@@ -1,0 +1,3 @@
+# Known false positives, one fingerprint per line.
+# A fake TMDb read token in a test (filler, not a credential), replaced in the next commit.
+8b1616623cd5d17cdc3f0deb50ab357a2cc02706:server/internal/tmdb/match_test.go:generic-api-key:96
