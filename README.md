@@ -121,7 +121,7 @@ golangci-lint run
 govulncheck ./...
 ```
 
-On NixOS: `nix-shell -p go gcc ffmpeg golangci-lint govulncheck`. The API contract is [server/api/openapi.yaml](server/api/openapi.yaml), served at `/api/v1/openapi.yaml`; a test fails when it and the registered routes disagree. Migrations are forward-only SQL files in `server/internal/db/migrations`.
+On NixOS, run `nix-shell` at the repo root first: [shell.nix](shell.nix) provides these tools, plus the Docker client and adb for the TV app. The API contract is [server/api/openapi.yaml](server/api/openapi.yaml), served at `/api/v1/openapi.yaml`; a test fails when it and the registered routes disagree. Migrations are forward-only SQL files in `server/internal/db/migrations`.
 
 Design notes and the verified facts the build relies on: [docs/REFERENCE.md](docs/REFERENCE.md).
 

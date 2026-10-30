@@ -54,7 +54,7 @@ In the VCRX compose file, mount media as `/mnt/media/<folder>:/media/<folder>:ro
 
 ## 4. Development environment (this NixOS box)
 
-- On 2026-10-30, `go`, `java`, `gradle`, `adb` and `docker` were all absent from PATH here. Use `nix-shell -p <pkgs>` per command or a `shell.nix` in the repo. System-wide installs are Dozer's lane; ask rather than editing `~/nixos-config`.
+- On 2026-10-30, `go`, `java`, `gradle`, `adb` and `docker` were all absent from PATH here. `nix-shell` at the repo root provides the ones the build uses from `shell.nix`; Java and Gradle stay out because the APK builds in a container. System-wide installs are Dozer's lane; ask rather than editing `~/nixos-config`.
 - The cgo SQLite driver needs gcc, which on this box also means nix-shell. That is one more reason to use the pure-Go driver (section 5).
 - The Android SDK is awkward on NixOS. Pick one path and document it in the README: nixpkgs `androidenv`, or a pinned Android build container run on nix1 (which has Docker). Either way the APK build must be reproducible from a clean checkout with one command.
 - `adb` can run from either machine; the TV only needs to be on the LAN.

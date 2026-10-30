@@ -11,7 +11,7 @@ Orange #FF5F00, and renders:
   brand/generated/     a wordmark on a black field for the README
 
 Run from the repo root after changing the kit:
-  nix-shell -p "python3.withPackages(p: [p.pillow])" --run "python3 brand/tools/make-assets.py"
+  nix-shell --run "python3 brand/tools/make-assets.py"
 Output is deterministic, so a rerun with an unchanged kit changes nothing.
 """
 import os
