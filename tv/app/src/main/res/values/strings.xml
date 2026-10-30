@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Every product name the app shows, or sends as its own name, lives in this
+         file, so renaming the product is one edit here plus the brand drawables
+         brand_wordmark and brand_mark and the launcher assets. -->
+    <string name="app_name">VCRX</string>
+    <string name="app_title">VCRX for TV</string>
+    <string name="server_product">VCRX Media Server</string>
+    <string name="tagline">Your media. Your hardware. Your rules.</string>
+    <string name="source_url">https://github.com/pete-builds/vcrx-media-server</string>
+    <string name="user_agent_product">VCRX-TV</string>
+    <string name="error_not_server">%1$s answered, but it is not a VCRX Media Server.</string>
+    <string name="error_unlike_server">%1$s answered, but not like a VCRX Media Server. %2$s</string>
+</resources>

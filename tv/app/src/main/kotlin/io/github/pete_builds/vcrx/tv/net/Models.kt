@@ -1,0 +1,245 @@
+// Wire types for server/api/openapi.yaml, the contract between the server and every
+// client. Field names follow the spec; fields the spec marks optional default here
+// so an older or newer server never breaks decoding.
+package io.github.pete_builds.vcrx.tv.net
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class ErrorBody(
+    val error: String = "",
+    val message: String = "",
+)
+
+@Serializable
+data class ServerInfo(
+    val name: String = "",
+    val product: String = "",
+    val version: String = "",
+    @SerialName("api_version") val apiVersion: Int = 0,
+)
+
+@Serializable
+data class Device(
+    val id: String,
+    val name: String,
+    val model: String? = null,
+    val platform: String,
+    val client: String,
+    @SerialName("client_version") val clientVersion: String,
+)
+
+@Serializable
+data class LoginRequest(
+    val username: String,
+    val password: String,
+    val device: Device,
+)
+
+@Serializable
+data class User(
+    val id: Long,
+    val username: String,
+    @SerialName("display_name") val displayName: String? = null,
+    @SerialName("is_admin") val isAdmin: Boolean = false,
+)
+
+@Serializable
+data class LoginResponse(
+    val token: String,
+    @SerialName("expires_at") val expiresAt: Long = 0,
+    val user: User,
+)
+
+@Serializable
+data class Library(
+    val id: Long,
+    val name: String,
+    val kind: String,
+    @SerialName("item_count") val itemCount: Int = 0,
+)
+
+@Serializable
+data class LibrariesResponse(val libraries: List<Library> = emptyList())
+
+@Serializable
+data class WatchState(
+    @SerialName("position_ms") val positionMs: Long = 0,
+    @SerialName("duration_ms") val durationMs: Long? = null,
+    val played: Boolean = false,
+    @SerialName("play_count") val playCount: Int = 0,
+    @SerialName("last_played_at") val lastPlayedAt: Long? = null,
+    @SerialName("unplayed_count") val unplayedCount: Int? = null,
+)
+
+@Serializable
+data class Track(
+    val id: Long,
+    val kind: String,
+    val index: Int? = null,
+    val codec: String? = null,
+    val language: String? = null,
+    val title: String? = null,
+    val channels: Int? = null,
+    @SerialName("is_default") val isDefault: Boolean = false,
+    @SerialName("is_forced") val isForced: Boolean = false,
+    @SerialName("is_external") val isExternal: Boolean = false,
+    @SerialName("is_image_based") val isImageBased: Boolean = false,
+)
+
+@Serializable
+data class Version(
+    val id: Long,
+    val label: String? = null,
+    @SerialName("file_name") val fileName: String = "",
+    val container: String? = null,
+    val size: Long = 0,
+    val bitrate: Long? = null,
+    @SerialName("duration_ms") val durationMs: Long? = null,
+    @SerialName("video_codec") val videoCodec: String? = null,
+    @SerialName("video_profile") val videoProfile: String? = null,
+    @SerialName("bit_depth") val bitDepth: Int? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val resolution: String? = null,
+    @SerialName("hdr_type") val hdrType: String? = null,
+    @SerialName("audio_tracks") val audioTracks: List<Track> = emptyList(),
+    @SerialName("subtitle_tracks") val subtitleTracks: List<Track> = emptyList(),
+)
+
+/**
+ * ItemSummary and ItemDetail in one type: every detail field is optional in the
+ * spec, so a summary decodes with those fields at their defaults.
+ */
+@Serializable
+data class Item(
+    val id: Long,
+    val kind: String,
+    @SerialName("library_id") val libraryId: Long = 0,
+    val title: String,
+    val year: Int? = null,
+    @SerialName("parent_id") val parentId: Long? = null,
+    @SerialName("show_id") val showId: Long? = null,
+    @SerialName("show_title") val showTitle: String? = null,
+    @SerialName("season_number") val seasonNumber: Int? = null,
+    @SerialName("episode_number") val episodeNumber: Int? = null,
+    @SerialName("episode_number_end") val episodeNumberEnd: Int? = null,
+    @SerialName("runtime_ms") val runtimeMs: Long? = null,
+    val resolution: String? = null,
+    @SerialName("child_count") val childCount: Int? = null,
+    @SerialName("has_poster") val hasPoster: Boolean = false,
+    @SerialName("has_backdrop") val hasBackdrop: Boolean = false,
+    @SerialName("has_thumb") val hasThumb: Boolean = false,
+    @SerialName("added_at") val addedAt: Long = 0,
+    val watch: WatchState? = null,
+    val overview: String? = null,
+    val tagline: String? = null,
+    @SerialName("content_rating") val contentRating: String? = null,
+    val genres: List<String> = emptyList(),
+    val directors: List<String> = emptyList(),
+    val studios: List<String> = emptyList(),
+    val ratings: Map<String, Double> = emptyMap(),
+    val versions: List<Version> = emptyList(),
+    @SerialName("next_episode") val nextEpisode: Item? = null,
+)
+
+@Serializable
+data class ItemPage(
+    val items: List<Item> = emptyList(),
+    val total: Int = 0,
+)
+
+@Serializable
+data class ItemsResponse(val items: List<Item> = emptyList())
+
+@Serializable
+data class HomeRow(
+    val id: String,
+    val title: String,
+    @SerialName("library_id") val libraryId: Long? = null,
+    val items: List<Item> = emptyList(),
+)
+
+@Serializable
+data class HomeResponse(val rows: List<HomeRow> = emptyList())
+
+@Serializable
+data class SetWatchedRequest(val played: Boolean)
+
+@Serializable
+data class VideoCodecCapability(
+    val codec: String,
+    val profiles: List<String> = emptyList(),
+    @SerialName("max_bit_depth") val maxBitDepth: Int? = null,
+    @SerialName("max_width") val maxWidth: Int? = null,
+    @SerialName("max_height") val maxHeight: Int? = null,
+    @SerialName("max_fps") val maxFps: Double? = null,
+)
+
+@Serializable
+data class AudioCodecCapability(
+    val codec: String,
+    @SerialName("max_channels") val maxChannels: Int? = null,
+    val decoder: String? = null,
+)
+
+@Serializable
+data class Capabilities(
+    val containers: List<String>,
+    @SerialName("video_codecs") val videoCodecs: List<VideoCodecCapability>,
+    @SerialName("audio_codecs") val audioCodecs: List<AudioCodecCapability>,
+    @SerialName("hdr_types") val hdrTypes: List<String> = emptyList(),
+    @SerialName("subtitle_codecs") val subtitleCodecs: List<String> = emptyList(),
+    @SerialName("max_width") val maxWidth: Int? = null,
+    @SerialName("max_height") val maxHeight: Int? = null,
+    @SerialName("max_bitrate") val maxBitrate: Long? = null,
+)
+
+@Serializable
+data class PlaybackRequest(
+    @SerialName("item_id") val itemId: Long,
+    @SerialName("version_id") val versionId: Long? = null,
+    @SerialName("start_position_ms") val startPositionMs: Long? = null,
+    val capabilities: Capabilities,
+)
+
+@Serializable
+data class SubtitleSource(
+    @SerialName("track_id") val trackId: Long,
+    val url: String,
+    val codec: String = "",
+    @SerialName("mime_type") val mimeType: String,
+    val language: String? = null,
+    val title: String? = null,
+    @SerialName("is_forced") val isForced: Boolean = false,
+)
+
+@Serializable
+data class StreamInfo(
+    val url: String,
+    val protocol: String = "progressive",
+    @SerialName("mime_type") val mimeType: String? = null,
+)
+
+@Serializable
+data class PlaybackSession(
+    @SerialName("session_id") val sessionId: String,
+    val decision: String = "",
+    val reason: String = "",
+    @SerialName("item_id") val itemId: Long,
+    val version: Version,
+    val stream: StreamInfo,
+    val subtitles: List<SubtitleSource> = emptyList(),
+    @SerialName("resume_position_ms") val resumePositionMs: Long = 0,
+    @SerialName("heartbeat_interval_ms") val heartbeatIntervalMs: Long = 10_000,
+)
+
+@Serializable
+data class PlaybackEvent(
+    val type: String,
+    @SerialName("position_ms") val positionMs: Long,
+    @SerialName("from_position_ms") val fromPositionMs: Long? = null,
+    @SerialName("duration_ms") val durationMs: Long? = null,
+    val message: String? = null,
+)

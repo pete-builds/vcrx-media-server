@@ -1,0 +1,153 @@
+package io.github.pete_builds.vcrx.tv.net
+
+import java.io.IOException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.HttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+
+/** The /api/v1 routes this client uses. Every call throws [ApiException] on failure. */
+class ServerApi(
+    private val client: OkHttpClient,
+    private val baseUrl: () -> String?,
+    private val json: Json,
+    private val onUnauthorized: () -> Unit,
+) {
+    /** Checks that [baseUrl] is a VCRX server, before it is saved. Sends no token. */
+    suspend fun serverInfo(baseUrl: String): ServerInfo {
+        val url = ServerAddress.resolve(baseUrl, "/api/v1/server")
+            ?: throw ApiException.BadResponse("That is not a valid address.")
+        return send(Request.Builder().url(url).build(), ServerInfo.serializer(), authRoute = false)
+    }
+
+    suspend fun login(request: LoginRequest): LoginResponse =
+        send(post("/api/v1/auth/login", request, LoginRequest.serializer()), LoginResponse.serializer(), authRoute = false)
+
+    suspend fun logout() {
+        send<Unit>(Request.Builder().url(url("/api/v1/auth/logout")).post(EMPTY_BODY).build(), null, authRoute = true)
+    }
+
+    suspend fun me(): User = get("/api/v1/me", User.serializer())
+
+    suspend fun home(): List<HomeRow> = get("/api/v1/home", HomeResponse.serializer()).rows
+
+    suspend fun libraries(): List<Library> = get("/api/v1/libraries", LibrariesResponse.serializer()).libraries
+
+    suspend fun libraryItems(libraryId: Long, sort: String, order: String, limit: Int, offset: Int): ItemPage {
+        val url = url("/api/v1/libraries/$libraryId/items").newBuilder()
+            .addQueryParameter("sort", sort)
+            .addQueryParameter("order", order)
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("offset", offset.toString())
+            .build()
+        return send(Request.Builder().url(url).build(), ItemPage.serializer())
+    }
+
+    suspend fun search(query: String, limit: Int = 60): List<Item> {
+        val url = url("/api/v1/search").newBuilder()
+            .addQueryParameter("q", query)
+            .addQueryParameter("limit", limit.toString())
+            .build()
+        return send(Request.Builder().url(url).build(), ItemsResponse.serializer()).items
+    }
+
+    suspend fun item(itemId: Long): Item = get("/api/v1/items/$itemId", Item.serializer())
+
+    suspend fun children(itemId: Long): List<Item> = get("/api/v1/items/$itemId/children", ItemsResponse.serializer()).items
+
+    suspend fun setWatched(itemId: Long, played: Boolean) {
+        val body = json.encodeToString(SetWatchedRequest.serializer(), SetWatchedRequest(played)).toRequestBody(JSON)
+        send<Unit>(Request.Builder().url(url("/api/v1/items/$itemId/watched")).put(body).build(), null)
+    }
+
+    suspend fun startPlayback(request: PlaybackRequest): PlaybackSession =
+        send(post("/api/v1/playback/sessions", request, PlaybackRequest.serializer()), PlaybackSession.serializer())
+
+    suspend fun postEvent(sessionId: String, event: PlaybackEvent) {
+        send<Unit>(post("/api/v1/playback/sessions/$sessionId/events", event, PlaybackEvent.serializer()), null)
+    }
+
+    /** Absolute artwork URL; the server answers 404 when there is none and the card draws a placeholder. */
+    fun artworkUrl(itemId: Long, kind: String, width: Int): String? =
+        baseUrl()?.let { ServerAddress.resolve(it, "/api/v1/items/$itemId/artwork/$kind?width=$width")?.toString() }
+
+    /** Resolves a path from the server, such as stream.url, against the base URL. */
+    fun absoluteUrl(path: String): String? =
+        baseUrl()?.let { ServerAddress.resolve(it, path)?.toString() }
+
+    private fun url(path: String): HttpUrl {
+        val base = baseUrl() ?: throw ApiException.BadResponse("No server is configured.")
+        return ServerAddress.resolve(base, path) ?: throw ApiException.BadResponse("The server address is not valid.")
+    }
+
+    private suspend fun <T> get(path: String, serializer: KSerializer<T>): T =
+        send(Request.Builder().url(url(path)).build(), serializer)
+
+    private fun <B> post(path: String, body: B, serializer: KSerializer<B>): Request =
+        Request.Builder().url(url(path)).post(json.encodeToString(serializer, body).toRequestBody(JSON)).build()
+
+    /**
+     * Runs the call and decodes the body with [serializer], or ignores it when null.
+     * A 401 outside the login routes means the session is gone, so the app returns
+     * to the Login screen through [onUnauthorized]. The body is read on the IO
+     * dispatcher: callers are often on Main, and a body larger than OkHttp's first
+     * buffer is still on the socket.
+     */
+    private suspend fun <T> send(request: Request, serializer: KSerializer<T>?, authRoute: Boolean = true): T {
+        val (status, body) = try {
+            withContext(Dispatchers.IO) {
+                client.newCall(request).await().use { response -> response.code to response.body.string() }
+            }
+        } catch (e: IOException) {
+            throw ApiException.Unreachable(e)
+        }
+        if (status !in 200..299) {
+            val error = httpError(status, body, json)
+            if (error is ApiException.Unauthorized && authRoute) onUnauthorized()
+            throw error
+        }
+        @Suppress("UNCHECKED_CAST")
+        if (serializer == null) return Unit as T
+        return try {
+            json.decodeFromString(serializer, body)
+        } catch (e: SerializationException) {
+            throw ApiException.BadResponse("The server sent a response this app cannot read.", e)
+        } catch (e: IllegalArgumentException) {
+            throw ApiException.BadResponse("The server sent a response this app cannot read.", e)
+        }
+    }
+
+    private companion object {
+        val JSON = "application/json; charset=utf-8".toMediaType()
+        val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody(null)
+    }
+}
+
+/** Suspends until the call completes, cancelling it if the coroutine is cancelled. */
+private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
+    continuation.invokeOnCancellation { cancel() }
+    enqueue(
+        object : Callback {
+            override fun onResponse(call: Call, response: Response) {
+                continuation.resume(response) { _, value, _ -> value.close() }
+            }
+
+            override fun onFailure(call: Call, e: IOException) {
+                continuation.resumeWithException(e)
+            }
+        },
+    )
+}

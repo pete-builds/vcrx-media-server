@@ -1,0 +1,12 @@
+# Build outputs, local caches and secrets never enter the build context.
+**/build/
+**/.gradle/
+**/.kotlin/
+.idea/
+*.iml
+local.properties
+signing/
+ffmpeg/ext/
+*.apk
+*.jks
+*.keystore
