@@ -10,10 +10,12 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/pete-builds/vcrx-media-server/server/internal/activity"
 	"github.com/pete-builds/vcrx-media-server/server/internal/admin"
 	"github.com/pete-builds/vcrx-media-server/server/internal/artwork"
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
+	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 )
@@ -35,6 +37,8 @@ type Server struct {
 	Playback   *playback.Service
 	Artwork    *artwork.Service
 	Subtitles  *subtitles.Service
+	Activity   *activity.Service
+	Webhooks   *notify.Webhooks
 	Admin      *admin.Admin
 	Scans      ScanStarter
 	// LibraryRoots lists roots for the readiness check.
@@ -46,6 +50,8 @@ type Server struct {
 	// TrustedNetworks (POST /api/v1/auth/auto).
 	AutoSignInUser  string
 	TrustedNetworks []netip.Prefix
+
+	streams streamRegistry
 }
 
 type access int
@@ -95,6 +101,11 @@ func (s *Server) Routes() []route {
 		{"PUT", "/api/v1/admin/users/{user_id}/grants", adminOnly, s.adminSetGrants},
 		{"PUT", "/api/v1/admin/users/{user_id}/policy", adminOnly, s.adminSetPolicy},
 		{"GET", "/api/v1/admin/activity/sessions", adminOnly, s.adminSessions},
+		{"GET", "/api/v1/admin/activity/now", adminOnly, s.activityNow},
+		{"GET", "/api/v1/admin/activity/history", adminOnly, s.activityHistory},
+		{"GET", "/api/v1/admin/activity/stats", adminOnly, s.activityStats},
+		{"GET", "/api/v1/admin/activity/users", adminOnly, s.activityUsers},
+		{"POST", "/api/v1/admin/activity/sessions/{session_id}/terminate", adminOnly, s.terminateSession},
 	}
 }
 

@@ -10,6 +10,10 @@ server_name: VCRX
 #auto_sign_in_user: admin
 #trusted_networks: [192.168.1.0/24, 100.64.0.0/10]
 
+# Which playback events go to the webhooks in VCRX_WEBHOOK_URLS (the URLs carry
+# tokens, so they live in .env, not here). Default: all of them.
+#webhook_events: [play, stop, refused, terminated]
+
 libraries:
   - name: Movies
     kind: movie

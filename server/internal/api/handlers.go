@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/netip"
 	"path/filepath"
@@ -402,9 +403,12 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := s.Playback.RecordEvent(r.Context(), info(r).Session.User.ID, r.PathValue("session_id"), ev)
+	var term *playback.TerminatedError
 	switch {
 	case errors.Is(err, playback.ErrSessionNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "Unknown playback session.")
+	case errors.As(err, &term):
+		writeError(w, http.StatusGone, "session_terminated", term.Message)
 	case errors.Is(err, playback.ErrSessionEnded):
 		writeError(w, http.StatusConflict, "session_ended", "That playback session has already ended.")
 	case err != nil && strings.HasPrefix(err.Error(), "unknown event type"):
@@ -422,6 +426,13 @@ func (s *Server) streamVersion(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r, "version_id")
 	if !ok {
 		return
+	}
+	session := r.URL.Query().Get("session")
+	if session != "" {
+		if msg, ok := s.Playback.Terminated(r.Context(), session); ok {
+			writeError(w, http.StatusGone, "session_terminated", msg)
+			return
+		}
 	}
 	v, root, err := s.Catalog.VersionForPlayback(r.Context(), info(r).Policy, id)
 	if err != nil {
@@ -443,7 +454,15 @@ func (s *Server) streamVersion(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", m)
 	}
 	w.Header().Set("Cache-Control", "private, no-transform")
-	http.ServeContent(w, r, filepath.Base(v.Path), fi.ModTime(), f)
+	var body io.ReadSeeker = f
+	if session != "" {
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		s.streams.add(session, &cancel)
+		defer s.streams.remove(session, &cancel)
+		body = ctxReader{ctx: ctx, rs: f}
+	}
+	http.ServeContent(w, r, filepath.Base(v.Path), fi.ModTime(), body)
 }
 
 func playbackMime(c *string) string {

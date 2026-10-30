@@ -56,6 +56,13 @@ type Config struct {
 	// TrustedNetworks defaults to loopback, private LAN ranges and Tailscale.
 	TrustedNetworks []string `yaml:"trusted_networks"`
 
+	// WebhookURLs receive playback events (play, stop, refused, terminated). A
+	// Discord webhook URL gets Discord's message shape. The URLs carry tokens, so
+	// they come from VCRX_WEBHOOK_URLS or VCRX_WEBHOOK_URLS_FILE, never the YAML file.
+	WebhookURLs []string `yaml:"-"`
+	// WebhookEvents limits which events are sent; empty sends all of them.
+	WebhookEvents []string `yaml:"webhook_events"`
+
 	// TMDbAPIKey turns on TMDb enrichment: a v3 API key or a v4 read access token.
 	// It comes from VCRX_TMDB_API_KEY or VCRX_TMDB_API_KEY_FILE, never the YAML file.
 	TMDbAPIKey   string `yaml:"-"`
@@ -167,6 +174,16 @@ func Load() (Config, error) {
 		}
 	}
 	c.TMDbAPIKey = strings.TrimSpace(c.TMDbAPIKey)
+	list("VCRX_WEBHOOK_URLS", &c.WebhookURLs)
+	if v := os.Getenv("VCRX_WEBHOOK_URLS_FILE"); v != "" && len(c.WebhookURLs) == 0 {
+		b, err := os.ReadFile(v) //nolint:gosec // the operator chooses this path
+		if err != nil {
+			errs = append(errs, fmt.Errorf("VCRX_WEBHOOK_URLS_FILE: %w", err))
+		} else {
+			c.WebhookURLs = splitList(strings.ReplaceAll(string(b), "\n", ","))
+		}
+	}
+	list("VCRX_WEBHOOK_EVENTS", &c.WebhookEvents)
 	ttlDays := int(c.SessionTTL / (24 * time.Hour))
 	integer("VCRX_SESSION_TTL_DAYS", &ttlDays)
 	c.SessionTTL = time.Duration(ttlDays) * 24 * time.Hour

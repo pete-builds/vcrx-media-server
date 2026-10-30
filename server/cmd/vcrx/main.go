@@ -25,6 +25,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/pete-builds/vcrx-media-server/server/internal/activity"
 	"github.com/pete-builds/vcrx-media-server/server/internal/admin"
 	"github.com/pete-builds/vcrx-media-server/server/internal/api"
 	"github.com/pete-builds/vcrx-media-server/server/internal/artwork"
@@ -34,6 +35,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
+	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/probe"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
@@ -217,6 +219,11 @@ func serve() error {
 	cat := &catalog.Catalog{DB: a.db}
 	authStore := &auth.Store{DB: a.db, TTL: cfg.SessionTTL}
 	pb := &playback.Service{DB: a.db, Catalog: cat}
+	hooks := notify.New(cfg.WebhookURLs, cfg.WebhookEvents, cfg.ServerName, log.With("component", "webhooks"))
+	if len(cfg.WebhookURLs) > 0 {
+		pb.Notify = hooks.Send
+		log.Info("webhooks on", "count", len(cfg.WebhookURLs), "events", cfg.WebhookEvents)
+	}
 
 	proxies, err := prefixes(cfg.TrustedProxies)
 	if err != nil {
@@ -236,6 +243,7 @@ func serve() error {
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
 		Artwork: art, Admin: adm, Scans: scanAdapter{scans},
+		Activity: &activity.Service{DB: a.db}, Webhooks: hooks,
 		Subtitles:        subtitles.New(cfg.SubtitleCacheDir(), cfg.FFmpegPath, log.With("component", "subtitles")),
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
