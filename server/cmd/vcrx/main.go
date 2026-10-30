@@ -243,7 +243,7 @@ func serve() error {
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
 		Artwork: art, Admin: adm, Scans: scanAdapter{scans},
-		Activity: &activity.Service{DB: a.db}, Webhooks: hooks,
+		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, WebDir: os.Getenv("VCRX_WEB_DIR"),
 		Subtitles:        subtitles.New(cfg.SubtitleCacheDir(), cfg.FFmpegPath, log.With("component", "subtitles")),
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,

@@ -127,9 +127,13 @@ func (s *Server) gate(rt route) http.Handler {
 			writeError(w, http.StatusForbidden, "lan_only", "Admin actions are only available on the local network.")
 			return
 		}
-		tok := bearer(r)
+		tok, viaCookie := sessionToken(r)
 		if tok == "" {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Sign in first.")
+			return
+		}
+		if viaCookie && !safeMethod(r.Method) && r.Header.Get(csrfHeader) == "" {
+			writeError(w, http.StatusForbidden, "csrf", "Missing the "+csrfHeader+" header.")
 			return
 		}
 		sess, err := s.Auth.Authenticate(r.Context(), tok, ri.IP)

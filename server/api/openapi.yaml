@@ -20,6 +20,7 @@ servers:
     description: nix1 on the LAN
 security:
   - bearer: []
+  - cookie: []
 
 paths:
   /healthz:
@@ -537,6 +538,14 @@ components:
       type: http
       scheme: bearer
       description: Opaque token from POST /api/v1/auth/login.
+    cookie:
+      type: apiKey
+      in: cookie
+      name: vcrx_session
+      description: >-
+        The same token in an HttpOnly cookie, set when login asks for it. Used by the web app, whose video,
+        track and image requests cannot carry a header. Requests other than GET and HEAD must also send
+        X-VCRX-Client, which a cross-site page cannot.
   parameters:
     ItemID: { name: item_id, in: path, required: true, schema: { type: integer } }
   responses:
@@ -570,6 +579,7 @@ components:
       required: [device]
       properties:
         device: { $ref: "#/components/schemas/Device" }
+        cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers. Cookie-authenticated requests that change something must send the X-VCRX-Client header." }
     Device:
       type: object
       required: [id, name, platform, client, client_version]
@@ -587,6 +597,7 @@ components:
         username: { type: string }
         password: { type: string, format: password }
         device: { $ref: "#/components/schemas/Device" }
+        cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers. Cookie-authenticated requests that change something must send the X-VCRX-Client header." }
     LoginResponse:
       type: object
       required: [token, user, expires_at]
