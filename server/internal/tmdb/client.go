@@ -228,6 +228,7 @@ func (m *Movie) Certification(country string) string {
 type SeasonRef struct {
 	SeasonNumber int    `json:"season_number"`
 	PosterPath   string `json:"poster_path"`
+	EpisodeCount int    `json:"episode_count"`
 }
 
 type Show struct {
@@ -284,14 +285,16 @@ type Season struct {
 
 // Result is one search hit, movie or show.
 type Result struct {
-	ID            int64   `json:"id"`
-	Title         string  `json:"title"`
-	OriginalTitle string  `json:"original_title"`
-	Name          string  `json:"name"`
-	OriginalName  string  `json:"original_name"`
-	ReleaseDate   string  `json:"release_date"`
-	FirstAirDate  string  `json:"first_air_date"`
-	Popularity    float64 `json:"popularity"`
+	ID            int64    `json:"id"`
+	Title         string   `json:"title"`
+	OriginalTitle string   `json:"original_title"`
+	Name          string   `json:"name"`
+	OriginalName  string   `json:"original_name"`
+	ReleaseDate   string   `json:"release_date"`
+	FirstAirDate  string   `json:"first_air_date"`
+	Popularity    float64  `json:"popularity"`
+	VoteCount     int      `json:"vote_count"`
+	OriginCountry []string `json:"origin_country"`
 }
 
 func (r Result) titles() []string {

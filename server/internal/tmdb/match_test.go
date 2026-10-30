@@ -141,3 +141,42 @@ func TestImagePathIsConfined(t *testing.T) {
 		t.Errorf("valid path refused: %v", err)
 	}
 }
+
+func TestQualifier(t *testing.T) {
+	for in, want := range map[string][2]string{
+		"Copper Sky (US)": {"Copper Sky", "US"},
+		"Copper Sky US":   {"Copper Sky", "US"},
+		"Copper Sky (UK)": {"Copper Sky", "GB"},
+		"Copper Sky":      {"Copper Sky", ""},
+		"US":              {"US", ""},
+		"Focus":           {"Focus", ""},
+	} {
+		if title, country := Qualifier(in); title != want[0] || country != want[1] {
+			t.Errorf("Qualifier(%q) = %q, %q; want %q, %q", in, title, country, want[0], want[1])
+		}
+	}
+}
+
+func TestShortlistCountryAndStandout(t *testing.T) {
+	shows := []Result{
+		{ID: 1, Name: "Copper Sky", FirstAirDate: "2005-01-01", OriginCountry: []string{"GB"}, Popularity: 40, VoteCount: 300},
+		{ID: 2, Name: "Copper Sky", FirstAirDate: "2009-01-01", OriginCountry: []string{"US"}, Popularity: 90, VoteCount: 900},
+	}
+	if list, _ := Shortlist(shows, "Copper Sky", 0, "GB"); len(list) != 1 || list[0].ID != 1 {
+		t.Errorf("GB filter: %+v", list)
+	}
+	if list, reason := Shortlist(shows, "Copper Sky", 0, "AU"); len(list) != 0 || !strings.Contains(reason, "AU") {
+		t.Errorf("AU filter: %+v %q", list, reason)
+	}
+	if _, ok := Standout(shows); ok {
+		t.Error("90 vs 40 popularity is not a clear lead")
+	}
+	shows[0].Popularity = 20
+	if top, ok := Standout(shows); !ok || top.ID != 2 {
+		t.Errorf("90 vs 20 should stand out: %+v %v", top, ok)
+	}
+	shows[1].VoteCount = 3
+	if _, ok := Standout(shows); ok {
+		t.Error("a lead with almost no votes is not trusted")
+	}
+}

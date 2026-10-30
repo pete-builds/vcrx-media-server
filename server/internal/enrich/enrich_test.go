@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -93,6 +94,21 @@ func newFake() *fakeTMDb {
 			"seasons":[{"season_number":1,"poster_path":"/gos1.jpg"},{"season_number":2,"poster_path":"/gos2.jpg"}],
 			"credits":{"cast":[{"name":"Lena Ok","character":"Gardener","order":0}]},
 			"external_ids":{"imdb_id":"tt0000300"},"content_ratings":{"results":[{"iso_3166_1":"US","rating":"TV-14"}]}}`,
+		// Ties: two films called Ember Vale in 2024, one a short; a feature runs 101 minutes.
+		"/search/movie?Ember Vale": `{"results":[{"id":401,"title":"Ember Vale","release_date":"2024-02-01","popularity":5,"vote_count":40},
+			{"id":402,"title":"Ember Vale","release_date":"2024-06-01","popularity":4,"vote_count":30}]}`,
+		"/movie/401": `{"id":401,"title":"Ember Vale","overview":"The feature.","runtime":101}`,
+		"/movie/402": `{"id":402,"title":"Ember Vale","overview":"The short.","runtime":12}`,
+		// Two shows called Copper Sky: one ran a single season, the other three of ten episodes.
+		"/search/tv?Copper Sky": `{"results":[{"id":501,"name":"Copper Sky","first_air_date":"2005-01-01","origin_country":["GB"],"popularity":30,"vote_count":200},
+			{"id":502,"name":"Copper Sky","first_air_date":"2011-01-01","origin_country":["US"],"popularity":25,"vote_count":150}]}`,
+		"/tv/501": `{"id":501,"name":"Copper Sky","overview":"The British one.","seasons":[{"season_number":1,"episode_count":6}]}`,
+		"/tv/502": `{"id":502,"name":"Copper Sky","overview":"The American one.","seasons":[{"season_number":0,"episode_count":2},
+			{"season_number":1,"episode_count":10},{"season_number":2,"episode_count":10},{"season_number":3,"episode_count":10}]}`,
+		// A popular film and an obscure namesake, with no runtime on disk to compare.
+		"/search/movie?Iron Lantern": `{"results":[{"id":601,"title":"Iron Lantern","release_date":"2019-01-01","popularity":80,"vote_count":5000},
+			{"id":602,"title":"Iron Lantern","release_date":"2019-03-01","popularity":2,"vote_count":3}]}`,
+		"/movie/601": `{"id":601,"title":"Iron Lantern","overview":"The famous one."}`,
 		"/tv/300/season/1": `{"season_number":1,"overview":"The first harvest.","poster_path":"/gos1.jpg","episodes":[
 			{"episode_number":1,"name":"Seedlings","overview":"It begins.","air_date":"2016-09-01","still_path":"/e1.jpg","vote_average":7.9,"vote_count":10},
 			{"episode_number":2,"name":"First Frost","overview":"It gets cold.","air_date":"2016-09-08","still_path":"/e2.jpg"},
@@ -379,5 +395,63 @@ func TestBusyLibraryWaits(t *testing.T) {
 	v.run()
 	if got := v.str(`SELECT status FROM tmdb_state WHERE item_id = ?`, id); got != "matched" {
 		t.Errorf("status = %q", got)
+	}
+}
+
+func TestTieSettledByRuntime(t *testing.T) {
+	v := setup(t)
+	lib := v.library("movie")
+	id := v.item(lib, "movie", nil, "k", "Ember Vale", 2024, nil, nil)
+	v.exec(`UPDATE items SET runtime_ms = ? WHERE id = ?`, (99 * time.Minute).Milliseconds(), id)
+	v.run()
+	if got := v.str(`SELECT overview FROM items WHERE id = ?`, id); got != "The feature." {
+		t.Errorf("overview = %q", got)
+	}
+	if got := v.str(`SELECT reason FROM tmdb_state WHERE item_id = ?`, id); got != "picked by runtime" {
+		t.Errorf("reason = %q", got)
+	}
+	// With a runtime that fits neither, it stays unmatched.
+	other := v.item(lib, "movie", nil, "k2", "Ember Vale", 2024, nil, nil)
+	v.exec(`UPDATE items SET runtime_ms = ? WHERE id = ?`, (55 * time.Minute).Milliseconds(), other)
+	v.run()
+	if got := v.str(`SELECT status || '|' || reason FROM tmdb_state WHERE item_id = ?`, other); !strings.HasPrefix(got, "unmatched|no result with this title fits the runtime") {
+		t.Errorf("no fit = %q", got)
+	}
+}
+
+func TestTieSettledBySeasons(t *testing.T) {
+	v := setup(t)
+	lib := v.library("show")
+	show := v.item(lib, "show", nil, "copper sky", "Copper Sky", nil, nil, nil)
+	for season := 1; season <= 3; season++ {
+		sid := v.item(lib, "season", show, strconv.Itoa(season), "Season", nil, season, nil)
+		v.item(lib, "episode", sid, "8", "Episode 8", nil, season, 8)
+	}
+	v.run()
+	if got := v.str(`SELECT overview FROM items WHERE id = ?`, show); got != "The American one." {
+		t.Errorf("overview = %q", got)
+	}
+	if got := v.str(`SELECT reason FROM tmdb_state WHERE item_id = ?`, show); got != "picked by seasons and episodes on disk" {
+		t.Errorf("reason = %q", got)
+	}
+}
+
+func TestCountryTagPicksTheShow(t *testing.T) {
+	v := setup(t)
+	lib := v.library("show")
+	show := v.item(lib, "show", nil, "copper sky uk", "Copper Sky (UK)", nil, nil, nil)
+	v.run()
+	if got := v.str(`SELECT overview FROM items WHERE id = ?`, show); got != "The British one." {
+		t.Errorf("overview = %q", got)
+	}
+}
+
+func TestTieSettledByPopularity(t *testing.T) {
+	v := setup(t)
+	lib := v.library("movie")
+	id := v.item(lib, "movie", nil, "k", "Iron Lantern", 2019, nil, nil)
+	v.run()
+	if got := v.str(`SELECT overview || '|' || (SELECT reason FROM tmdb_state WHERE item_id = items.id) FROM items WHERE id = ?`, id); got != "The famous one.|picked by popularity" {
+		t.Errorf("got %q", got)
 	}
 }
