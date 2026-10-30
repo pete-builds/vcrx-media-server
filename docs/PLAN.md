@@ -30,7 +30,9 @@ server/
     db/                SQLite (modernc, WAL, OFD locks), embedded forward-only migrations
     library/           filename parser, walker, incremental diff, version grouping
     probe/             ffprobe wrapper
-    metadata/          NFO reader (tmdb arrives in milestone 5)
+    metadata/          NFO reader
+    tmdb/              TMDb client and the title and year match rule
+    enrich/            fills items from TMDb without overwriting NFO, local or locked data
     artwork/           local artwork discovery, resize cache, frame thumbnails
     auth/              argon2id passwords, opaque hashed tokens, login rate limit
     policy/            library grants and per-version visibility, used by every query
@@ -56,7 +58,7 @@ The reference says to group files into one item only when they share a folder an
 2. **TV slice** (this session): Compose for TV app, connect by IP, login, home rows, library grid, details, season and episode picker, search, Media3 direct play with capabilities, seek, stop, resume, progress sync, error and disconnected states, one-command APK build, ADB steps. **Acceptance test passes here.**
 3. **Playback breadth:** remux and HLS (fMP4) with an FFmpeg job manager, audio-only transcode, image subtitle burn-in, manual version merge and split.
 4. **Activity:** live sessions, history, stats, playback policy before stream start (no 4K transcodes for non-admins), webhooks.
-5. **Collections and overlays:** YAML in `/config/collections`, smart rules, auto collections, overlays, optional TMDb with the user's key.
+5. **Collections and overlays:** YAML in `/config/collections`, smart rules, auto collections, overlays. Optional TMDb enrichment with the user's key shipped early (2026-10-30); still to come: manual match fixes and matching versions by TMDb id.
 6. **Access policies and VA-API** hardware transcoding.
 7. **Ecosystem hooks:** Radarr and Sonarr import webhooks, watch state for media-reclaim.
 

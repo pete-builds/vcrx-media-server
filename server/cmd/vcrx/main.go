@@ -32,9 +32,11 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/config"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
+	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/probe"
+	"github.com/pete-builds/vcrx-media-server/server/internal/tmdb"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -56,6 +58,10 @@ Usage:
   vcrx library add -name NAME -kind movie|show -path /media/Movies [-grouping folder|title_year]
   vcrx library list
   vcrx library scan -name NAME [-path sub/folder] [-force]
+  vcrx metadata refresh [-all]         fetch posters and plots from TMDb now; -all
+                                       re-checks items already done
+  vcrx metadata status                 matched and unmatched counts, and why each
+                                       unmatched title was skipped
 
 Settings come from VCRX_* environment variables and /config/vcrx.yaml; see
 deploy/.env.example.
@@ -81,6 +87,8 @@ func main() {
 		err = userCmd(args)
 	case "library":
 		err = libraryCmd(args)
+	case "metadata":
+		err = metadataCmd(args)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
@@ -222,10 +230,12 @@ func serve() error {
 		proxies = append(proxies, pfx)
 	}
 
+	art := artwork.New(a.db, cfg.ArtworkCacheDir(), cfg.FFmpegPath)
+	art.MetadataDir = cfg.MetadataDir()
 	srv := &api.Server{
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
-		Artwork: artwork.New(a.db, cfg.ArtworkCacheDir(), cfg.FFmpegPath), Admin: adm, Scans: scanAdapter{scans},
+		Artwork: art, Admin: adm, Scans: scanAdapter{scans},
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
 	}
@@ -237,6 +247,13 @@ func serve() error {
 		go scans.Schedule(ctx)
 	}
 	go housekeeping(ctx, log, pb, authStore)
+	if cfg.TMDbAPIKey != "" {
+		enr := newEnricher(a)
+		enr.Busy = scans.Running
+		go enr.Run(ctx, 2*time.Minute, 15*time.Minute)
+	} else {
+		log.Info("TMDb enrichment is off: set VCRX_TMDB_API_KEY for posters and plots")
+	}
 
 	hs := srv.HTTPServer(cfg.Addr())
 	errc := make(chan error, 1)
@@ -517,4 +534,72 @@ func libraryCmd(args []string) error {
 		return fmt.Errorf("library: unknown command %q", sub)
 	}
 	return nil
+}
+
+func newEnricher(a *app) *enrich.Enricher {
+	return &enrich.Enricher{DB: a.db, TMDb: tmdb.New(a.cfg.TMDbAPIKey, a.cfg.TMDbLanguage), Dir: a.cfg.MetadataDir(),
+		Country: a.cfg.TMDbCountry, Log: a.log.With("component", "tmdb")}
+}
+
+func metadataCmd(args []string) error {
+	if len(args) == 0 {
+		return errors.New("metadata: want refresh or status")
+	}
+	sub, args := args[0], args[1:]
+	fs := flag.NewFlagSet("metadata "+sub, flag.ContinueOnError)
+	all := fs.Bool("all", false, "re-check every item, not only new and due ones")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	a, err := open(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.db.Close() }()
+	enr := newEnricher(a)
+	switch sub {
+	case "refresh":
+		if a.cfg.TMDbAPIKey == "" {
+			return errors.New("set VCRX_TMDB_API_KEY (or VCRX_TMDB_API_KEY_FILE) first")
+		}
+		if *all {
+			if err := enr.ResetChecks(ctx); err != nil {
+				return err
+			}
+		}
+		st, err := enr.Drain(ctx)
+		fmt.Printf("tmdb: %d matched, %d unmatched, %d errors, %d episodes filled\n", st.Matched, st.Unmatched, st.Errors, st.Episodes)
+		if st.Unmatched > 0 {
+			fmt.Println("run `vcrx metadata status` to see what was skipped and why")
+		}
+		return err
+	case "status":
+		st, err := enr.Status(ctx)
+		if err != nil {
+			return err
+		}
+		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+		_, _ = fmt.Fprintln(tw, "KIND\tMATCHED\tUNMATCHED\tERROR\tPENDING")
+		for _, k := range []string{"movie", "show", "episode"} {
+			_, _ = fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\n", k, st.Counts[k+" matched"], st.Counts[k+" unmatched"], st.Counts[k+" error"],
+				st.Counts[k+" pending"])
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+		if len(st.Unmatched) > 0 {
+			fmt.Println()
+			tw = tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+			_, _ = fmt.Fprintln(tw, "ID\tKIND\tTITLE\tYEAR\tWHY")
+			for _, u := range st.Unmatched {
+				_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%d\t%s\n", u.ID, u.Kind, u.Title, u.Year, u.Reason)
+			}
+			return tw.Flush()
+		}
+		return nil
+	default:
+		return fmt.Errorf("metadata: unknown command %q", sub)
+	}
 }

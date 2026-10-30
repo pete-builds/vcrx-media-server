@@ -51,6 +51,13 @@ type Config struct {
 	// TrustedProxies are reverse proxies whose X-Forwarded-For is believed.
 	TrustedProxies []string `yaml:"trusted_proxies"`
 
+	// TMDbAPIKey turns on TMDb enrichment: a v3 API key or a v4 read access token.
+	// It comes from VCRX_TMDB_API_KEY or VCRX_TMDB_API_KEY_FILE, never the YAML file.
+	TMDbAPIKey   string `yaml:"-"`
+	TMDbLanguage string `yaml:"tmdb_language"`
+	// TMDbCountry picks the content rating shown, e.g. US for PG-13.
+	TMDbCountry string `yaml:"tmdb_country"`
+
 	Libraries []LibrarySpec `yaml:"libraries"`
 }
 
@@ -69,6 +76,8 @@ func defaults() Config {
 		LogLevel:         "info",
 		LogFormat:        "json",
 		SessionTTL:       90 * 24 * time.Hour,
+		TMDbLanguage:     "en-US",
+		TMDbCountry:      "US",
 	}
 }
 
@@ -136,6 +145,18 @@ func Load() (Config, error) {
 	str("VCRX_LOG_FORMAT", &c.LogFormat)
 	boolean("VCRX_ADMIN_ALLOW_REMOTE", &c.AdminAllowRemote)
 	list("VCRX_TRUSTED_PROXIES", &c.TrustedProxies)
+	str("VCRX_TMDB_LANGUAGE", &c.TMDbLanguage)
+	str("VCRX_TMDB_COUNTRY", &c.TMDbCountry)
+	str("VCRX_TMDB_API_KEY", &c.TMDbAPIKey)
+	if v := os.Getenv("VCRX_TMDB_API_KEY_FILE"); v != "" && c.TMDbAPIKey == "" {
+		b, err := os.ReadFile(v) //nolint:gosec // the operator chooses this path
+		if err != nil {
+			errs = append(errs, fmt.Errorf("VCRX_TMDB_API_KEY_FILE: %w", err))
+		} else {
+			c.TMDbAPIKey = strings.TrimSpace(string(b))
+		}
+	}
+	c.TMDbAPIKey = strings.TrimSpace(c.TMDbAPIKey)
 	ttlDays := int(c.SessionTTL / (24 * time.Hour))
 	integer("VCRX_SESSION_TTL_DAYS", &ttlDays)
 	c.SessionTTL = time.Duration(ttlDays) * 24 * time.Hour
@@ -194,6 +215,10 @@ func (c Config) DBPath() string { return filepath.Join(c.ConfigDir, "vcrx.db") }
 func (c Config) BackupDir() string { return filepath.Join(c.ConfigDir, "backups") }
 
 func (c Config) ArtworkCacheDir() string { return filepath.Join(c.CacheDir, "artwork") }
+
+// MetadataDir holds images downloaded from TMDb. It sits under the config dir,
+// not the cache, because downloading them again for a whole library is slow.
+func (c Config) MetadataDir() string { return filepath.Join(c.ConfigDir, "metadata", "tmdb") }
 
 // Logger builds the process logger from LogLevel and LogFormat.
 func (c Config) Logger() *slog.Logger {

@@ -1,6 +1,7 @@
 // Package artwork serves item images. Originals are never modified: local files
 // are decoded, resized to a width bucket and cached as JPEG under the cache dir.
-// Episodes without a thumbnail file get a frame extracted with ffmpeg.
+// Images downloaded from TMDb are used when there is no local file, and episodes
+// without either get a frame extracted with ffmpeg.
 package artwork
 
 import (
@@ -47,6 +48,8 @@ type Service struct {
 	DB       *sql.DB
 	CacheDir string
 	FFmpeg   string
+	// MetadataDir holds images downloaded from TMDb; empty turns them off.
+	MetadataDir string
 	// sem bounds concurrent ffmpeg frame grabs and resizes.
 	sem chan struct{}
 }
@@ -122,6 +125,12 @@ func (s *Service) lookup(ctx context.Context, itemID int64, kind string) (source
 	err = s.DB.QueryRowContext(ctx, `SELECT source_path FROM artwork WHERE item_id = ? AND kind = ? AND source = 'local'`, itemID, kind).Scan(&p)
 	if err == nil && p.Valid {
 		return source{path: p.String, root: libRoot}, nil
+	}
+	if s.MetadataDir != "" {
+		err = s.DB.QueryRowContext(ctx, `SELECT cache_path FROM artwork WHERE item_id = ? AND kind = ? AND source = 'tmdb'`, itemID, kind).Scan(&p)
+		if err == nil && p.Valid {
+			return source{path: p.String, root: s.MetadataDir}, nil
+		}
 	}
 	switch {
 	case itemKind == "season" && kind == "poster" && parent.Valid:
