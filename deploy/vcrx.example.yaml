@@ -3,6 +3,13 @@
 # add with `vcrx library add` are left alone.
 server_name: VCRX
 
+# Sign in without a password from your own networks: clients on trusted_networks
+# (default: loopback, private LAN ranges and Tailscale) become this user. Anyone
+# who can reach the server from those networks gets that user's access, so leave
+# it off on a network you share.
+#auto_sign_in_user: admin
+#trusted_networks: [192.168.1.0/24, 100.64.0.0/10]
+
 libraries:
   - name: Movies
     kind: movie

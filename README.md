@@ -112,6 +112,7 @@ Any other media server on the same host keeps running untouched; VCRX only reads
 
 ## Security
 
+- Optional password-free sign-in on your own networks: set `auto_sign_in_user` in `vcrx.yaml` and clients on `trusted_networks` (loopback, private LAN ranges and Tailscale by default) are signed in as that user, each device with its own session. Off by default.
 - LAN-first. Never forward VCRX's port on your router. Admin routes answer only from loopback and private addresses unless `VCRX_ADMIN_ALLOW_REMOTE=true`.
 - Passwords are hashed with argon2id. Tokens are random, stored only as SHA-256 hashes, and expire after 90 idle days. Failed logins are rate limited per address and per username.
 - Every file is reached through a version id; paths are resolved with symlinks evaluated and must stay inside their library root, which must sit under `VCRX_MEDIA_ROOTS`.

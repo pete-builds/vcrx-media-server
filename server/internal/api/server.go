@@ -40,6 +40,10 @@ type Server struct {
 
 	AdminAllowRemote bool
 	TrustedProxies   []netip.Prefix
+	// AutoSignInUser, when set, is signed in without a password for clients on
+	// TrustedNetworks (POST /api/v1/auth/auto).
+	AutoSignInUser  string
+	TrustedNetworks []netip.Prefix
 }
 
 type access int
@@ -64,6 +68,7 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/openapi.yaml", public, s.openapi},
 		{"GET", "/api/v1/server", public, s.serverInfo},
 		{"POST", "/api/v1/auth/login", public, s.login},
+		{"POST", "/api/v1/auth/auto", public, s.autoLogin},
 		{"POST", "/api/v1/auth/logout", signedIn, s.logout},
 		{"GET", "/api/v1/me", signedIn, s.me},
 		{"GET", "/api/v1/home", signedIn, s.home},

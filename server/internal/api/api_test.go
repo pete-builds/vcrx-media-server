@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -573,5 +574,63 @@ func TestShowNavigationAndWatched(t *testing.T) {
 	f.do("GET", "/api/v1/search?q=pil", f.friendTok, nil).json(t, &s)
 	if len(s.Items) != 1 || s.Items[0].ID != f.episodeID {
 		t.Fatalf("search: %+v", s.Items)
+	}
+}
+
+func TestTrustedNetworkSignIn(t *testing.T) {
+	f := newFixture(t)
+	dev := map[string]any{"device": map[string]string{"id": "web-1", "name": "Browser", "platform": "web", "client": "vcrx-web", "client_version": "1"}}
+	// Off by default: no password-free sign-in from anywhere.
+	if r := f.do("POST", "/api/v1/auth/auto", "", dev); r.code != 404 {
+		t.Fatalf("off: %d %s", r.code, r.body)
+	}
+	if r := f.do("GET", "/api/v1/server", "", nil); !strings.Contains(string(r.body), `"auto_sign_in":false`) {
+		t.Fatalf("server info when off: %s", r.body)
+	}
+	for _, n := range []string{"192.168.0.0/16", "100.64.0.0/10"} {
+		p, _ := netip.ParsePrefix(n)
+		f.srv.TrustedNetworks = append(f.srv.TrustedNetworks, p)
+	}
+	f.srv.AutoSignInUser = "pete"
+	f.h = f.srv.Handler()
+
+	for _, ip := range []string{"192.168.86.50:1", "100.101.102.103:1"} {
+		r := f.do("POST", "/api/v1/auth/auto", "", dev, "RemoteAddr", ip)
+		if r.code != 200 {
+			t.Fatalf("%s: %d %s", ip, r.code, r.body)
+		}
+		var out struct {
+			Token string
+			User  struct{ Username string }
+		}
+		r.json(t, &out)
+		if out.User.Username != "pete" || out.Token == "" {
+			t.Fatalf("%s: %+v", ip, out)
+		}
+		if me := f.do("GET", "/api/v1/me", out.Token, nil, "RemoteAddr", ip); me.code != 200 {
+			t.Fatalf("token from auto sign-in rejected: %d", me.code)
+		}
+	}
+	if r := f.do("GET", "/api/v1/server", "", nil, "RemoteAddr", "100.101.102.103:1"); !strings.Contains(string(r.body), `"auto_sign_in":true`) {
+		t.Fatalf("server info on Tailscale: %s", r.body)
+	}
+	// Outside the trusted networks, and through an untrusted proxy header, it is refused.
+	if r := f.do("POST", "/api/v1/auth/auto", "", dev, "RemoteAddr", "8.8.8.8:1"); r.code != 403 {
+		t.Fatalf("public address: %d", r.code)
+	}
+	if r := f.do("POST", "/api/v1/auth/auto", "", dev, "RemoteAddr", "8.8.8.8:1", "X-Forwarded-For", "192.168.1.2"); r.code != 403 {
+		t.Fatalf("spoofed forwarded-for: %d", r.code)
+	}
+	if r := f.do("POST", "/api/v1/auth/auto", "", dev, "RemoteAddr", "10.0.0.5:1"); r.code != 403 {
+		t.Fatalf("a private range not in the list: %d", r.code)
+	}
+	if r := f.do("GET", "/api/v1/server", "", nil, "RemoteAddr", "8.8.8.8:1"); !strings.Contains(string(r.body), `"auto_sign_in":false`) {
+		t.Fatalf("server info from outside: %s", r.body)
+	}
+	// A disabled or missing user is not signed in.
+	f.srv.AutoSignInUser = "nobody"
+	f.h = f.srv.Handler()
+	if r := f.do("POST", "/api/v1/auth/auto", "", dev); r.code != 403 {
+		t.Fatalf("missing user: %d", r.code)
 	}
 }
