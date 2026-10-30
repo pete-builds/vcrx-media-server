@@ -93,7 +93,7 @@ func TestAuthModes(t *testing.T) {
 	if gotKey != "v3key" || gotAuth != "" {
 		t.Fatalf("v3 key: api_key=%q auth=%q", gotKey, gotAuth)
 	}
-	c.Key = "eyJhbGciOiJIUzI1NiJ9." + strings.Repeat("a", 60) + ".sig"
+	c.Key = strings.Repeat("h", 20) + "." + strings.Repeat("p", 60) + ".sig"
 	if _, err := c.Search(context.Background(), "movie", "x", 0); err != nil {
 		t.Fatal(err)
 	}
