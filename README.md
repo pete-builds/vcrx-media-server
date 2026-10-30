@@ -16,7 +16,7 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 
 | Works now | Comes later |
 |---|---|
-| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork | TMDb enrichment (optional, your own key), collections, overlays |
+| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key) | Collections, overlays, manual match fixes |
 | Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
 | Direct play over HTTP with Range, sidecar subtitles | Remux and HLS transcoding, VA-API hardware acceleration |
 | Every playback logged with its decision and reason, resume positions, Continue Watching | Activity screens, stats, webhooks |
@@ -71,6 +71,8 @@ Inside the container (`docker compose exec vcrx vcrx ...`):
 vcrx migrate                  back up the database, apply migrations, exit
 vcrx user add|grant|passwd|list
 vcrx library add|list|scan
+vcrx metadata refresh [-all]  fetch posters and plots from TMDb now
+vcrx metadata status          matched and unmatched counts, and why each miss was skipped
 vcrx healthcheck              what the container HEALTHCHECK runs
 ```
 
@@ -79,6 +81,16 @@ vcrx healthcheck              what the container HEALTHCHECK runs
 ### Configuration
 
 Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its automatic pre-migration backups and the settings file live in `/config`; resized artwork and other caches live in `/cache` and can be deleted at any time.
+
+### TMDb posters and plots (optional)
+
+Set `VCRX_TMDB_API_KEY` in `.env` to your own [TMDb](https://www.themoviedb.org/settings/api) API key or API Read Access Token, then `docker compose up -d`. Two minutes after startup, and every 15 minutes after that, the server fills new movies and shows with plot, tagline, genres, cast, studio or network, content rating, TMDb rating, poster and backdrop, and episodes with titles, plots and stills. The first pass over a large library takes a while; `vcrx metadata refresh` runs it in the foreground.
+
+- **Your own data wins.** A value from an NFO, a local poster, or a field an admin locked is never replaced. Enrichment only writes a field that is empty or still holds what it wrote last time.
+- **No guessing.** A movie or show is matched by the TMDb or IMDb id in its NFO, or else by title and year, and only when exactly one result has that title in that year (or one year off). Anything doubtful is left alone and listed by `vcrx metadata status` with the reason; a year in the folder name usually fixes it.
+- Images are kept in `/config/metadata/tmdb`. `VCRX_TMDB_LANGUAGE` (default `en-US`) and `VCRX_TMDB_COUNTRY` (default `US`, for content ratings) are optional.
+
+This product uses the TMDB API but is not endorsed or certified by TMDB.
 
 ## Run the TV app
 
@@ -107,7 +119,7 @@ Any other media server on the same host keeps running untouched; VCRX only reads
 
 ## Privacy
 
-VCRX sends nothing anywhere. No telemetry, no usage reports, no update checks. Activity history (who played what, from which device and IP) stays in your database.
+VCRX sends nothing anywhere unless you add a TMDb key. No telemetry, no usage reports, no update checks. With a key, the server sends TMDb the titles and years it searches for and the TMDb ids it looks up, and downloads images from TMDb; it sends nothing about users or what they watch. Activity history (who played what, from which device and IP) stays in your database.
 
 ## Development
 

@@ -90,3 +90,51 @@ func TestResizeAndCache(t *testing.T) {
 		t.Fatal("rendered artwork from outside the library root")
 	}
 }
+
+func TestTMDbArtwork(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := db.Open(filepath.Join(dir, "vcrx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := db.Migrate(context.Background(), conn, "", slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	meta := filepath.Join(dir, "metadata")
+	if err := os.MkdirAll(filepath.Join(meta, "1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(meta, "1", "poster-abc.png")
+	f, _ := os.Create(file)
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, 200, 300))); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	mustExec := func(q string, args ...any) {
+		if _, err := conn.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustExec(`INSERT INTO libraries (id, name, kind, root_path, created_at, updated_at) VALUES (1, 'Movies', 'movie', ?, 0, 0)`, filepath.Join(dir, "Movies"))
+	mustExec(`INSERT INTO items (id, library_id, kind, group_key, title, sort_title, added_at, updated_at) VALUES (1, 1, 'movie', 'k', 'Film', 'Film', 0, 0)`)
+	mustExec(`INSERT INTO artwork (item_id, kind, source, url, cache_path, updated_at) VALUES (1, 'poster', 'tmdb', '/abc.png', ?, 0)`, file)
+
+	s := New(conn, filepath.Join(dir, "cache"), "ffmpeg")
+	if _, err := s.Get(context.Background(), 1, "poster", 160); !errors.Is(err, ErrNoArtwork) {
+		t.Fatalf("TMDb artwork served with no metadata dir: %v", err)
+	}
+	s.MetadataDir = meta
+	if _, err := s.Get(context.Background(), 1, "poster", 160); err != nil {
+		t.Fatalf("TMDb poster: %v", err)
+	}
+	// A cache_path pointing outside the metadata dir is refused.
+	outside := filepath.Join(dir, "outside.png")
+	if err := os.Rename(file, outside); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(`UPDATE artwork SET cache_path = ? WHERE item_id = 1`, outside)
+	if _, err := s.Get(context.Background(), 1, "poster", 240); err == nil {
+		t.Fatal("rendered TMDb artwork from outside the metadata dir")
+	}
+}

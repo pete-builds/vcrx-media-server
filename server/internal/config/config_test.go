@@ -71,3 +71,27 @@ func TestYAMLFile(t *testing.T) {
 		t.Fatal("relative media root accepted")
 	}
 }
+
+func TestTMDbKey(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("VCRX_CONFIG_DIR", dir)
+	c, err := Load()
+	if err != nil || c.TMDbAPIKey != "" || c.TMDbLanguage != "en-US" || c.TMDbCountry != "US" {
+		t.Fatalf("defaults: %+v %v", c, err)
+	}
+	keyFile := filepath.Join(dir, "tmdb.key")
+	if err := os.WriteFile(keyFile, []byte("  from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VCRX_TMDB_API_KEY_FILE", keyFile)
+	if c, err = Load(); err != nil || c.TMDbAPIKey != "from-file" {
+		t.Fatalf("key file: %q %v", c.TMDbAPIKey, err)
+	}
+	t.Setenv("VCRX_TMDB_API_KEY", " from-env ")
+	if c, err = Load(); err != nil || c.TMDbAPIKey != "from-env" {
+		t.Fatalf("env wins: %q %v", c.TMDbAPIKey, err)
+	}
+	if want := filepath.Join(dir, "metadata", "tmdb"); c.MetadataDir() != want {
+		t.Fatalf("metadata dir %q", c.MetadataDir())
+	}
+}
