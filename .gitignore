@@ -17,3 +17,5 @@ tv/signing/
 .vscode/
 *.swp
 .DS_Store
+# Local credentials kept beside the compose file
+deploy/.*password*

@@ -133,9 +133,18 @@ func CurrentVersion(ctx context.Context, conn *sql.DB) (int, error) {
 // interrupted run resumes where it stopped. When the database already holds data
 // it is copied to backupDir first. It refuses a database newer than this binary.
 func Migrate(ctx context.Context, conn *sql.DB, backupDir string, log *slog.Logger) (applied int, err error) {
+	return migrateTo(ctx, conn, backupDir, log, 0)
+}
+
+// migrateTo stops at version target (0 means the latest), so tests can build a
+// database at an older schema and exercise a data migration.
+func migrateTo(ctx context.Context, conn *sql.DB, backupDir string, log *slog.Logger, target int) (applied int, err error) {
 	ms, err := loadMigrations()
 	if err != nil {
 		return 0, err
+	}
+	if target > 0 && target < len(ms) {
+		ms = ms[:target]
 	}
 	current, err := CurrentVersion(ctx, conn)
 	if err != nil {

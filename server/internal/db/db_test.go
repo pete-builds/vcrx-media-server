@@ -109,3 +109,55 @@ func TestUniqueItemIdentityWithNullParent(t *testing.T) {
 		t.Fatal("duplicate top-level item accepted")
 	}
 }
+
+// Migration 2 backfills added_at from file mtimes, and a migration over existing
+// data writes a backup first.
+func TestMigration2BackfillsAddedAt(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := Open(filepath.Join(dir, "vcrx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	ctx := context.Background()
+	if _, err := migrateTo(ctx, conn, "", quiet(), 1); err != nil {
+		t.Fatal(err)
+	}
+	const scan, early, later = 5_000_000, 1_000_000, 2_000_000
+	for _, q := range []string{
+		`INSERT INTO libraries (id, name, kind, root_path, created_at, updated_at) VALUES (1, 'TV', 'show', '/tv', 0, 0)`,
+		`INSERT INTO items (id, library_id, kind, parent_id, group_key, title, sort_title, added_at, updated_at) VALUES
+			(1, 1, 'show', NULL, 's', 'Show', 'Show', 5000000, 0),
+			(2, 1, 'season', 1, '1', 'Season 1', 'Season 1', 5000000, 0),
+			(3, 1, 'episode', 2, '1', 'One', 'One', 5000000, 0),
+			(4, 1, 'episode', 2, '2', 'Two', 'Two', 5000000, 0)`,
+		`INSERT INTO media_versions (item_id, library_id, path, rel_path, size, mtime, added_at, updated_at) VALUES
+			(3, 1, '/tv/a.mkv', 'a.mkv', 1, 2000000, 5000000, 0),
+			(3, 1, '/tv/b.mkv', 'b.mkv', 1, 9000000, 5000000, 0),
+			(4, 1, '/tv/c.mkv', 'c.mkv', 1, 1000000, 5000000, 0)`,
+	} {
+		if _, err := conn.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := Migrate(ctx, conn, filepath.Join(dir, "backups"), quiet())
+	if err != nil || n != LatestVersion()-1 {
+		t.Fatalf("migrate: n=%d err=%v", n, err)
+	}
+	want := map[int64]int64{1: early, 2: early, 3: later, 4: early}
+	for id, w := range want {
+		var got int64
+		if err := conn.QueryRow(`SELECT added_at FROM items WHERE id = ?`, id).Scan(&got); err != nil || got != w {
+			t.Errorf("item %d added_at = %d (%v), want %d", id, got, err, w)
+		}
+	}
+	// A version whose mtime is later than its scan keeps the scan time.
+	var b int64
+	if err := conn.QueryRow(`SELECT added_at FROM media_versions WHERE rel_path = 'b.mkv'`).Scan(&b); err != nil || b != scan {
+		t.Errorf("future mtime: added_at = %d, %v", b, err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, "backups"))
+	if len(entries) != 1 || !strings.Contains(entries[0].Name(), "pre-migrate-v1") {
+		t.Fatalf("backups = %v", entries)
+	}
+}
