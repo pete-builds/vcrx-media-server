@@ -1,0 +1,29 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - sqlclosecheck
+    - rowserrcheck
+    - unconvert
+  settings:
+    gosec:
+      excludes:
+        # G304: file paths come from the scanner and are confined by fsafe.
+        - G304
+        # G204: ffmpeg and ffprobe are invoked with argument vectors, never a shell.
+        - G204
+        # G202: queries are assembled from fixed SQL fragments and ? placeholders;
+        # every value is bound, never concatenated.
+        - G202
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec, errcheck]
+formatters:
+  enable:
+    - gofmt

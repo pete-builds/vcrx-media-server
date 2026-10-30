@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<movie>
+    <title>Night of the Living Dead</title>
+    <originaltitle>Night of the Living Dead</originaltitle>
+    <sorttitle>Night of the Living Dead 1</sorttitle>
+    <ratings>
+        <rating name="imdb" max="10" default="true">
+            <value>7.8</value>
+            <votes>140,000</votes>
+        </rating>
+        <rating name="themoviedb" max="10">
+            <value>7.5</value>
+            <votes>2000</votes>
+        </rating>
+        <rating name="rottentomatoes" max="100">
+            <value>96</value>
+        </rating>
+    </ratings>
+    <userrating>0</userrating>
+    <year>1968</year>
+    <plot>A group of strangers barricade themselves in a farmhouse.</plot>
+    <outline>Short outline.</outline>
+    <tagline>They keep coming back.</tagline>
+    <runtime>96</runtime>
+    <mpaa>Rated Unrated</mpaa>
+    <uniqueid type="imdb" default="true">tt0063350</uniqueid>
+    <uniqueid type="tmdb">10331</uniqueid>
+    <genre>Horror</genre>
+    <genre>Thriller</genre>
+    <genre>horror</genre>
+    <country>United States of America</country>
+    <set tmdbcolid="261382">
+        <name>Living Dead Collection</name>
+        <overview></overview>
+    </set>
+    <tag>public domain</tag>
+    <tag>monochrome</tag>
+    <credits>John A. Russo</credits>
+    <credits>George A. Romero</credits>
+    <director>George A. Romero</director>
+    <premiered>1968-10-04</premiered>
+    <studio>Image Ten</studio>
+    <actor>
+        <name>Duane Jones</name>
+        <role>Ben</role>
+        <order>0</order>
+    </actor>
+    <actor>
+        <name>Judith O'Dea</name>
+        <role>Barbra</role>
+        <order>1</order>
+    </actor>
+</movie>
+https://www.imdb.com/title/tt0063350/

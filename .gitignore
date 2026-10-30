@@ -1,0 +1,19 @@
+# Deploy state
+deploy/.env
+deploy/data/
+# Go
+/server/vcrx
+/server/coverage.out
+# Android
+tv/.gradle/
+tv/build/
+tv/**/build/
+tv/local.properties
+tv/signing/
+*.jks
+*.keystore
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store

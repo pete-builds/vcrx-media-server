@@ -1,0 +1,725 @@
+openapi: 3.1.0
+info:
+  title: VCRX Media Server API
+  version: "1"
+  summary: Self-hosted, offline-first media server.
+  description: |
+    Every route lives under /api/v1 except the health checks. JSON field names are
+    snake_case. Timestamps are unix milliseconds; positions and durations are
+    milliseconds. Authenticate with `Authorization: Bearer <token>` from
+    POST /api/v1/auth/login, on every request including images, streams and
+    subtitles. Errors are `{"error": "<code>", "message": "<human text>"}`.
+
+    The routes in this file and the routes the server registers are compared by a
+    test; adding one without the other fails CI.
+  license:
+    name: AGPL-3.0-or-later
+    identifier: AGPL-3.0-or-later
+servers:
+  - url: http://192.168.86.20:3750
+    description: nix1 on the LAN
+security:
+  - bearer: []
+
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness. 200 while the process is serving.
+      security: []
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness. 503 when the database or a library root is unreachable.
+      security: []
+      responses:
+        "200": { description: Ready, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
+        "503": { description: Not ready, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
+
+  /api/v1/openapi.yaml:
+    get:
+      operationId: getOpenAPI
+      summary: This document.
+      security: []
+      responses:
+        "200": { description: The spec, content: { application/yaml: {} } }
+
+  /api/v1/server:
+    get:
+      operationId: getServerInfo
+      summary: Public server identity, used by clients to confirm they found a VCRX server.
+      security: []
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ServerInfo" } } } }
+
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      summary: Exchange a username and password for a bearer token. Rate limited per IP and username.
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/LoginRequest" } } }
+      responses:
+        "200": { description: Logged in, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      summary: Revoke the token used for this request.
+      responses:
+        "204": { description: Logged out }
+  /api/v1/me:
+    get:
+      operationId: getMe
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/home:
+    get:
+      operationId: getHome
+      summary: Rows for the TV home screen, already filtered by the caller's access.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows]
+                properties:
+                  rows: { type: array, items: { $ref: "#/components/schemas/HomeRow" } }
+
+  /api/v1/libraries:
+    get:
+      operationId: listLibraries
+      summary: Libraries the caller may see.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [libraries]
+                properties:
+                  libraries: { type: array, items: { $ref: "#/components/schemas/Library" } }
+  /api/v1/libraries/{library_id}/items:
+    get:
+      operationId: listLibraryItems
+      summary: Top-level items of a library (movies, or shows).
+      parameters:
+        - { name: library_id, in: path, required: true, schema: { type: integer } }
+        - { name: sort, in: query, schema: { type: string, enum: [title, added, year], default: title } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc] } }
+        - { name: genre, in: query, schema: { type: string } }
+        - { name: year, in: query, schema: { type: integer } }
+        - { name: resolution, in: query, schema: { $ref: "#/components/schemas/Resolution" } }
+        - { name: unwatched, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ItemPage" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/search:
+    get:
+      operationId: search
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        "200":
+          description: Movies, shows and episodes whose title matches, best first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ItemSummary" } }
+
+  /api/v1/items/{item_id}:
+    get:
+      operationId: getItem
+      parameters: [{ $ref: "#/components/parameters/ItemID" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ItemDetail" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/items/{item_id}/children:
+    get:
+      operationId: getItemChildren
+      summary: Seasons of a show, or episodes of a season, in order.
+      parameters: [{ $ref: "#/components/parameters/ItemID" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ItemSummary" } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/items/{item_id}/watched:
+    put:
+      operationId: setWatched
+      summary: Mark watched or unwatched. On a show or season this applies to every episode.
+      parameters: [{ $ref: "#/components/parameters/ItemID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [played]
+              properties:
+                played: { type: boolean }
+      responses:
+        "204": { description: Saved }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/items/{item_id}/artwork/{kind}:
+    get:
+      operationId: getArtwork
+      summary: A JPEG of the item's artwork, resized to fit width. 404 when there is none; clients draw a placeholder.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [poster, backdrop, thumb] } }
+        - { name: width, in: query, schema: { type: integer, minimum: 32, maximum: 3840 } }
+      responses:
+        "200": { description: Image, content: { image/jpeg: {} } }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/playback/sessions:
+    post:
+      operationId: startPlayback
+      summary: |
+        Ask to play an item. The server picks a version the caller may see, compares it
+        with the device's capabilities, records the decision and its reason, and
+        returns where to stream from. A policy refusal is 403 and a file this server
+        cannot yet adapt for the device is 422; both carry a message to show on screen
+        and are still recorded in the activity history.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackRequest" } } }
+      responses:
+        "201": { description: Session created, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackSession" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v1/playback/sessions/{session_id}/events:
+    post:
+      operationId: postPlaybackEvent
+      summary: |
+        Report what the player did. Send start once playing, progress every
+        heartbeat_interval_ms while playing, pause, resume, seek (with
+        from_position_ms), buffering, error, and stop. Progress and stop update the
+        caller's resume position; a stop past 90% marks the item played.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackEvent" } } }
+      responses:
+        "204": { description: Recorded }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/v1/versions/{version_id}/file:
+    get:
+      operationId: streamVersion
+      summary: |
+        The media file itself, for direct play. Supports Range, If-Range and HEAD.
+        Access is checked on every request against the caller's policy.
+      parameters:
+        - { name: version_id, in: path, required: true, schema: { type: integer } }
+        - { name: session, in: query, schema: { type: string }, description: Playback session id, for activity accounting. }
+      responses:
+        "200": { description: Whole file }
+        "206": { description: Partial content }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "416": { description: Range not satisfiable }
+    head:
+      operationId: headVersion
+      parameters:
+        - { name: version_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: Headers only }
+  /api/v1/subtitles/{stream_id}:
+    get:
+      operationId: getSubtitle
+      summary: A sidecar subtitle file, served as-is with its text MIME type.
+      parameters:
+        - { name: stream_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: Subtitle text }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/libraries:
+    get:
+      operationId: adminListLibraries
+      summary: All libraries with root paths and their last scan. Admin and LAN only.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [libraries]
+                properties:
+                  libraries: { type: array, items: { $ref: "#/components/schemas/AdminLibrary" } }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: adminCreateLibrary
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/LibraryInput" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/AdminLibrary" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/libraries/{library_id}/scan:
+    post:
+      operationId: adminScanLibrary
+      summary: Start a scan, optionally limited to one folder under the library root.
+      parameters:
+        - { name: library_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path: { type: string, description: Folder relative to the library root. }
+      responses:
+        "202": { description: Accepted, content: { application/json: { schema: { $ref: "#/components/schemas/ScanRun" } } } }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/scans:
+    get:
+      operationId: adminListScans
+      parameters:
+        - { name: library_id, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        "200":
+          description: Most recent first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scans]
+                properties:
+                  scans: { type: array, items: { $ref: "#/components/schemas/ScanRun" } }
+  /api/v1/admin/users:
+    get:
+      operationId: adminListUsers
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users: { type: array, items: { $ref: "#/components/schemas/AdminUser" } }
+    post:
+      operationId: adminCreateUser
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UserInput" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/AdminUser" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/users/{user_id}/grants:
+    put:
+      operationId: adminSetGrants
+      summary: Replace the set of libraries a user may see.
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [library_ids]
+              properties:
+                library_ids: { type: array, items: { type: integer } }
+      responses:
+        "204": { description: Saved }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/users/{user_id}/policy:
+    put:
+      operationId: adminSetPolicy
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UserPolicy" } } }
+      responses:
+        "204": { description: Saved }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/activity/sessions:
+    get:
+      operationId: adminListPlaybackSessions
+      summary: Playback history, newest first. active=true returns only sessions still open.
+      parameters:
+        - { name: active, in: query, schema: { type: boolean } }
+        - { name: user_id, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions: { type: array, items: { $ref: "#/components/schemas/ActivitySession" } }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: Opaque token from POST /api/v1/auth/login.
+  parameters:
+    ItemID: { name: item_id, in: path, required: true, schema: { type: integer } }
+  responses:
+    Error:
+      description: Error
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string, description: Stable machine code, e.g. unauthorized, not_found, playback_refused, transcode_unavailable. }
+        message: { type: string, description: Short text safe to show on a TV. }
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, degraded, down] }
+        checks: { type: object, additionalProperties: { type: string } }
+    ServerInfo:
+      type: object
+      required: [name, product, version, api_version]
+      properties:
+        name: { type: string, description: Friendly server name from config. }
+        product: { type: string, const: vcrx-media-server }
+        version: { type: string }
+        api_version: { type: integer, const: 1 }
+    Device:
+      type: object
+      required: [id, name, platform, client, client_version]
+      properties:
+        id: { type: string, description: Stable random id generated by the client on first launch. }
+        name: { type: string, example: Living room TV }
+        model: { type: string, example: TCL 55S546 }
+        platform: { type: string, example: android_tv }
+        client: { type: string, example: vcrx-tv }
+        client_version: { type: string, example: 0.1.0 }
+    LoginRequest:
+      type: object
+      required: [username, password, device]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+        device: { $ref: "#/components/schemas/Device" }
+    LoginResponse:
+      type: object
+      required: [token, user, expires_at]
+      properties:
+        token: { type: string }
+        expires_at: { type: integer }
+        user: { $ref: "#/components/schemas/User" }
+    User:
+      type: object
+      required: [id, username, is_admin]
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        display_name: { type: [string, "null"] }
+        is_admin: { type: boolean }
+    Resolution:
+      type: string
+      enum: [SD, 480p, 576p, 720p, 1080p, 4K, 8K]
+    Library:
+      type: object
+      required: [id, name, kind, item_count]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        kind: { type: string, enum: [movie, show] }
+        item_count: { type: integer }
+    WatchState:
+      type: object
+      required: [position_ms, played, play_count]
+      properties:
+        position_ms: { type: integer }
+        duration_ms: { type: [integer, "null"] }
+        played: { type: boolean }
+        play_count: { type: integer }
+        last_played_at: { type: [integer, "null"] }
+        unplayed_count: { type: [integer, "null"], description: For shows and seasons, episodes not yet played. }
+    ItemSummary:
+      type: object
+      required: [id, kind, title, library_id, has_poster, has_backdrop, has_thumb, added_at]
+      properties:
+        id: { type: integer }
+        kind: { type: string, enum: [movie, show, season, episode] }
+        library_id: { type: integer }
+        title: { type: string }
+        year: { type: [integer, "null"] }
+        parent_id: { type: [integer, "null"] }
+        show_id: { type: [integer, "null"] }
+        show_title: { type: [string, "null"] }
+        season_number: { type: [integer, "null"] }
+        episode_number: { type: [integer, "null"] }
+        episode_number_end: { type: [integer, "null"] }
+        runtime_ms: { type: [integer, "null"] }
+        resolution: { oneOf: [{ $ref: "#/components/schemas/Resolution" }, { type: "null" }], description: Best resolution the caller may play. }
+        child_count: { type: [integer, "null"], description: Seasons in a show, episodes in a season. }
+        has_poster: { type: boolean }
+        has_backdrop: { type: boolean }
+        has_thumb: { type: boolean }
+        added_at: { type: integer }
+        watch: { $ref: "#/components/schemas/WatchState" }
+    Track:
+      type: object
+      required: [id, kind, is_default, is_forced, is_external, is_image_based]
+      properties:
+        id: { type: integer }
+        kind: { type: string, enum: [audio, subtitle, video] }
+        index: { type: [integer, "null"], description: Stream index inside the file; null for sidecar files. }
+        codec: { type: [string, "null"], description: FFprobe codec name, e.g. eac3, truehd, subrip, ass, hdmv_pgs_subtitle. }
+        language: { type: [string, "null"], description: ISO 639-2 as tagged in the file. }
+        title: { type: [string, "null"] }
+        channels: { type: [integer, "null"] }
+        is_default: { type: boolean }
+        is_forced: { type: boolean }
+        is_external: { type: boolean }
+        is_image_based: { type: boolean }
+    Version:
+      type: object
+      required: [id, size]
+      properties:
+        id: { type: integer }
+        label: { type: [string, "null"], description: "Edition or source label parsed from the filename, e.g. Director's Cut, REMUX." }
+        file_name: { type: string }
+        container: { type: [string, "null"], description: "mkv, mp4, avi, ts, webm, ..." }
+        size: { type: integer }
+        bitrate: { type: [integer, "null"] }
+        duration_ms: { type: [integer, "null"] }
+        video_codec: { type: [string, "null"] }
+        video_profile: { type: [string, "null"] }
+        bit_depth: { type: [integer, "null"] }
+        width: { type: [integer, "null"] }
+        height: { type: [integer, "null"] }
+        resolution: { oneOf: [{ $ref: "#/components/schemas/Resolution" }, { type: "null" }] }
+        hdr_type: { type: [string, "null"], enum: [hdr10, hdr10plus, hlg, dolby_vision, null] }
+        audio_tracks: { type: array, items: { $ref: "#/components/schemas/Track" } }
+        subtitle_tracks: { type: array, items: { $ref: "#/components/schemas/Track" } }
+    ItemDetail:
+      allOf:
+        - $ref: "#/components/schemas/ItemSummary"
+        - type: object
+          properties:
+            overview: { type: [string, "null"] }
+            tagline: { type: [string, "null"] }
+            content_rating: { type: [string, "null"] }
+            genres: { type: array, items: { type: string } }
+            directors: { type: array, items: { type: string } }
+            studios: { type: array, items: { type: string } }
+            ratings: { type: object, additionalProperties: { type: number }, description: "Keyed by source: imdb, tmdb, nfo." }
+            versions: { type: array, items: { $ref: "#/components/schemas/Version" }, description: Only versions the caller may play, best first. }
+            next_episode: { oneOf: [{ $ref: "#/components/schemas/ItemSummary" }, { type: "null" }], description: "For a show or season: the episode Play should start (first unwatched, or in progress)." }
+    ItemPage:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ItemSummary" } }
+        total: { type: integer }
+    HomeRow:
+      type: object
+      required: [id, title, items]
+      properties:
+        id: { type: string, description: "continue_watching, recently_added_movies, recently_added_episodes, or library:<id>" }
+        title: { type: string }
+        library_id: { type: [integer, "null"] }
+        items: { type: array, items: { $ref: "#/components/schemas/ItemSummary" } }
+    VideoCodecCapability:
+      type: object
+      required: [codec]
+      properties:
+        codec: { type: string, description: "FFprobe name: h264, hevc, av1, vp9, vp8, mpeg2video, mpeg4, vc1." }
+        profiles: { type: array, items: { type: string }, description: "Lower case FFprobe profile names: main, high, main 10, high 10. Empty means any." }
+        max_bit_depth: { type: integer }
+        max_width: { type: integer }
+        max_height: { type: integer }
+        max_fps: { type: number }
+    AudioCodecCapability:
+      type: object
+      required: [codec]
+      properties:
+        codec: { type: string, description: "FFprobe name: aac, ac3, eac3, dts, truehd, flac, opus, vorbis, mp3, mp2, pcm_s16le, alac." }
+        max_channels: { type: integer }
+        decoder: { type: string, enum: [hardware, software, ffmpeg_extension, passthrough] }
+    Capabilities:
+      type: object
+      required: [containers, video_codecs, audio_codecs]
+      properties:
+        containers: { type: array, items: { type: string }, description: "Containers the player demuxes: mkv, mp4, webm, ts, avi, mov, flv." }
+        video_codecs: { type: array, items: { $ref: "#/components/schemas/VideoCodecCapability" } }
+        audio_codecs: { type: array, items: { $ref: "#/components/schemas/AudioCodecCapability" } }
+        hdr_types: { type: array, items: { type: string, enum: [hdr10, hdr10plus, hlg, dolby_vision] } }
+        subtitle_codecs: { type: array, items: { type: string }, description: "subrip, ass, ssa, webvtt, mov_text, ttml, dvb_subtitle, hdmv_pgs_subtitle, dvd_subtitle." }
+        max_width: { type: integer }
+        max_height: { type: integer }
+        max_bitrate: { type: integer }
+    PlaybackRequest:
+      type: object
+      required: [item_id, capabilities]
+      properties:
+        item_id: { type: integer, description: A movie or episode. }
+        version_id: { type: [integer, "null"], description: Omit to let the server pick the best version the device can play. }
+        start_position_ms: { type: [integer, "null"], description: Omit to resume from the saved position. }
+        capabilities: { $ref: "#/components/schemas/Capabilities" }
+    SubtitleSource:
+      type: object
+      required: [track_id, url, codec, mime_type]
+      properties:
+        track_id: { type: integer }
+        url: { type: string, description: Path relative to the server base URL. }
+        codec: { type: string }
+        mime_type: { type: string, description: "application/x-subrip, text/x-ssa, text/vtt, application/ttml+xml" }
+        language: { type: [string, "null"] }
+        title: { type: [string, "null"] }
+        is_forced: { type: boolean }
+    PlaybackSession:
+      type: object
+      required: [session_id, decision, reason, item_id, version, stream, resume_position_ms, heartbeat_interval_ms]
+      properties:
+        session_id: { type: string }
+        decision: { type: string, enum: [direct_play, remux, audio_transcode, transcode] }
+        reason: { type: string, description: Why this decision, in plain words. Recorded in activity. }
+        item_id: { type: integer }
+        version: { $ref: "#/components/schemas/Version" }
+        stream:
+          type: object
+          required: [url, protocol]
+          properties:
+            url: { type: string, description: Path relative to the server base URL; send the bearer header. }
+            protocol: { type: string, enum: [progressive, hls] }
+            mime_type: { type: [string, "null"], description: "video/x-matroska, video/mp4, ..." }
+        subtitles: { type: array, items: { $ref: "#/components/schemas/SubtitleSource" }, description: Sidecar files to add as side-loaded tracks. Embedded tracks come from the container. }
+        resume_position_ms: { type: integer }
+        heartbeat_interval_ms: { type: integer }
+    PlaybackEvent:
+      type: object
+      required: [type, position_ms]
+      properties:
+        type: { type: string, enum: [start, pause, resume, seek, progress, buffering, stop, error] }
+        position_ms: { type: integer }
+        from_position_ms: { type: [integer, "null"], description: For seek. }
+        duration_ms: { type: [integer, "null"] }
+        message: { type: [string, "null"], description: For error. }
+    AdminLibrary:
+      allOf:
+        - $ref: "#/components/schemas/Library"
+        - type: object
+          properties:
+            root_path: { type: string }
+            grouping: { type: string, enum: [folder, title_year] }
+            scan_interval_minutes: { type: integer }
+            last_scan: { oneOf: [{ $ref: "#/components/schemas/ScanRun" }, { type: "null" }] }
+    LibraryInput:
+      type: object
+      required: [name, kind, root_path]
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [movie, show] }
+        root_path: { type: string, description: Absolute path inside the container, under a configured media root. }
+        grouping: { type: string, enum: [folder, title_year], default: folder }
+        scan_interval_minutes: { type: integer, default: 60 }
+    ScanRun:
+      type: object
+      required: [id, library_id, trigger, status, started_at]
+      properties:
+        id: { type: integer }
+        library_id: { type: integer }
+        trigger: { type: string }
+        path_filter: { type: [string, "null"] }
+        status: { type: string, enum: [running, ok, error, aborted] }
+        error: { type: [string, "null"] }
+        files_seen: { type: integer }
+        files_added: { type: integer }
+        files_changed: { type: integer }
+        files_missing: { type: integer }
+        files_failed: { type: integer }
+        started_at: { type: integer }
+        finished_at: { type: [integer, "null"] }
+    AdminUser:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          properties:
+            disabled: { type: boolean }
+            library_ids: { type: array, items: { type: integer } }
+            policy: { $ref: "#/components/schemas/UserPolicy" }
+            created_at: { type: integer }
+    UserInput:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 64 }
+        password: { type: string, minLength: 8 }
+        display_name: { type: string }
+        is_admin: { type: boolean, default: false }
+        library_ids: { type: array, items: { type: integer } }
+    UserPolicy:
+      type: object
+      properties:
+        max_resolution: { oneOf: [{ $ref: "#/components/schemas/Resolution" }, { type: "null" }], description: Versions above this are invisible to the user. }
+        max_content_rating: { type: [string, "null"] }
+        allow_labels: { type: array, items: { type: string } }
+        deny_labels: { type: array, items: { type: string } }
+        allow_transcode: { type: boolean }
+        allow_4k_transcode: { type: boolean }
+    ActivitySession:
+      type: object
+      required: [id, decision, decision_reason, state, started_at]
+      properties:
+        id: { type: string }
+        user_id: { type: [integer, "null"] }
+        username: { type: [string, "null"] }
+        item_id: { type: [integer, "null"] }
+        item_title: { type: [string, "null"] }
+        version_id: { type: [integer, "null"] }
+        version_summary: { type: [string, "null"] }
+        device_name: { type: [string, "null"] }
+        device_model: { type: [string, "null"] }
+        client: { type: [string, "null"] }
+        client_version: { type: [string, "null"] }
+        ip: { type: [string, "null"] }
+        decision: { type: string }
+        decision_reason: { type: string }
+        state: { type: string }
+        start_position_ms: { type: integer }
+        last_position_ms: { type: integer }
+        duration_ms: { type: [integer, "null"] }
+        played_ms: { type: integer }
+        started_at: { type: integer }
+        last_event_at: { type: integer }
+        ended_at: { type: [integer, "null"] }

@@ -1,0 +1,46 @@
+# VCRX Media Server on one Linux host. From this directory:
+#   cp .env.example .env            (then edit the media paths)
+#   mkdir -p data/config data/cache
+#   cp vcrx.example.yaml data/config/vcrx.yaml
+#   docker compose up -d --build
+name: vcrx-media-server
+
+services:
+  vcrx:
+    build:
+      context: ..
+      args:
+        VERSION: ${VCRX_VERSION:-dev}
+    image: vcrx-media-server:local
+    container_name: vcrx
+    # Host networking: the server sees real client IPs (activity history and the
+    # LAN-only admin check depend on them) and takes no Docker network.
+    network_mode: host
+    user: "${VCRX_UID:-1000}:${VCRX_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=64m
+    environment:
+      VCRX_BIND: ${VCRX_BIND:-0.0.0.0}
+      VCRX_PORT: ${VCRX_PORT:-3750}
+      VCRX_SERVER_NAME: ${VCRX_SERVER_NAME:-VCRX}
+      VCRX_LOG_LEVEL: ${VCRX_LOG_LEVEL:-info}
+      VCRX_PROBE_CONCURRENCY: ${VCRX_PROBE_CONCURRENCY:-4}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${VCRX_DATA_DIR:-./data}/config:/config
+      - ${VCRX_DATA_DIR:-./data}/cache:/cache
+      # Media is mounted read-only, one folder per library.
+      - ${VCRX_MOVIES_DIR:?set VCRX_MOVIES_DIR in .env}:/media/Movies:ro
+      - ${VCRX_TV_DIR:?set VCRX_TV_DIR in .env}:/media/TV:ro
+    labels:
+      # Built locally, so there is no registry image for Watchtower to pull.
+      com.centurylinklabs.watchtower.enable: "false"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    stop_grace_period: 15s

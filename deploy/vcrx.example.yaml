@@ -1,0 +1,17 @@
+# VCRX settings file, read from /config/vcrx.yaml. Environment variables win.
+# Libraries listed here are created or updated by name at startup; libraries you
+# add with `vcrx library add` are left alone.
+server_name: VCRX
+
+libraries:
+  - name: Movies
+    kind: movie
+    path: /media/Movies
+    # folder: only files sharing a folder and name prefix become versions of one
+    # movie. title_year: also merge files whose parsed title and year match.
+    grouping: folder
+    scan_interval_minutes: 60
+  - name: TV
+    kind: show
+    path: /media/TV
+    scan_interval_minutes: 60

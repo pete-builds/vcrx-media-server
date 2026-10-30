@@ -1,0 +1,130 @@
+<p align="center"><img src="brand/generated/vcrx-wordmark-on-black.png" alt="VCRX" width="420"></p>
+
+# VCRX Media Server
+
+**Your media. Your hardware. Your rules.**
+
+A self-hosted media server and a native Google TV app, built from scratch. No subscriptions, no ads, no telemetry, no vendor accounts and no required cloud service: it starts, scans and plays on a LAN with the internet unplugged. Your media, your server, your accounts, your data.
+
+VCRX exists for the things other servers need add-ons and scripts for: per-version access rules (a friend sees the 1080p copy, never the 4K one), built-in activity history and playback policy, and collections defined in files you own. Those land milestone by milestone; see [docs/PLAN.md](docs/PLAN.md).
+
+Licence: AGPL-3.0-or-later. If you run a modified VCRX as a service, share your changes.
+
+## Status
+
+Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV slice.
+
+| Works now | Comes later |
+|---|---|
+| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork | TMDb enrichment (optional, your own key), collections, overlays |
+| Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
+| Direct play over HTTP with Range, sidecar subtitles | Remux and HLS transcoding, VA-API hardware acceleration |
+| Every playback logged with its decision and reason, resume positions, Continue Watching | Activity screens, stats, webhooks |
+| REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Web client, other TV platforms |
+
+A file the TV cannot play directly is refused with a message saying why ("needs video conversion: the device has no av1 video decoder"). Transcoding arrives in milestone 3.
+
+## Run the server
+
+Needs Docker with Compose on a Linux host that can read your media.
+
+```bash
+git clone https://github.com/pete-builds/vcrx-media-server.git
+cd vcrx-media-server/deploy
+cp .env.example .env                       # set VCRX_MOVIES_DIR and VCRX_TV_DIR
+mkdir -p data/config data/cache
+cp vcrx.example.yaml data/config/vcrx.yaml # declares the Movies and TV libraries
+docker compose up -d --build
+docker compose exec vcrx vcrx user add -username you -admin
+docker compose logs -f vcrx                # watch the first scan
+```
+
+The container runs as `VCRX_UID:VCRX_GID` (1000 by default), which must be able to read the media and write `data/`. Media is mounted read-only. The server listens on port 3750 on the host's network.
+
+Check it:
+
+```bash
+curl -s http://<server-ip>:3750/readyz     # {"status":"ok", "checks": {...}}
+docker compose exec vcrx vcrx library list # item counts and the last scan
+```
+
+### More users
+
+```bash
+docker compose exec vcrx vcrx user add -username friend
+docker compose exec vcrx vcrx user grant -username friend -libraries Movies,TV
+```
+
+A new user sees nothing until granted a library. Admins see everything. To keep a user off 4K versions, set their policy through the API:
+
+```bash
+curl -X PUT http://<server-ip>:3750/api/v1/admin/users/<id>/policy \
+  -H "Authorization: Bearer <admin token>" -H "Content-Type: application/json" \
+  -d '{"max_resolution": "1080p", "allow_transcode": true}'
+```
+
+### CLI
+
+Inside the container (`docker compose exec vcrx vcrx ...`):
+
+```
+vcrx migrate                  back up the database, apply migrations, exit
+vcrx user add|grant|passwd|list
+vcrx library add|list|scan
+vcrx healthcheck              what the container HEALTHCHECK runs
+```
+
+`vcrx library scan -name Movies -path "Some Folder"` rescans one folder. A scan refuses to mark files missing when the library root is unreachable or suddenly empty, or when more than half the library would vanish at once; `-force` overrides the last two after you have checked the mount.
+
+### Configuration
+
+Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its automatic pre-migration backups and the settings file live in `/config`; resized artwork and other caches live in `/cache` and can be deleted at any time.
+
+## Run the TV app
+
+Build the APK with one command and sideload it with ADB: [tv/README.md](tv/README.md). On the TV, enter `http://<server-ip>:3750` and sign in.
+
+## Acceptance test
+
+The MVP is done when this passes end to end on real hardware:
+
+1. On the server: `docker compose up -d --build` with read-only media mounts, then `vcrx library list` shows both libraries scanned with nonzero item counts.
+2. Build the APK (`tv/build-apk.sh`) and sideload it (`adb install -r tv/build/out/vcrx-tv-release.apk`).
+3. On the TV: connect to `http://<server-ip>:3750`, sign in, see Recently Added on Home.
+4. Browse Movies and TV, open a show, pick a season and an episode.
+5. Play a file that direct plays. Seek forward. Press Back to stop.
+6. Open the same item again: it offers Resume at the position you stopped at, and Home shows it under Continue Watching.
+7. The activity log has the session: `GET /api/v1/admin/activity/sessions` lists the device, the decision (`direct_play`), its reason, and the positions.
+
+Any other media server on the same host keeps running untouched; VCRX only reads the media folders.
+
+## Security
+
+- LAN-first. Never forward VCRX's port on your router. Admin routes answer only from loopback and private addresses unless `VCRX_ADMIN_ALLOW_REMOTE=true`.
+- Passwords are hashed with argon2id. Tokens are random, stored only as SHA-256 hashes, and expire after 90 idle days. Failed logins are rate limited per address and per username.
+- Every file is reached through a version id; paths are resolved with symlinks evaluated and must stay inside their library root, which must sit under `VCRX_MEDIA_ROOTS`.
+- Remote access later: put VCRX behind a reverse proxy that terminates HTTPS (Caddy, nginx), add the proxy's address to `VCRX_TRUSTED_PROXIES` so client IPs are logged correctly, and keep admin routes LAN-only. Use a VPN rather than a port forward where you can.
+
+## Privacy
+
+VCRX sends nothing anywhere. No telemetry, no usage reports, no update checks. Activity history (who played what, from which device and IP) stays in your database.
+
+## Development
+
+The server is Go 1.26 with a pure-Go SQLite driver; no cgo.
+
+```bash
+cd server
+go test -race ./...      # includes the OpenAPI drift test
+go vet ./...
+golangci-lint run
+govulncheck ./...
+```
+
+On NixOS: `nix-shell -p go gcc ffmpeg golangci-lint govulncheck`. The API contract is [server/api/openapi.yaml](server/api/openapi.yaml), served at `/api/v1/openapi.yaml`; a test fails when it and the registered routes disagree. Migrations are forward-only SQL files in `server/internal/db/migrations`.
+
+Design notes and the verified facts the build relies on: [docs/REFERENCE.md](docs/REFERENCE.md).
+
+## Brand
+
+The VCRX wordmark, standalone V mark, app icons and TV tiles live in [brand/](brand/README.md): VCRX Orange `#FF5F00` on Black, Rajdhani for display type and Inter for interface text. The kit is raster artwork, so the logo is always the image, never retyped in a font. `brand/tools/make-assets.py` derives the Android launcher icons, TV banners and in-app logo files from it; rerun it after changing the kit.

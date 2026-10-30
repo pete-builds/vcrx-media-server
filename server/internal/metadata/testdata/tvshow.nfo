@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tvshow>
+  <title>The Bexbury Mysteries</title>
+  <showtitle>The Bexbury Mysteries</showtitle>
+  <year>2020</year>
+  <plot>A small town keeps its secrets.</plot>
+  <mpaa>TV-14</mpaa>
+  <premiered>2020-03-01</premiered>
+  <studio>VCRX Network</studio>
+  <genre>Mystery</genre>
+  <uniqueid type="tvdb" default="true">999999</uniqueid>
+  <uniqueid type="tmdb">424242</uniqueid>
+  <uniqueid type="imdb">tt9999991</uniqueid>
+</tvshow>

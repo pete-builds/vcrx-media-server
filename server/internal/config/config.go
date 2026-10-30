@@ -1,0 +1,209 @@
+// Package config loads settings from environment variables and an optional YAML
+// file at $VCRX_CONFIG_DIR/vcrx.yaml. Environment variables win over the file.
+// Secrets come from env or from a *_FILE path, never from the repo.
+package config
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"go.yaml.in/yaml/v3"
+)
+
+// LibrarySpec is a library declared in vcrx.yaml. Libraries are matched by name and
+// upserted at startup; libraries missing from the file are left alone.
+type LibrarySpec struct {
+	Name                string `yaml:"name"`
+	Kind                string `yaml:"kind"`
+	Path                string `yaml:"path"`
+	Grouping            string `yaml:"grouping"`
+	ScanIntervalMinutes int    `yaml:"scan_interval_minutes"`
+}
+
+type Config struct {
+	ServerName string `yaml:"server_name"`
+	Bind       string `yaml:"bind"`
+	Port       int    `yaml:"port"`
+
+	ConfigDir string `yaml:"-"`
+	CacheDir  string `yaml:"cache_dir"`
+	// MediaRoots are the only directories a library root may sit under.
+	MediaRoots []string `yaml:"media_roots"`
+
+	FFprobePath      string `yaml:"ffprobe"`
+	FFmpegPath       string `yaml:"ffmpeg"`
+	ProbeConcurrency int    `yaml:"probe_concurrency"`
+	ScanOnStartup    bool   `yaml:"scan_on_startup"`
+
+	LogLevel  string `yaml:"log_level"`
+	LogFormat string `yaml:"log_format"`
+
+	SessionTTL time.Duration `yaml:"-"`
+	// AdminAllowRemote lets admin routes answer from public addresses. Off by default.
+	AdminAllowRemote bool `yaml:"admin_allow_remote"`
+	// TrustedProxies are reverse proxies whose X-Forwarded-For is believed.
+	TrustedProxies []string `yaml:"trusted_proxies"`
+
+	Libraries []LibrarySpec `yaml:"libraries"`
+}
+
+func defaults() Config {
+	return Config{
+		ServerName:       "VCRX",
+		Bind:             "0.0.0.0",
+		Port:             3750,
+		ConfigDir:        "/config",
+		CacheDir:         "/cache",
+		MediaRoots:       []string{"/media"},
+		FFprobePath:      "ffprobe",
+		FFmpegPath:       "ffmpeg",
+		ProbeConcurrency: 4,
+		ScanOnStartup:    true,
+		LogLevel:         "info",
+		LogFormat:        "json",
+		SessionTTL:       90 * 24 * time.Hour,
+	}
+}
+
+// Load reads vcrx.yaml (if present) then the environment.
+func Load() (Config, error) {
+	c := defaults()
+	if v := os.Getenv("VCRX_CONFIG_DIR"); v != "" {
+		c.ConfigDir = v
+	}
+	file := filepath.Join(c.ConfigDir, "vcrx.yaml")
+	if v := os.Getenv("VCRX_CONFIG_FILE"); v != "" {
+		file = v
+	}
+	if b, err := os.ReadFile(file); err == nil { //nolint:gosec // the operator chooses this path
+		dec := yaml.NewDecoder(strings.NewReader(string(b)))
+		dec.KnownFields(true)
+		if err := dec.Decode(&c); err != nil && !errors.Is(err, io.EOF) {
+			return c, fmt.Errorf("%s: %w", file, err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return c, fmt.Errorf("read %s: %w", file, err)
+	}
+
+	str := func(key string, dst *string) {
+		if v, ok := os.LookupEnv(key); ok && v != "" {
+			*dst = v
+		}
+	}
+	var errs []error
+	integer := func(key string, dst *int) {
+		if v, ok := os.LookupEnv(key); ok && v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", key, err))
+				return
+			}
+			*dst = n
+		}
+	}
+	boolean := func(key string, dst *bool) {
+		if v, ok := os.LookupEnv(key); ok && v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", key, err))
+				return
+			}
+			*dst = b
+		}
+	}
+	list := func(key string, dst *[]string) {
+		if v, ok := os.LookupEnv(key); ok && v != "" {
+			*dst = splitList(v)
+		}
+	}
+	str("VCRX_SERVER_NAME", &c.ServerName)
+	str("VCRX_BIND", &c.Bind)
+	integer("VCRX_PORT", &c.Port)
+	str("VCRX_CACHE_DIR", &c.CacheDir)
+	list("VCRX_MEDIA_ROOTS", &c.MediaRoots)
+	str("VCRX_FFPROBE", &c.FFprobePath)
+	str("VCRX_FFMPEG", &c.FFmpegPath)
+	integer("VCRX_PROBE_CONCURRENCY", &c.ProbeConcurrency)
+	boolean("VCRX_SCAN_ON_STARTUP", &c.ScanOnStartup)
+	str("VCRX_LOG_LEVEL", &c.LogLevel)
+	str("VCRX_LOG_FORMAT", &c.LogFormat)
+	boolean("VCRX_ADMIN_ALLOW_REMOTE", &c.AdminAllowRemote)
+	list("VCRX_TRUSTED_PROXIES", &c.TrustedProxies)
+	ttlDays := int(c.SessionTTL / (24 * time.Hour))
+	integer("VCRX_SESSION_TTL_DAYS", &ttlDays)
+	c.SessionTTL = time.Duration(ttlDays) * 24 * time.Hour
+
+	if err := c.validate(); err != nil {
+		errs = append(errs, err)
+	}
+	return c, errors.Join(errs...)
+}
+
+func splitList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (c *Config) validate() error {
+	var errs []error
+	if c.Port < 1 || c.Port > 65535 {
+		errs = append(errs, fmt.Errorf("port %d out of range", c.Port))
+	}
+	if c.ProbeConcurrency < 1 {
+		c.ProbeConcurrency = 1
+	}
+	if c.SessionTTL < time.Hour {
+		errs = append(errs, errors.New("session TTL must be at least one day"))
+	}
+	for i, r := range c.MediaRoots {
+		if !filepath.IsAbs(r) {
+			errs = append(errs, fmt.Errorf("media root %q must be absolute", r))
+		}
+		c.MediaRoots[i] = filepath.Clean(r)
+	}
+	for _, l := range c.Libraries {
+		if l.Name == "" || l.Path == "" {
+			errs = append(errs, errors.New("every library in vcrx.yaml needs a name and a path"))
+		}
+		if l.Kind != "movie" && l.Kind != "show" {
+			errs = append(errs, fmt.Errorf("library %q: kind must be movie or show", l.Name))
+		}
+		if l.Grouping != "" && l.Grouping != "folder" && l.Grouping != "title_year" {
+			errs = append(errs, fmt.Errorf("library %q: grouping must be folder or title_year", l.Name))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (c Config) Addr() string { return fmt.Sprintf("%s:%d", c.Bind, c.Port) }
+
+func (c Config) DBPath() string { return filepath.Join(c.ConfigDir, "vcrx.db") }
+
+func (c Config) BackupDir() string { return filepath.Join(c.ConfigDir, "backups") }
+
+func (c Config) ArtworkCacheDir() string { return filepath.Join(c.CacheDir, "artwork") }
+
+// Logger builds the process logger from LogLevel and LogFormat.
+func (c Config) Logger() *slog.Logger {
+	var lvl slog.Level
+	if err := lvl.UnmarshalText([]byte(c.LogLevel)); err != nil {
+		lvl = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: lvl}
+	if c.LogFormat == "text" {
+		return slog.New(slog.NewTextHandler(os.Stderr, opts))
+	}
+	return slog.New(slog.NewJSONHandler(os.Stderr, opts))
+}
