@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 )
 
 // LibrarySpec is a library declared in vcrx.yaml. Libraries are matched by name and
@@ -25,6 +27,8 @@ type LibrarySpec struct {
 	Path                string `yaml:"path"`
 	Grouping            string `yaml:"grouping"`
 	ScanIntervalMinutes int    `yaml:"scan_interval_minutes"`
+	// Overlays are drawn onto this library's posters (rating, resolution, ribbon).
+	Overlays []overlay.Spec `yaml:"overlays"`
 }
 
 type Config struct {
@@ -62,6 +66,11 @@ type Config struct {
 	WebhookURLs []string `yaml:"-"`
 	// WebhookEvents limits which events are sent; empty sends all of them.
 	WebhookEvents []string `yaml:"webhook_events"`
+
+	// IMDbRatings downloads IMDb's public ratings file once a day and stores the
+	// rating and vote count for every movie and show with an IMDb id. Off by
+	// default: IMDb licenses the file for personal, non-commercial use.
+	IMDbRatings bool `yaml:"imdb_ratings"`
 
 	// TMDbAPIKey turns on TMDb enrichment: a v3 API key or a v4 read access token.
 	// It comes from VCRX_TMDB_API_KEY or VCRX_TMDB_API_KEY_FILE, never the YAML file.
@@ -156,6 +165,7 @@ func Load() (Config, error) {
 	str("VCRX_LOG_LEVEL", &c.LogLevel)
 	str("VCRX_LOG_FORMAT", &c.LogFormat)
 	boolean("VCRX_ADMIN_ALLOW_REMOTE", &c.AdminAllowRemote)
+	boolean("VCRX_IMDB_RATINGS", &c.IMDbRatings)
 	list("VCRX_TRUSTED_PROXIES", &c.TrustedProxies)
 	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
 	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)
@@ -235,6 +245,11 @@ func (c *Config) validate() error {
 		}
 		if l.Grouping != "" && l.Grouping != "folder" && l.Grouping != "title_year" {
 			errs = append(errs, fmt.Errorf("library %q: grouping must be folder or title_year", l.Name))
+		}
+		for _, o := range l.Overlays {
+			if err := o.Validate(); err != nil {
+				errs = append(errs, fmt.Errorf("library %q: %w", l.Name, err))
+			}
 		}
 	}
 	return errors.Join(errs...)

@@ -16,7 +16,7 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 
 | Works now | Comes later |
 |---|---|
-| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key) | Collections, overlays, manual match fixes |
+| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays | Collections, manual match fixes |
 | Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
 | Direct play over HTTP with Range, sidecar and embedded text subtitles (also as WebVTT for browsers) | Remux and HLS transcoding, picture subtitle burn-in, VA-API hardware acceleration |
 | Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, stats, per-user totals, stop a stream, webhooks | Activity screens in a client |
@@ -100,6 +100,20 @@ Open `http://<server>:3750/` in a browser. It is part of the server: no separate
 - **Play** in the browser, resuming where any device left off. The browser tells the server what it can decode; a file it cannot play directly (often HEVC with AC-3 or DTS audio in Firefox, or anything in a container the browser does not read) is refused with the reason until conversion lands, and the TV app still plays it. Subtitles: pick any text track, sidecar or inside the file.
 - **Activity** for admins: now playing with a Stop button, history, stats and users.
 - **Sign-in:** with `auto_sign_in_user` set, a browser on a trusted network is signed straight in; otherwise it shows a sign-in form. The session is an HttpOnly cookie, and every change the page makes carries a header a cross-site page cannot send.
+
+### Poster overlays (Kometa style)
+
+List `overlays` under a library in `vcrx.yaml` and the server draws badges onto that library's posters, the way Kometa does for Plex. Because the badges are part of the poster image, the TV app, the web app and anything else that shows posters get them with no change. `?overlays=0` on an artwork URL returns the clean poster.
+
+| Type | Draws | Options |
+|---|---|---|
+| `rating` | A star and score with its source, top left by default | `sources`: preference order, default `[imdb, tmdb]` |
+| `resolution` | The best version's resolution with an HDR, DV, DV HDR or HDR10+ tag, bottom right | `resolutions`: which get a badge, default `[4K]` |
+| `ribbon` | A diagonal corner ribbon, default `TOP RATED` | `min_rating` (8.0), `min_votes` (25,000 for IMDb), `text` |
+
+All three take `position`: `top_left`, `top_right`, `bottom_left` or `bottom_right`. Badges are VCRX's own lettering, not copies of third-party logos. Kometa's `ribbon` default draws on IMDb Top 250 and Rotten Tomatoes lists that VCRX has no source for, so VCRX's ribbon is a rule on the IMDb rating and vote count instead.
+
+**IMDb ratings:** set `imdb_ratings: true` and the server downloads IMDb's public ratings file once a day (and only when it changed) and keeps the rating and vote count for every title with an IMDb id. NFO files and TMDb enrichment supply the ids. `vcrx metadata imdb` runs the sync now. IMDb licenses the file for personal, non-commercial use, so it is off by default.
 
 ### Activity and notifications
 

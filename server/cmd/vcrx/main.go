@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -34,12 +35,15 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/config"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
+	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
+	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/probe"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 	"github.com/pete-builds/vcrx-media-server/server/internal/tmdb"
+	"github.com/pete-builds/vcrx-media-server/server/web"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -239,6 +243,15 @@ func serve() error {
 
 	art := artwork.New(a.db, cfg.ArtworkCacheDir(), cfg.FFmpegPath)
 	art.MetadataDir = cfg.MetadataDir()
+	if ov, n, err := overlays(ctx, adm, cfg.Libraries, a.db); err != nil {
+		log.Error("overlays off", "err", err)
+	} else if n > 0 {
+		art.Overlays = ov
+		log.Info("poster overlays on", "libraries", n)
+	}
+	if cfg.IMDbRatings {
+		go (&imdb.Syncer{DB: a.db, Log: log.With("component", "imdb")}).Run(ctx)
+	}
 	srv := &api.Server{
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
@@ -553,7 +566,7 @@ func newEnricher(a *app) *enrich.Enricher {
 
 func metadataCmd(args []string) error {
 	if len(args) == 0 {
-		return errors.New("metadata: want refresh or status")
+		return errors.New("metadata: want refresh, status or imdb")
 	}
 	sub, args := args[0], args[1:]
 	fs := flag.NewFlagSet("metadata "+sub, flag.ContinueOnError)
@@ -570,6 +583,13 @@ func metadataCmd(args []string) error {
 	defer func() { _ = a.db.Close() }()
 	enr := newEnricher(a)
 	switch sub {
+	case "imdb":
+		res, err := (&imdb.Syncer{DB: a.db, Log: a.log}).Sync(ctx, true)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("imdb: %d titles with an IMDb id, %d ratings written, %d removed\n", res.Wanted, res.Updated, res.Removed)
+		return nil
 	case "refresh":
 		if a.cfg.TMDbAPIKey == "" {
 			return errors.New("set VCRX_TMDB_API_KEY (or VCRX_TMDB_API_KEY_FILE) first")
@@ -629,4 +649,33 @@ func prefixes(list []string) ([]netip.Prefix, error) {
 		out = append(out, pfx.Masked())
 	}
 	return out, nil
+}
+
+// overlays builds the poster overlay service from the libraries in vcrx.yaml
+// that list overlays, matched to their database ids by name.
+func overlays(ctx context.Context, adm *admin.Admin, specs []config.LibrarySpec, conn *sql.DB) (*overlay.Service, int, error) {
+	byName := map[string][]overlay.Spec{}
+	for _, l := range specs {
+		if len(l.Overlays) > 0 {
+			byName[strings.ToLower(l.Name)] = l.Overlays
+		}
+	}
+	if len(byName) == 0 {
+		return nil, 0, nil
+	}
+	libs, err := adm.Libraries(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	fontBytes, err := fs.ReadFile(web.Static, "static/fonts/rajdhani_bold.ttf")
+	if err != nil {
+		return nil, 0, err
+	}
+	ov := &overlay.Service{DB: conn, Specs: map[int64][]overlay.Spec{}, Font: fontBytes}
+	for _, l := range libs {
+		if sp := byName[strings.ToLower(l.Name)]; sp != nil {
+			ov.Specs[l.ID] = sp
+		}
+	}
+	return ov, len(ov.Specs), nil
 }

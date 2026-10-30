@@ -14,6 +14,10 @@ server_name: VCRX
 # tokens, so they live in .env, not here). Default: all of them.
 #webhook_events: [play, stop, refused, terminated]
 
+# IMDb ratings for overlays and details, from IMDb's public ratings file,
+# downloaded once a day. IMDb licenses it for personal, non-commercial use.
+#imdb_ratings: true
+
 libraries:
   - name: Movies
     kind: movie
@@ -22,7 +26,13 @@ libraries:
     # movie. title_year: also merge files whose parsed title and year match.
     grouping: folder
     scan_interval_minutes: 60
+    # Badges drawn onto posters, like Kometa overlays. Every client shows them.
+    #overlays:
+    #  - { type: rating, position: top_left, sources: [imdb] }
+    #  - { type: resolution, position: bottom_right }   # 4K only unless resolutions: [...]
   - name: TV
     kind: show
     path: /media/TV
     scan_interval_minutes: 60
+    #overlays:
+    #  - { type: ribbon }   # TOP RATED: IMDb 8.0+ with 25,000+ votes; min_rating, min_votes, text

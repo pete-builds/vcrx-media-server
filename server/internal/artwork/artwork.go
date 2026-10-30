@@ -50,8 +50,16 @@ type Service struct {
 	FFmpeg   string
 	// MetadataDir holds images downloaded from TMDb; empty turns them off.
 	MetadataDir string
+	// Overlays, when set, draws badges onto posters (Kometa style).
+	Overlays Overlayer
 	// sem bounds concurrent ffmpeg frame grabs and resizes.
 	sem chan struct{}
+}
+
+// Overlayer draws badges onto a poster. sig is "" when the item gets none; it
+// goes into the cache key, so a changed rating or a new 4K version redraws.
+type Overlayer interface {
+	Poster(ctx context.Context, itemID int64) (sig string, paint func(*image.RGBA) error, err error)
 }
 
 func New(conn *sql.DB, cacheDir, ffmpeg string) *Service {
@@ -68,6 +76,11 @@ type source struct {
 // Get returns the path of a cached JPEG for the item's artwork at a width bucket,
 // rendering it first if needed. The caller has already checked access.
 func (s *Service) Get(ctx context.Context, itemID int64, kind string, width int) (string, error) {
+	return s.GetWith(ctx, itemID, kind, width, true)
+}
+
+// GetWith is Get with a choice of overlays on posters; false returns the clean image.
+func (s *Service) GetWith(ctx context.Context, itemID int64, kind string, width int, overlays bool) (string, error) {
 	src, err := s.lookup(ctx, itemID, kind)
 	if err != nil {
 		return "", err
@@ -77,7 +90,14 @@ func (s *Service) Get(ctx context.Context, itemID int64, kind string, width int)
 	if err != nil {
 		return "", ErrNoArtwork
 	}
-	key := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d|%d|%v", src.path, fi.Size(), fi.ModTime().UnixNano(), w, src.extract)))
+	var sig string
+	var paint func(*image.RGBA) error
+	if overlays && kind == "poster" && !src.extract && s.Overlays != nil {
+		if sig, paint, err = s.Overlays.Poster(ctx, itemID); err != nil {
+			return "", err
+		}
+	}
+	key := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d|%d|%v|%s", src.path, fi.Size(), fi.ModTime().UnixNano(), w, src.extract, sig)))
 	out := filepath.Join(s.CacheDir, strconv.FormatInt(itemID, 10), kind+"-"+hex.EncodeToString(key[:8])+".jpg")
 	if _, err := os.Stat(out); err == nil {
 		return out, nil
@@ -103,7 +123,7 @@ func (s *Service) Get(ctx context.Context, itemID int64, kind string, width int)
 	if src.extract {
 		err = s.extractFrame(ctx, src, w, out)
 	} else {
-		err = renderResized(src, w, out)
+		err = renderResized(src, w, out, paint)
 	}
 	if err != nil {
 		_ = os.WriteFile(failMarker, []byte(err.Error()), 0o600)
@@ -153,7 +173,7 @@ func (s *Service) lookup(ctx context.Context, itemID int64, kind string) (source
 	return source{}, ErrNoArtwork
 }
 
-func renderResized(src source, w int, out string) error {
+func renderResized(src source, w int, out string, paint func(*image.RGBA) error) error {
 	f, _, err := fsafe.OpenUnder(src.root, src.path)
 	if err != nil {
 		return ErrNoArtwork
@@ -180,6 +200,17 @@ func renderResized(src source, w int, out string) error {
 		dst := image.NewRGBA(image.Rect(0, 0, w, max(h, 1)))
 		draw.CatmullRom.Scale(dst, dst.Bounds(), img, b, draw.Src, nil)
 		img = dst
+	}
+	if paint != nil {
+		rgba, ok := img.(*image.RGBA)
+		if !ok {
+			rgba = image.NewRGBA(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy()))
+			draw.Draw(rgba, rgba.Bounds(), img, img.Bounds().Min, draw.Src)
+		}
+		if err := paint(rgba); err != nil {
+			return err
+		}
+		img = rgba
 	}
 	return writeJPEG(img, out)
 }

@@ -51,13 +51,37 @@ if [ ! -d "$media" ]; then
   clip "$media/TV/Quiet Street/Season 02/Quiet Street - S02E01.mp4" 40 libx264 aac
 fi
 
+# NFO ratings let the poster overlays show without network access.
+nfo() { # dir file rating votes
+  [ -f "$1/$2" ] && return
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<%s><ratings><rating name="imdb" max="10"><value>%s</value><votes>%s</votes></rating></ratings></%s>\n' \
+    "${2%.nfo}" "$3" "$4" "${2%.nfo}" > "$1/$2"
+}
+nfo "$media/Movies/Harbor Lights (2001)" movie.nfo 8.4 310000
+nfo "$media/Movies/Copper Valley (2015)" movie.nfo 6.9 41000
+nfo "$media/Movies/Paper Trail (1998)" movie.nfo 7.7 88000
+nfo "$media/TV/Quiet Street" tvshow.nfo 8.8 120000
+
 cat > "$dir/config/vcrx.yaml" << YAML
 server_name: VCRX Dev
 auto_sign_in_user: dev
 trusted_networks: [127.0.0.0/8, "::1/128"]
 libraries:
-  - { name: Movies, kind: movie, path: $media/Movies, grouping: title_year, scan_interval_minutes: 60 }
-  - { name: TV, kind: show, path: $media/TV, scan_interval_minutes: 60 }
+  - name: Movies
+    kind: movie
+    path: $media/Movies
+    grouping: title_year
+    scan_interval_minutes: 60
+    # The sample clips are 720p, so the resolution badge includes it here.
+    overlays:
+      - { type: rating, position: top_left, sources: [imdb, tmdb] }
+      - { type: resolution, position: bottom_right, resolutions: [4K, 1080p, 720p] }
+  - name: TV
+    kind: show
+    path: $media/TV
+    scan_interval_minutes: 60
+    overlays:
+      - { type: ribbon }
 YAML
 
 export VCRX_CONFIG_DIR="$dir/config" VCRX_CACHE_DIR="$dir/cache" VCRX_MEDIA_ROOTS="$media"

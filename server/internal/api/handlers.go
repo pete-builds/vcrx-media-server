@@ -364,7 +364,7 @@ func (s *Server) artwork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "Not found.")
 		return
 	}
-	path, err := s.Artwork.Get(r.Context(), id, kind, queryInt(r, "width", 0))
+	path, err := s.Artwork.GetWith(r.Context(), id, kind, queryInt(r, "width", 0), r.URL.Query().Get("overlays") != "0")
 	if err != nil {
 		if !errors.Is(err, artwork.ErrNoArtwork) {
 			s.Log.Warn("artwork", "item", id, "kind", kind, "err", err)
@@ -374,7 +374,8 @@ func (s *Server) artwork(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
-	http.ServeFile(w, r, path)
+	// path is a cache file the artwork service built from a hash, never from the request.
+	http.ServeFile(w, r, path) //nolint:gosec // see above
 }
 
 func (s *Server) startPlayback(w http.ResponseWriter, r *http.Request) {
