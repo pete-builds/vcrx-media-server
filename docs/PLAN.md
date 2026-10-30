@@ -46,9 +46,9 @@ Safety rules built in from the first commit:
 - Every playback request writes a session row with the decision and its reason, refusals included.
 - Admin routes answer only from loopback and private LAN ranges unless configured otherwise.
 
-## Version grouping, an open question for Pete
+## Version grouping
 
-The reference says to group files into one item only when they share a folder and a filename prefix. Pete's Movies folder is mostly one release folder per file (`Some Film 2009 2160p HDR .../`, `Some_Film_2009_Extended_.../`), so that rule alone will show duplicates. Each library therefore has a `grouping` setting: `folder` (the reference rule, default) or `title_year` (also group files whose parsed title and year match). Matching on TMDb ids in milestone 5 is the long-term answer. Manual merge and split follow in milestone 3.
+The reference says to group files into one item only when they share a folder and a filename prefix. A library laid out as one release folder per file (`Some Film 2009 2160p HDR .../`, `Some_Film_2009_Extended_.../`) shows duplicates under that rule. Each library therefore has a `grouping` setting: `folder` (the reference rule, and the default for new installs) or `title_year` (also group files whose parsed title and year match). Pete switched his Movies library to `title_year` on 2026-10-30: 392 cards became 384 with no duplicate title and year left, and 4K and 1080p copies now sit as versions of one movie. Matching on TMDb ids in milestone 5 is the long-term answer; manual merge and split follow in milestone 3.
 
 ## Milestones
 
