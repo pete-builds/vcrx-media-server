@@ -15,6 +15,7 @@ import (
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
+	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 )
 
 var (
@@ -66,6 +67,9 @@ type SubtitleSource struct {
 	Language *string `json:"language"`
 	Title    *string `json:"title"`
 	IsForced bool    `json:"is_forced"`
+	// Embedded is true for a track inside the media file. Players that read the
+	// container (Media3) already have it; browsers need the WebVTT copy.
+	Embedded bool `json:"embedded"`
 }
 
 type Session struct {
@@ -76,6 +80,7 @@ type Session struct {
 	Version             catalog.Version  `json:"version"`
 	Stream              Stream           `json:"stream"`
 	Subtitles           []SubtitleSource `json:"subtitles"`
+	WebVTTSubtitles     []SubtitleSource `json:"webvtt_subtitles"`
 	ResumePositionMs    int64            `json:"resume_position_ms"`
 	HeartbeatIntervalMs int64            `json:"heartbeat_interval_ms"`
 }
@@ -224,6 +229,7 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 		SessionID: id, Decision: d.Kind, Reason: d.Reason, ItemID: req.ItemID, Version: v,
 		Stream:              Stream{URL: fmt.Sprintf("/api/v1/versions/%d/file?session=%s", v.ID, id), Protocol: "progressive", MimeType: mime},
 		Subtitles:           sidecars(v),
+		WebVTTSubtitles:     webvtt(v),
 		ResumePositionMs:    resume,
 		HeartbeatIntervalMs: s.heartbeat().Milliseconds(),
 	}
@@ -353,6 +359,20 @@ func sidecars(v catalog.Version) []SubtitleSource {
 		}
 		out = append(out, SubtitleSource{TrackID: t.ID, URL: "/api/v1/subtitles/" + strconv.FormatInt(t.ID, 10), Codec: codec,
 			MimeType: mime, Language: t.Language, Title: t.Title, IsForced: t.IsForced})
+	}
+	return out
+}
+
+// webvtt lists every text subtitle, sidecar or embedded, as a WebVTT URL for
+// clients that read nothing else. Image-based tracks need burn-in and are left out.
+func webvtt(v catalog.Version) []SubtitleSource {
+	out := []SubtitleSource{}
+	for _, t := range v.SubtitleTracks {
+		if t.IsImageBased || !subtitles.TextCodec(s2(t.Codec)) {
+			continue
+		}
+		out = append(out, SubtitleSource{TrackID: t.ID, URL: "/api/v1/subtitles/" + strconv.FormatInt(t.ID, 10) + "?format=vtt",
+			Codec: "webvtt", MimeType: "text/vtt", Language: t.Language, Title: t.Title, IsForced: t.IsForced, Embedded: !t.IsExternal})
 	}
 	return out
 }

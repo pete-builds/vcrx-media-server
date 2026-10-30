@@ -15,6 +15,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
+	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 )
 
 // ScanStarter starts a scan in the background and returns its scan_runs id. It
@@ -33,6 +34,7 @@ type Server struct {
 	Catalog    *catalog.Catalog
 	Playback   *playback.Service
 	Artwork    *artwork.Service
+	Subtitles  *subtitles.Service
 	Admin      *admin.Admin
 	Scans      ScanStarter
 	// LibraryRoots lists roots for the readiness check.
