@@ -153,3 +153,17 @@ func TestLimiter(t *testing.T) {
 		t.Fatal("reset did not clear")
 	}
 }
+
+func TestIPKeyGroupsIPv6ByPrefix(t *testing.T) {
+	for in, want := range map[string]string{
+		"192.168.1.20":            "ip:192.168.1.20",
+		"2001:db8:1:2::a":         "ip:2001:db8:1:2::/64",
+		"2001:db8:1:2:aa:bb:cc:d": "ip:2001:db8:1:2::/64",
+		"::ffff:192.168.1.20":     "ip:192.168.1.20",
+		"unknown":                 "ip:unknown",
+	} {
+		if got := IPKey(in); got != want {
+			t.Errorf("IPKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

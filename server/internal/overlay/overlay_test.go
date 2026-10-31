@@ -1,13 +1,19 @@
 package overlay
 
 import (
+	"context"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/png"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/pete-builds/vcrx-media-server/server/internal/db"
+	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 )
 
 func TestBadgesFollowPetesKometaSetup(t *testing.T) {
@@ -114,5 +120,41 @@ func TestDrawPaintsTheChosenCorners(t *testing.T) {
 		fh, _ := os.Create(out)
 		_ = png.Encode(fh, img)
 		_ = fh.Close()
+	}
+}
+
+// The resolution badge describes only the versions the viewer may play: a
+// friend capped at 1080p does not learn there is a 4K copy from a poster.
+func TestResolutionBadgeFollowsThePolicy(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := db.Open(filepath.Join(dir, "vcrx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := db.Migrate(context.Background(), conn, "", slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO libraries (id, name, kind, root_path, created_at, updated_at) VALUES (1, 'Movies', 'movie', '/m', 0, 0)`,
+		`INSERT INTO items (id, library_id, kind, group_key, title, sort_title, added_at, updated_at) VALUES (1, 1, 'movie', 'k', 'Film', 'Film', 0, 0)`,
+		`INSERT INTO media_versions (item_id, library_id, path, rel_path, size, mtime, height, resolution, hdr_type, probe_status, added_at, updated_at)
+			VALUES (1, 1, '/m/a.mkv', 'a', 1, 0, 2160, '4K', 'hdr10', 'ok', 0, 0)`,
+		`INSERT INTO media_versions (item_id, library_id, path, rel_path, size, mtime, height, resolution, probe_status, added_at, updated_at)
+			VALUES (1, 1, '/m/b.mkv', 'b', 1, 0, 1080, '1080p', 'ok', 0, 0)`,
+	} {
+		if _, err := conn.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := &Service{DB: conn, Specs: map[int64][]Spec{1: {{Type: "resolution", Resolutions: []string{"4K", "1080p"}}}}}
+	for _, c := range []struct {
+		pol  policy.Policy
+		want string
+	}{{policy.Policy{IsAdmin: true}, "4K"}, {policy.Policy{UserID: 2, LibraryIDs: []int64{1}, MaxResolution: "1080p"}, "1080p"}} {
+		bs, _, err := s.Plan(context.Background(), 1, c.pol)
+		if err != nil || len(bs) != 1 || bs[0].Text != c.want {
+			t.Errorf("max resolution %q: badges %+v (%v), want %s", c.pol.MaxResolution, bs, err, c.want)
+		}
 	}
 }

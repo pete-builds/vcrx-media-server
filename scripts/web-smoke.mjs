@@ -120,7 +120,7 @@ async function main() {
     ["/activity/users", "table.list"],
     ["/settings", ".settings h1"],
     ["/settings/libraries", "table.list"],
-    ["/settings/users", ".add-user"],
+    ["/settings/users", ".user-summary"],
   ];
   for (const [path, selector] of pages) {
     console.log(`page #${path}`);

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -63,4 +64,18 @@ func (l *Limiter) prune(key string) []time.Time {
 // users table.
 func UserKey(username string) string { return "user:" + strings.ToLower(username) }
 
-func IPKey(ip string) string { return "ip:" + ip }
+// IPKey is the limiter key for a client address. IPv6 clients are keyed by
+// their /64, the block one home or one host is handed: a client rotating
+// through privacy addresses in it still counts as one.
+func IPKey(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return "ip:" + ip
+	}
+	if a = a.Unmap(); a.Is6() {
+		if p, err := a.Prefix(64); err == nil {
+			return "ip:" + p.String()
+		}
+	}
+	return "ip:" + a.String()
+}

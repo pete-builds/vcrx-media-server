@@ -193,7 +193,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := info(r).IP
-	for _, key := range []string{auth.IPKey(ip), auth.UserKey(req.Username)} {
+	for _, key := range loginKeys(ip, req.Username) {
 		if ok, wait := s.Limiter.Allowed(key); !ok {
 			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 			writeError(w, http.StatusTooManyRequests, "rate_limited", fmt.Sprintf("Too many failed sign-ins. Try again in %d minutes.", int(wait.Minutes())+1))
@@ -203,8 +203,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	dev := req.Device.device()
 	token, sess, err := s.Auth.Login(r.Context(), req.Username, req.Password, dev, ip)
 	if errors.Is(err, auth.ErrInvalidCredentials) {
-		s.Limiter.Fail(auth.IPKey(ip))
-		s.Limiter.Fail(auth.UserKey(req.Username))
+		for _, key := range loginKeys(ip, req.Username) {
+			s.Limiter.Fail(key)
+		}
 		s.Log.Warn("login failed", "ip", ip, "username", clip(req.Username, 64))
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "Wrong username or password.")
 		return
@@ -213,12 +214,29 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	s.Limiter.Reset(auth.UserKey(req.Username))
+	if !IsLAN(ip) {
+		// A LAN sign-in leaves the account's internet count alone: those
+		// failures are someone else's.
+		s.Limiter.Reset(auth.UserKey(req.Username))
+	}
 	s.Log.Info("login", "user", sess.User.Username, "ip", ip, "device", dev.Name, "client", dev.Client)
 	if req.Cookie {
 		s.setSessionCookie(w, r, token)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": sess.ExpiresAt, "user": toUserJSON(sess.User)})
+}
+
+// loginKeys are the limiter buckets a sign-in counts against: always the
+// client's address, and the account too when the client is off the LAN. The
+// account lock stops guessing spread across many addresses on the internet;
+// applied on the LAN as well, anyone on the internet could keep it shut by
+// failing as "pete" every few minutes, and Pete could never sign in at home.
+// Guessing from the LAN stays limited per address.
+func loginKeys(ip, username string) []string {
+	if IsLAN(ip) {
+		return []string{auth.IPKey(ip)}
+	}
+	return []string{auth.IPKey(ip), auth.UserKey(username)}
 }
 
 func clip(s string, n int) string {
@@ -365,7 +383,7 @@ func (s *Server) artwork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "Not found.")
 		return
 	}
-	path, err := s.Artwork.GetWith(r.Context(), id, kind, queryInt(r, "width", 0), r.URL.Query().Get("overlays") != "0")
+	path, err := s.Artwork.Get(r.Context(), ri.Policy, id, kind, queryInt(r, "width", 0), r.URL.Query().Get("overlays") != "0")
 	if err != nil {
 		if !errors.Is(err, artwork.ErrNoArtwork) {
 			s.Log.Warn("artwork", "item", id, "kind", kind, "err", err)
@@ -413,7 +431,20 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &ev) {
 		return
 	}
-	err := s.Playback.RecordEvent(r.Context(), info(r).Session.User.ID, r.PathValue("session_id"), ev)
+	ri := info(r)
+	// Progress lands in the item's watch state, so the caller must still be
+	// allowed the session's version, as for its streams.
+	if ss, err := s.Playback.ForStream(r.Context(), ri.Session.User.ID, r.PathValue("session_id")); err == nil {
+		if ok, err := s.Catalog.CanPlay(r.Context(), ri.Policy, ss.VersionID); err != nil || !ok {
+			if err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			writeError(w, http.StatusNotFound, "not_found", "Unknown playback session.")
+			return
+		}
+	}
+	err := s.Playback.RecordEvent(r.Context(), ri.Session.User.ID, r.PathValue("session_id"), ev)
 	var term *playback.TerminatedError
 	switch {
 	case errors.Is(err, playback.ErrSessionNotFound):
