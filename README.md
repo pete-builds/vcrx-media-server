@@ -124,6 +124,12 @@ All three take `position`: `top_left`, `top_right`, `bottom_left` or `bottom_rig
 
 **IMDb ratings:** set `imdb_ratings: true` and the server downloads IMDb's public ratings file once a day (and only when it changed) and keeps the rating and vote count for every title with an IMDb id. NFO files and TMDb enrichment supply the ids. `vcrx metadata imdb` runs the sync now. IMDb licenses the file for personal, non-commercial use, so it is off by default.
 
+### Trailers and extras
+
+Extras laid out the way Plex reads them work with no internet: `<name>-trailer.mkv` beside a film, and the folders `Trailers`, `Featurettes`, `Behind The Scenes`, `Deleted Scenes`, `Interviews`, `Scenes`, `Shorts` and `Other` inside a film's or show's folder (a season's folder works too and attaches to the show). They never become titles of their own. Each film or show page gets a Trailer button and an Extras row; they play in the VCRX player through the same decision and access rules as the film, so a friend who cannot see a film cannot play its trailer either, and a trailer never moves the film's resume point. A show's `theme.mp3` plays quietly on its TV page (and on the web page when you press Theme music). Like any file, an extra that disappears is kept for 30 days before it is forgotten.
+
+**YouTube trailers (optional):** with a TMDb key, `trailers_youtube: true` (or `VCRX_TRAILERS_YOUTUBE=true`) looks up each title's official trailer on TMDb and offers it when there is no local one. The web app plays it in YouTube's no-cookie player (the only outside frame the web app's security policy then allows, and only with this setting on); the TV app opens the YouTube app. Off by default, because playing one needs the internet and YouTube then sees the request.
+
 ### Collections
 
 Every film series (a TMDb collection) with two or more of its films in a movie library becomes a collection there, in release order, like Kometa's `franchise` default. The membership is rebuilt every 30 minutes, so a new sequel joins on its own; a series that drops to one film goes away. Names come from TMDb once, so this needs `VCRX_TMDB_API_KEY`; without it, series wait rather than get a made-up name. `vcrx metadata collections` builds them now. The web app shows them under a library's Collections button and links each film's page to its series. Libraries also filter by genre and decade.
@@ -215,7 +221,7 @@ Any other media server on the same host keeps running untouched; VCRX only reads
 
 ## Privacy
 
-VCRX sends nothing anywhere unless you add a TMDb key. No telemetry, no usage reports, no update checks. With a key, the server sends TMDb the titles and years it searches for and the TMDb ids it looks up, and downloads images from TMDb; it sends nothing about users or what they watch. Activity history (who played what, from which device and IP) stays in your database.
+VCRX sends nothing anywhere unless you add a TMDb key. No telemetry, no usage reports, no update checks. With a key, the server sends TMDb the titles and years it searches for and the TMDb ids it looks up, and downloads images from TMDb; it sends nothing about users or what they watch. With `trailers_youtube` on, pressing a YouTube trailer's button makes that browser or TV fetch it from YouTube, which then sees that device's address; the web app sends YouTube only its own origin as the referrer, never the page. Activity history (who played what, from which device and IP) stays in your database.
 
 ## Development
 

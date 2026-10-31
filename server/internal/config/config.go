@@ -97,6 +97,10 @@ type Config struct {
 	TMDbLanguage string `yaml:"tmdb_language"`
 	// TMDbCountry picks the content rating shown, e.g. US for PG-13.
 	TMDbCountry string `yaml:"tmdb_country"`
+	// TrailersYouTube looks up each title's official YouTube trailer on TMDb and
+	// offers it when there is no local trailer file. Off by default: it needs the
+	// internet to play, and VCRX works without it. Needs a TMDb key.
+	TrailersYouTube bool `yaml:"trailers_youtube"`
 
 	Libraries []LibrarySpec `yaml:"libraries"`
 
@@ -191,6 +195,7 @@ func Load() (Config, error) {
 	str("VCRX_LOG_FORMAT", &c.LogFormat)
 	boolean("VCRX_ADMIN_ALLOW_REMOTE", &c.AdminAllowRemote)
 	boolean("VCRX_IMDB_RATINGS", &c.IMDbRatings)
+	boolean("VCRX_TRAILERS_YOUTUBE", &c.TrailersYouTube)
 	list("VCRX_TRUSTED_PROXIES", &c.TrustedProxies)
 	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
 	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)
@@ -288,6 +293,10 @@ func (c *Config) validate() error {
 	}
 	return errors.Join(errs...)
 }
+
+// YouTubeTrailers reports whether YouTube trailers are on: asked for, and a
+// TMDb key to look them up with.
+func (c Config) YouTubeTrailers() bool { return c.TrailersYouTube && c.TMDbAPIKey != "" }
 
 func (c Config) Addr() string { return fmt.Sprintf("%s:%d", c.Bind, c.Port) }
 

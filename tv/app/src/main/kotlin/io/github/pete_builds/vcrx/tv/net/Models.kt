@@ -20,6 +20,8 @@ data class ServerInfo(
     @SerialName("api_version") val apiVersion: Int = 0,
     /** True when this device's network may sign in without a password (POST /api/v1/auth/auto). */
     @SerialName("auto_sign_in") val autoSignIn: Boolean = false,
+    /** True when the admin turned on YouTube trailers, so details may carry one with source "youtube". */
+    @SerialName("trailers_youtube") val trailersYoutube: Boolean = false,
 )
 
 @Serializable
@@ -149,7 +151,33 @@ data class Item(
     @SerialName("next_episode") val nextEpisode: Item? = null,
     /** Collections this item is in, such as a film series. */
     val collections: List<CollectionRef> = emptyList(),
+    /** A movie's or show's local trailers, featurettes and the like, trailers first. */
+    val extras: List<Extra> = emptyList(),
+    /** What the Trailer button plays: a local extra first, else YouTube when the server offers it. */
+    val trailer: Trailer? = null,
+    /** A show's theme.mp3. */
+    @SerialName("theme_music") val themeMusic: ThemeMusic? = null,
 )
+
+@Serializable
+data class Extra(
+    val id: Long,
+    val kind: String = "other",
+    val title: String = "",
+    @SerialName("duration_ms") val durationMs: Long? = null,
+)
+
+@Serializable
+data class Trailer(
+    /** "local" or "youtube". */
+    val source: String,
+    val title: String = "Trailer",
+    @SerialName("extra_id") val extraId: Long? = null,
+    @SerialName("youtube_key") val youtubeKey: String? = null,
+)
+
+@Serializable
+data class ThemeMusic(val id: Long, val url: String)
 
 @Serializable
 data class CollectionRef(val id: Long, val name: String)
@@ -225,6 +253,8 @@ data class PlaybackRequest(
     @SerialName("version_id") val versionId: Long? = null,
     @SerialName("start_position_ms") val startPositionMs: Long? = null,
     val capabilities: Capabilities,
+    /** Plays one of the item's extras (a trailer) instead of a version. */
+    @SerialName("extra_id") val extraId: Long? = null,
 )
 
 @Serializable

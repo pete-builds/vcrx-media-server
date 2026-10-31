@@ -22,6 +22,11 @@ server_name: VCRX
 # downloaded once a day. IMDb licenses it for personal, non-commercial use.
 #imdb_ratings: true
 
+# Trailers from local files (Movie-trailer.mkv, a Trailers folder) always work,
+# offline. With a TMDb key, this also offers each title's official YouTube
+# trailer when there is no local one; playing it needs the internet.
+#trailers_youtube: true
+
 # Radarr and Sonarr webhooks find the folder by name in a library. If they see
 # the NAS at another path and folder names differ, map their prefix to VCRX's.
 #arr_path_map:

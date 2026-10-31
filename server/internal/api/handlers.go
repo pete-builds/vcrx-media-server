@@ -93,7 +93,7 @@ func (s *Server) openapi(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serverInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": s.ServerName, "product": "vcrx-media-server", "version": s.Version, "api_version": 1,
-		"auto_sign_in": s.autoSignIn(info(r).IP),
+		"auto_sign_in": s.autoSignIn(info(r).IP), "trailers_youtube": s.TrailersYouTube,
 	})
 }
 
@@ -399,7 +399,7 @@ func (s *Server) startPlayback(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if req.ItemID <= 0 {
+	if req.ItemID <= 0 && req.ExtraID == nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "item_id is required.")
 		return
 	}

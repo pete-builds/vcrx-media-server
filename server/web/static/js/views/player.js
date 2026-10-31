@@ -22,6 +22,8 @@ export async function playerView({ match, params }) {
   const body = { item_id: itemId, capabilities: capabilities() };
   if (params.get("version")) body.version_id = Number(params.get("version"));
   if (params.get("start") !== null) body.start_position_ms = Number(params.get("start")) || 0;
+  // A trailer or other extra of the item (views/extras.js) plays from its start.
+  if (params.get("extra")) Object.assign(body, { extra_id: Number(params.get("extra")), start_position_ms: 0 });
 
   const back = () => (history.length > 1 ? history.back() : (location.hash = `#/item/${itemId}`));
   const backBtn = h("button", { class: "btn btn-small", type: "button", onclick: back, "aria-label": "Back" }, icon("back"), "Back");
@@ -40,7 +42,8 @@ export async function playerView({ match, params }) {
   const hls = session.stream.protocol === "hls";
   const converted = hls || session.stream.protocol === "fmp4";
   const totalMs = session.version.duration_ms || 0;
-  const title = item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)} · ${item.title}` : item.title;
+  const playingExtra = body.extra_id ? (item.extras || []).find((x) => x.id === body.extra_id) : null;
+  const title = playingExtra ? `${item.title} · ${playingExtra.title}` : item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)} · ${item.title}` : item.title;
   const video = h("video", { autoplay: true, playsinline: true, preload: "auto" });
   video.controls = !converted;
   const status = h("div", { class: "status", hidden: true });

@@ -19,6 +19,14 @@ class SettingsStore(context: Context) {
         get() = prefs.getString(KEY_USERNAME, null)
         set(value) = prefs.edit().putString(KEY_USERNAME, value).apply()
 
+    /**
+     * A show's theme.mp3 plays quietly on its details screen. On by default; the
+     * Settings screen's toggle, when it has one, writes this.
+     */
+    var themeMusic: Boolean
+        get() = prefs.getBoolean(KEY_THEME_MUSIC, true)
+        set(value) = prefs.edit().putBoolean(KEY_THEME_MUSIC, value).apply()
+
     /** Random, generated on first launch, stable until the app's data is cleared. */
     val deviceId: String
         @Synchronized get() {
@@ -33,5 +41,6 @@ class SettingsStore(context: Context) {
         const val KEY_SERVER_NAME = "server_name"
         const val KEY_USERNAME = "username"
         const val KEY_DEVICE_ID = "device_id"
+        const val KEY_THEME_MUSIC = "theme_music"
     }
 }

@@ -15,6 +15,9 @@ var ErrNotFound = errors.New("not found")
 
 type Catalog struct {
 	DB *sql.DB
+	// TrailersYouTube offers the YouTube trailer TMDb lists when an item has no
+	// local one (the trailers_youtube setting, which needs a TMDb key).
+	TrailersYouTube bool
 }
 
 // each calls fn for every row and always closes rows.
