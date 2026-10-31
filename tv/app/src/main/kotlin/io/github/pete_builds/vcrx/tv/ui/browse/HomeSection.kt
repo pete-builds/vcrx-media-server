@@ -55,7 +55,7 @@ class HomeViewModel(private val graph: AppGraph) : ViewModel() {
         if (!quiet) state = LoadState.Loading
         viewModelScope.launch {
             state = try {
-                LoadState.Ready(graph.api.home().filter { it.items.isNotEmpty() }).also {
+                LoadState.Ready(HomeRows.toShow(graph.api.home())).also {
                     loadedAt = SystemClock.elapsedRealtime()
                 }
             } catch (e: ApiException) {
@@ -101,8 +101,7 @@ fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
     }
 }
 
-private fun shapeFor(row: HomeRow): CardShape =
-    if (row.id == "continue_watching" || row.id == "recently_added_episodes") CardShape.Wide else CardShape.Poster
+private fun shapeFor(row: HomeRow): CardShape = if (HomeRows.wide(row)) CardShape.Wide else CardShape.Poster
 
 @Composable
 private fun HomeRowView(row: HomeRow, focus: BrowseFocus, firstRow: Boolean) {
@@ -120,9 +119,10 @@ private fun HomeRowView(row: HomeRow, focus: BrowseFocus, firstRow: Boolean) {
                     shape = shapeFor(row),
                     onClick = {
                         focus.restoreItemId = item.id
+                        focus.restoreRowId = row.id
                         actions.openDetails(item.id)
                     },
-                    focusModifier = itemFocus(focus, item.id, first = firstRow && index == 0),
+                    focusModifier = itemFocus(focus, item.id, first = firstRow && index == 0, rowId = row.id),
                 )
             }
         }
@@ -134,15 +134,18 @@ private fun HomeRowView(row: HomeRow, focus: BrowseFocus, firstRow: Boolean) {
  * card that opened Details, or the first card after the rail handed focus over.
  */
 @Composable
-fun itemFocus(focus: BrowseFocus, itemId: Long, first: Boolean): Modifier {
+fun itemFocus(focus: BrowseFocus, itemId: Long, first: Boolean, rowId: String? = null): Modifier {
     val requester = remember { FocusRequester() }
-    val restoring = focus.restoreItemId == itemId
+    val restoring = HomeRows.restores(focus.restoreItemId, focus.restoreRowId, itemId, rowId)
     val take = restoring || (first && focus.toContent && focus.restoreItemId == null)
     LaunchedEffect(take) {
         if (take) {
             runCatching { requester.requestFocus() }
             focus.toContent = false
-            if (restoring) focus.restoreItemId = null
+            if (restoring) {
+                focus.restoreItemId = null
+                focus.restoreRowId = null
+            }
         }
     }
     return Modifier.focusRequester(requester)
@@ -156,6 +159,7 @@ fun GridCard(item: Item, index: Int, focus: BrowseFocus) {
         item = item,
         onClick = {
             focus.restoreItemId = item.id
+            focus.restoreRowId = null
             actions.openDetails(item.id)
         },
         // Grids size their own cells, so the card fills the cell.

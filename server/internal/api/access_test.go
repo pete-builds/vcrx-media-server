@@ -49,6 +49,19 @@ var noItemRoutes = map[string]string{
 	"POST /api/v1/auth/logout": "ends the caller's own session",
 	"GET /api/v1/me":           "the caller's own account",
 	"GET /api/v1/speedtest":    "random filler bytes for timing the connection; reads nothing from the library",
+	// The Home layout is the caller's own list of row kinds ("trending",
+	// "seasonal") with fixed names and descriptions; it names no titles.
+	"GET /api/v1/layout/home":    "the caller's own Home row order, row kinds only",
+	"PUT /api/v1/layout/home":    "saves the caller's own Home row order, row kinds only",
+	"DELETE /api/v1/layout/home": "resets the caller's own Home row order, row kinds only",
+}
+
+// listParamRoutes take a path parameter that is not an item, version, session
+// or other id the policy can hide, so a list probe (hides) may cover them
+// instead of a 404. Keep this narrow: a route whose parameter names a title,
+// file or stream must prove it answers 404 for a hidden one.
+var listParamRoutes = map[string]string{
+	"GET /api/v1/rows/{row_id}": "a Home row id (trending, genre:Drama); the row lists titles under the caller's policy",
 }
 
 type probe struct {
@@ -406,6 +419,12 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 		at("GET /api/v1/items/{item_id}", f.movieID).hides("film.2160p", `"4K"`),
 		at("GET /api/v1/items/{item_id}", f.showID).hides(`"child_count":2`),
 		at("GET /api/v1/items/{item_id}/children", f.showID).hides("Season 2"),
+		// Home's See all: a library's row lists only what the friend may see,
+		// a row in a library they lose is gone, and a row named after a
+		// hidden title does not exist for them.
+		at("GET /api/v1/rows/{row_id}", fmt.Sprintf("recently_added_movies:%d", w.movies)).hides("Zebra Night", "Zebra Rated"),
+		at("GET /api/v1/rows/{row_id}", fmt.Sprintf("recently_added_movies:%d", w.vault)),
+		at("GET /api/v1/rows/{row_id}", fmt.Sprintf("because_you_watched:%d", w.horrorMovie)),
 	)
 	return ps
 }
@@ -449,6 +468,8 @@ func checkCoverage(t *testing.T, routes []route, ps []probe) {
 			continue
 		}
 		switch {
+		case strings.Contains(rt.Path, "{") && listParamRoutes[key] != "" && listed[key]:
+			// Covered by a list probe; see listParamRoutes.
 		case strings.Contains(rt.Path, "{") && !hidden[key]:
 			t.Errorf("%s is not in the access walk: add a probe that calls it as the friend for something their policy hides (want 404), and make the handler apply info(r).Policy", key)
 		case !hidden[key] && !listed[key]:

@@ -7,6 +7,11 @@
 # titles, test patterns and tones) and creates the admin "dev" with the password
 # "devpassword". The server listens on 127.0.0.1 only, port $VCRX_PORT (3751),
 # and signs this machine in without a password.
+#
+# It is a development build (-tags vcrxdev): Home's seasonal rows go by
+# VCRX_DEV_HOME_DATE (default 2026-10-31, so the Halloween row shows on any
+# day), and "vcrx dev-seed" gives the sample library a play history for
+# Trending, Most Watched and Because You Watched. Release builds have neither.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -87,6 +92,20 @@ if [ ! -f "$kettle" ]; then
     -c:v mpeg4 -q:v 4 -g 240 -c:a libmp3lame -ac 2 "$kettle"
 fi
 
+# Small extra films and shows, so Home has enough titles for its rows (a row
+# needs four): horror for the Halloween row, a family Halloween film, comedy,
+# action. Tiny and short, to keep the first run quick.
+tiny() { # out
+  [ -f "$1" ] && return
+  mkdir -p "$(dirname "$1")"
+  ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=24:duration=4" -f lavfi -i "sine=frequency=500:duration=4" \
+    -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -ac 2 "$1"
+}
+extra_movies=("Hollow Pines (1987)" "The Lantern Hour (1994)" "Grave Weather (2003)" "Midnight Orchard (2019)"
+  "Pumpkin Patrol (2012)" "Starlight Diner (1995)" "Second Helping (2009)" "Iron Meridian (2016)")
+for m in "${extra_movies[@]}"; do tiny "$media/Movies/$m/$m.mp4"; done
+for s in "Lamplight Lane" "North Ferry" "Signal Hill"; do tiny "$media/TV/$s/Season 01/$s - S01E01.mp4"; done
+
 # Extras: a trailer beside a film, two extras folders, and a show's theme
 # music. None may become a title; they attach to Harbor Lights and Quiet Street.
 harbor="$media/Movies/Harbor Lights (2001)"
@@ -97,17 +116,31 @@ theme="$media/TV/Quiet Street/theme.mp3"
 [ -f "$theme" ] || ffmpeg -loglevel error -y -f lavfi -i "sine=frequency=262:duration=12" -c:a libmp3lame -q:a 6 "$theme"
 
 # NFO ratings let the poster overlays show without network access; the optional
-# fifth argument is more NFO XML, such as an invented cast.
+# fifth argument is more NFO XML, such as an invented cast, genres and plots.
 nfo() { # dir file rating votes [extra-xml]
   [ -f "$1/$2" ] && return
   printf '<?xml version="1.0" encoding="UTF-8"?>\n<%s><ratings><rating name="imdb" max="10"><value>%s</value><votes>%s</votes></rating></ratings>%s</%s>\n' \
     "${2%.nfo}" "$3" "$4" "${5:-}" "${2%.nfo}" > "$1/$2"
 }
 nfo "$media/Movies/Harbor Lights (2001)" movie.nfo 8.4 310000 \
-  '<actor><name>Mara Quill</name><role>Lighthouse Keeper</role><order>0</order></actor><actor><name>Tomas Brandt</name><role>Harbor Master</role><order>1</order></actor><actor><name>June Okafor</name><order>2</order></actor>'
-nfo "$media/Movies/Copper Valley (2015)" movie.nfo 6.9 41000
-nfo "$media/Movies/Paper Trail (1998)" movie.nfo 7.7 88000
-nfo "$media/TV/Quiet Street" tvshow.nfo 8.8 120000
+  '<actor><name>Mara Quill</name><role>Lighthouse Keeper</role><order>0</order></actor><actor><name>Tomas Brandt</name><role>Harbor Master</role><order>1</order></actor><actor><name>June Okafor</name><order>2</order></actor><genre>Drama</genre><genre>Mystery</genre><director>Ines Calloway</director><premiered>2001-03-09</premiered>'
+nfo "$media/Movies/Copper Valley (2015)" movie.nfo 6.9 41000 '<genre>Western</genre><genre>Drama</genre><director>Ines Calloway</director><premiered>2015-08-21</premiered>'
+nfo "$media/Movies/Paper Trail (1998)" movie.nfo 7.7 88000 '<genre>Drama</genre><genre>Thriller</genre><genre>Mystery</genre><premiered>1998-05-01</premiered>'
+nfo "$media/Movies/River Line (2011)" movie.nfo 7.3 64000 '<genre>Drama</genre><genre>Crime</genre><director>Ines Calloway</director><premiered>2011-09-30</premiered>'
+nfo "$media/Movies/Twin Rivers (2018)" movie.nfo 7.0 27000 '<genre>Drama</genre><genre>Mystery</genre><premiered>2018-02-16</premiered>'
+nfo "$media/Movies/Night Garden (2020)" movie.nfo 6.7 19000 '<genre>Fantasy</genre><genre>Drama</genre><genre>Mystery</genre><premiered>2020-10-09</premiered>'
+nfo "$media/Movies/Hollow Pines (1987)" movie.nfo 7.1 52000 '<genre>Horror</genre><plot>A ranger hears something in the woods on Halloween night.</plot><premiered>1987-10-23</premiered>'
+nfo "$media/Movies/The Lantern Hour (1994)" movie.nfo 7.4 91000 '<genre>Horror</genre><genre>Mystery</genre><plot>A haunted lighthouse keeps its own hours.</plot><premiered>1994-10-14</premiered>'
+nfo "$media/Movies/Grave Weather (2003)" movie.nfo 6.8 40000 '<genre>Horror</genre><genre>Thriller</genre><premiered>2003-11-07</premiered>'
+nfo "$media/Movies/Midnight Orchard (2019)" movie.nfo 7.0 33000 '<genre>Thriller</genre><premiered>2019-09-13</premiered>'
+nfo "$media/Movies/Pumpkin Patrol (2012)" movie.nfo 6.6 12000 '<genre>Family</genre><genre>Animation</genre><mpaa>G</mpaa><plot>Three kids in costume save Halloween.</plot><premiered>2012-10-05</premiered>'
+nfo "$media/Movies/Starlight Diner (1995)" movie.nfo 7.2 61000 '<genre>Comedy</genre><premiered>1995-06-02</premiered>'
+nfo "$media/Movies/Second Helping (2009)" movie.nfo 6.5 22000 '<genre>Comedy</genre><genre>Romance</genre><premiered>2009-02-06</premiered>'
+nfo "$media/Movies/Iron Meridian (2016)" movie.nfo 7.6 250000 '<genre>Action</genre><genre>Adventure</genre><premiered>2016-07-01</premiered>'
+nfo "$media/TV/Quiet Street" tvshow.nfo 8.8 120000 '<genre>Drama</genre>'
+nfo "$media/TV/Lamplight Lane" tvshow.nfo 7.9 45000 '<genre>Mystery</genre>'
+nfo "$media/TV/North Ferry" tvshow.nfo 8.1 67000 '<genre>Drama</genre>'
+nfo "$media/TV/Signal Hill" tvshow.nfo 7.4 21000 '<genre>Comedy</genre>'
 
 cat > "$dir/config/vcrx.yaml" << YAML
 server_name: VCRX Dev
@@ -133,13 +166,14 @@ YAML
 
 export VCRX_CONFIG_DIR="$dir/config" VCRX_CACHE_DIR="$dir/cache" VCRX_MEDIA_ROOTS="$media"
 export VCRX_BIND=127.0.0.1 VCRX_PORT="$port" VCRX_LOG_FORMAT="${VCRX_LOG_FORMAT:-text}"
+export VCRX_DEV_HOME_DATE="${VCRX_DEV_HOME_DATE:-2026-10-31}"
 # Subtitle search answers from an offline stub with invented results, so
 # neither this script nor CI ever calls OpenSubtitles. 0 turns search off.
 export VCRX_OPENSUBTITLES_STUB="${VCRX_OPENSUBTITLES_STUB:-1}"
 # Serve the web app from the source tree, so an edit shows on reload.
 export VCRX_WEB_DIR="$repo/server/web/static"
 cd "$repo/server"
-go build -o "$dir/vcrx" ./cmd/vcrx
+go build -tags vcrxdev -o "$dir/vcrx" ./cmd/vcrx
 # Capture first: under pipefail, grep -q exiting at its first match would
 # SIGPIPE the lister and fail the check once there is more than one user.
 users="$("$dir/vcrx" user list 2> /dev/null || true)"
@@ -156,5 +190,10 @@ for _ in $(seq 1 50); do
   curl -fsS "http://127.0.0.1:$port/healthz" > /dev/null 2>&1 && break
   sleep 0.2
 done
-for lib in Movies TV; do "$dir/vcrx" library scan -name "$lib" || true; done
+# CI starts the smoke test once both scan lines are printed, so hold them
+# until the play history is seeded too.
+scanned=""
+for lib in Movies TV; do scanned+="$("$dir/vcrx" library scan -name "$lib" || true)"$'\n'; done
+"$dir/vcrx" dev-seed || echo "dev-server: dev-seed failed; Home has fewer rows" >&2
+printf '%s' "$scanned"
 wait "$server"

@@ -7,6 +7,7 @@ import { h, errorBox, skeleton } from "./dom.js";
 import { homeView } from "./views/home.js";
 import { libraryView } from "./views/library.js";
 import { libraryCollectionsView, collectionView } from "./views/collections.js";
+import { rowView } from "./views/rows.js";
 import { itemView } from "./views/item.js";
 import { searchView } from "./views/search.js";
 import { playerView } from "./views/player.js";
@@ -23,11 +24,12 @@ const routes = [
   [/^\/library\/(\d+)$/, () => libraryView],
   [/^\/library\/(\d+)\/collections$/, () => libraryCollectionsView],
   [/^\/collection\/(\d+)$/, () => collectionView],
+  [/^\/row\/([^/]+)$/, () => rowView],
   [/^\/item\/(\d+)$/, () => itemView],
   [/^\/search$/, () => searchView],
   [/^\/play\/(\d+)$/, () => playerView],
   [/^\/activity(?:\/(now|history|stats|users))?$/, () => activityView],
-  [/^\/settings(?:\/(account|libraries|users|newsletter))?$/, () => settingsView],
+  [/^\/settings(?:\/(account|home|libraries|users|newsletter))?$/, () => settingsView],
   [/^\/login$/, () => loginView],
 ];
 

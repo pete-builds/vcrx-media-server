@@ -151,6 +151,8 @@ data class Item(
     @SerialName("next_episode") val nextEpisode: Item? = null,
     /** Collections this item is in, such as a film series. */
     val collections: List<CollectionRef> = emptyList(),
+    /** A short line some Home rows add, such as "3 new episodes"; null elsewhere. */
+    val note: String? = null,
     /** A movie's or show's local trailers, featurettes and the like, trailers first. */
     val extras: List<Extra> = emptyList(),
     /** What the Trailer button plays: a local extra first, else YouTube when the server offers it. */
@@ -202,16 +204,45 @@ data class ItemPage(
 @Serializable
 data class ItemsResponse(val items: List<Item> = emptyList())
 
+/**
+ * One Home row. The server decides which rows exist and their order (the
+ * user's Home layout); the app draws whatever comes. [id] is stable and is the
+ * key for GET /api/v1/rows/{id} when [seeAll] is true.
+ */
 @Serializable
 data class HomeRow(
     val id: String,
     val title: String,
+    val kind: String = "",
     @SerialName("library_id") val libraryId: Long? = null,
+    @SerialName("see_all") val seeAll: Boolean = false,
     val items: List<Item> = emptyList(),
 )
 
 @Serializable
 data class HomeResponse(val rows: List<HomeRow> = emptyList())
+
+/** One slot of the Home layout: a kind of row, whether it shows, and its place. */
+@Serializable
+data class HomeLayoutRow(
+    val key: String,
+    val title: String = "",
+    val description: String = "",
+    val enabled: Boolean = true,
+)
+
+/** The caller's Home layout; [source] is "user", "server" or "default". */
+@Serializable
+data class HomeLayout(
+    val rows: List<HomeLayoutRow> = emptyList(),
+    val source: String = "default",
+)
+
+@Serializable
+data class HomeLayoutEntry(val key: String, val enabled: Boolean)
+
+@Serializable
+data class HomeLayoutInput(val rows: List<HomeLayoutEntry>)
 
 @Serializable
 data class SetWatchedRequest(val played: Boolean)
