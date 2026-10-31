@@ -312,6 +312,10 @@ class PlaybackController(
             phase = Phase.Failed("The server sent a stream address this app cannot use.", false)
             return
         }
+        // TODO(#41): once #41 lands, the session carries subtitle_offset_ms (the viewer's
+        // subtitle delay). Apply it to these side-loaded tracks and to embedded ones (for
+        // example by shifting the cues the player outputs), but never to the WebVTT URLs
+        // used for converted streams in ConvertedSubtitles: the server already shifts those.
         val subtitles = created.subtitles.mapNotNull { sub ->
             val url = graph.api.absoluteUrl(sub.url) ?: return@mapNotNull null
             MediaItem.SubtitleConfiguration.Builder(Uri.parse(url))
