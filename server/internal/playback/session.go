@@ -82,6 +82,14 @@ type SubtitleSource struct {
 	// Embedded is true for a track inside the media file. Players that read the
 	// container (Media3) already have it; browsers need the WebVTT copy.
 	Embedded bool `json:"embedded"`
+	// Downloaded is true for a subtitle the server fetched from OpenSubtitles.
+	Downloaded bool `json:"downloaded"`
+}
+
+// SubtitleSearch tells a player whether to offer "Search for subtitles".
+type SubtitleSearch struct {
+	Enabled     bool `json:"enabled"`
+	CanDownload bool `json:"can_download"`
 }
 
 type Session struct {
@@ -95,6 +103,11 @@ type Session struct {
 	WebVTTSubtitles     []SubtitleSource `json:"webvtt_subtitles"`
 	ResumePositionMs    int64            `json:"resume_position_ms"`
 	HeartbeatIntervalMs int64            `json:"heartbeat_interval_ms"`
+	// SubtitleOffsetMs is this user's subtitle delay for this version: positive
+	// shows cues later. WebVTT URLs are already shifted by it; a player that
+	// side-loads the raw files or reads embedded tracks applies it itself.
+	SubtitleOffsetMs int64          `json:"subtitle_offset_ms"`
+	SubtitleSearch   SubtitleSearch `json:"subtitle_search"`
 }
 
 type Event struct {
@@ -155,8 +168,18 @@ func newID() string {
 // Start chooses a version and a decision, records the session, and returns it. A
 // refusal is recorded too, and returned with a nil error.
 func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req StartRequest) (*Session, *Refusal, error) {
+	// The item itself first: its library, labels and rating. Checking only the
+	// versions would let a friend start a title they cannot see and read its
+	// file name and tracks from the answer.
+	visible, err := s.Catalog.Visible(ctx, pol, req.ItemID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !visible {
+		return nil, nil, catalog.ErrNotFound
+	}
 	var kind, title string
-	err := s.DB.QueryRowContext(ctx, `SELECT kind, title FROM items WHERE id = ?`, req.ItemID).Scan(&kind, &title)
+	err = s.DB.QueryRowContext(ctx, `SELECT kind, title FROM items WHERE id = ?`, req.ItemID).Scan(&kind, &title)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, catalog.ErrNotFound
 	}
@@ -401,7 +424,7 @@ func sidecars(v catalog.Version) []SubtitleSource {
 			continue
 		}
 		out = append(out, SubtitleSource{TrackID: t.ID, URL: "/api/v1/subtitles/" + strconv.FormatInt(t.ID, 10), Codec: codec,
-			MimeType: mime, Language: t.Language, Title: t.Title, IsForced: t.IsForced})
+			MimeType: mime, Language: t.Language, Title: t.Title, IsForced: t.IsForced, Downloaded: t.IsDownloaded})
 	}
 	return out
 }
@@ -415,7 +438,7 @@ func webvtt(v catalog.Version) []SubtitleSource {
 			continue
 		}
 		out = append(out, SubtitleSource{TrackID: t.ID, URL: "/api/v1/subtitles/" + strconv.FormatInt(t.ID, 10) + "?format=vtt",
-			Codec: "webvtt", MimeType: "text/vtt", Language: t.Language, Title: t.Title, IsForced: t.IsForced, Embedded: !t.IsExternal})
+			Codec: "webvtt", MimeType: "text/vtt", Language: t.Language, Title: t.Title, IsForced: t.IsForced, Embedded: !t.IsExternal, Downloaded: t.IsDownloaded})
 	}
 	return out
 }

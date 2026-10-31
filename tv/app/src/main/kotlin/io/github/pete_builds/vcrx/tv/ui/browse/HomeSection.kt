@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18,15 +19,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewModelScope
 import androidx.tv.material3.MaterialTheme
 import io.github.pete_builds.vcrx.tv.AppGraph
+import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.HomeRow
 import io.github.pete_builds.vcrx.tv.net.Item
+import io.github.pete_builds.vcrx.tv.settings.HomeLayout
 import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
 import io.github.pete_builds.vcrx.tv.ui.components.CardShape
 import io.github.pete_builds.vcrx.tv.ui.components.EmptyView
@@ -68,13 +72,18 @@ class HomeViewModel(private val graph: AppGraph) : ViewModel() {
 @Composable
 fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
     val vm = graphViewModel(key = HOME) { HomeViewModel(it) }
+    // Settings > Home screen: hidden rows left out, the rest in the viewer's order.
+    val homePrefs by LocalContext.current.graph.preferences.flow.collectAsState()
     // Continue Watching changes after playback, which happens in another activity.
     LifecycleResumeEffect(vm) {
         vm.refreshIfStale()
         onPauseOrDispose { }
     }
-    LoadStateContent(vm.state, onRetry = { vm.load(); onRetry() }) { rows ->
-        if (rows.isEmpty()) {
+    LoadStateContent(vm.state, onRetry = { vm.load(); onRetry() }) { loaded ->
+        val rows = HomeLayout.arrange(loaded, homePrefs.home) { it.id }
+        if (rows.isEmpty() && loaded.isNotEmpty()) {
+            EmptyView("Every row is hidden", "Show them again in Settings, Home screen.")
+        } else if (rows.isEmpty()) {
             EmptyView(
                 "Nothing here yet",
                 "Add a library on the server and scan it, or ask the server admin to grant you one.",

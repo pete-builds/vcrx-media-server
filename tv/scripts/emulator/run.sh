@@ -96,9 +96,16 @@ shot 09-library
 key KEYCODE_BACK KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
 sleep 3
 shot 10-settings
-key KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
+# Subtitles is the first page; its switch is the first row, focused.
+key KEYCODE_DPAD_CENTER
+sleep 3
+shot 11-settings-subtitles
+key KEYCODE_BACK
+sleep 2
+# About and diagnostics is the seventh page.
+key KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
 sleep 6
-shot 11-about
+shot 12-about
 
 adb logcat -d -b crash > "$out/crash.log"
 # Only this app's lines and runtime errors; the rest of the system log is noise.

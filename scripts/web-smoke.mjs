@@ -179,7 +179,7 @@ async function main() {
     ["/activity/users", "table.list"],
     ["/settings", ".settings h1"],
     ["/settings/libraries", "table.list"],
-    ["/settings/users", ".add-user"],
+    ["/settings/users", ".user-summary"],
     ["/settings/home", ".layout-list li"],
     ["/row/trending", ".grid .card"],
     ["/settings/newsletter", ".newsletter-form"],
@@ -200,7 +200,10 @@ async function main() {
     if (!res.found) fail(`#${path}`, `no ${selector}`);
     if (res.error) fail(`#${path}`, `shows an error box: ${res.text.slice(0, 160).replace(/\n/g, " ")}`);
     const junk = res.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
-    if (junk) fail(`#${path}`, `shows "${junk[0]}"`);
+    if (junk) {
+      const at = res.text.slice(Math.max(0, junk.index - 60), junk.index + 20).replace(/\s+/g, " ");
+      fail(`#${path}`, `shows "${junk[0]}" in "...${at}..."`);
+    }
     if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
   }
 
@@ -493,9 +496,15 @@ async function main() {
       v.play().catch(() => {});
       for (let i = 0; i < 80 && !(v.currentTime > 1.5); i++) await new Promise((r) => setTimeout(r, 150));
       const pill = document.querySelector(".player .pill");
+      // All the player's text, hidden controls included: they show on the next
+      // mouse move, so a "null" there is one the viewer will see.
+      const shell = v.closest(".player");
       return { ok: v.currentTime > 1.5, t: v.currentTime, err: v.error && v.error.code, converted: !v.controls, pill: pill ? pill.textContent : null,
+        text: shell ? shell.textContent : "",
         why: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
     if (!res.ok) fail(`play ${label}`, `video did not advance (t=${res.t}, media error ${res.err}) ${res.why || ""}`);
+    const playerJunk = (res.text || "").match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+    if (playerJunk) fail(`play ${label}`, `the player shows "${playerJunk[0]}": ${res.text.slice(0, 160).replace(/\s+/g, " ")}`);
     if (res.converted !== (wantDecision === "converted")) fail(`play ${label}`, `expected a ${wantDecision} stream`);
     if (wantPill && res.pill !== wantPill) fail(`play ${label}`, `labelled "${res.pill}", expected "${wantPill}"`);
     if (exceptions.length) fail(`play ${label}`, `threw: ${exceptions[0]}`);
@@ -507,6 +516,73 @@ async function main() {
     (await evaluate(`return document.createElement("video").canPlayType("application/vnd.apple.mpegurl") !== ""`));
   if (nativeHLS) await hlsPlayer(s, evaluate, ids);
   else await hlsMSE(evaluate, ids);
+
+  // Subtitles: "Search for subtitles…" (the dev server's offline stub, never
+  // OpenSubtitles), download and switch in one click, then the timing control,
+  // which must change the cues the server serves, and Delete on the item page.
+  if (ids.direct) {
+    console.log(`subtitles: search, download, timing (#/play/${ids.direct})`);
+    exceptions = [];
+    await s("Page.navigate", { url: `${base}/#/play/${ids.direct}?start=0` });
+    const res = await evaluate(`
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const wait = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = await fn(); if (v) return v; await sleep(150); } return null; };
+      const sel = await wait(() => document.querySelector('.player select[aria-label="Subtitles"]'));
+      if (!sel) return { why: "no subtitle menu" };
+      if (![...sel.options].some((o) => o.value === "search")) return { why: "no Search for subtitles entry in the menu" };
+      sel.value = "search";
+      sel.dispatchEvent(new Event("change"));
+      const btn = await wait(() => document.querySelector(".sub-search:not([hidden]) .sub-result button:not([disabled])"));
+      if (!btn) return { why: "no search results: " + ((document.querySelector(".sub-search") || {}).innerText || "no panel") };
+      const row = btn.closest(".sub-result").innerText;
+      if (!/Matches this file/.test(row)) return { why: "first result has no hash-match badge: " + row };
+      btn.click();
+      const picked = await wait(() => sel.selectedOptions[0] && /downloaded/.test(sel.selectedOptions[0].textContent));
+      if (!picked) return { why: "the downloaded subtitle was not selected" };
+      const v = document.querySelector("video");
+      const firstCue = () => { const t = [...v.textTracks].find((t) => t.mode === "showing"); return t && t.cues && t.cues.length ? t.cues[0] : null; };
+      const c0 = await wait(firstCue);
+      if (!c0 || !/Downloaded subtitle/.test(c0.text)) return { why: "downloaded cues not shown: " + (c0 && c0.text) };
+      const start0 = c0.startTime;
+      const item = await (await fetch("/api/v1/items/${ids.direct}")).json();
+      const track = item.versions.flatMap((x) => x.subtitle_tracks).find((t) => t.is_downloaded);
+      if (!track) return { why: "the item lists no downloaded track" };
+      const served = async () => (await (await fetch("/api/v1/subtitles/" + track.id + "?format=vtt")).text()).match(/^\\S+ --> \\S+/m)[0];
+      const before = await served();
+      const plus = document.querySelector(".sub-timing-plus");
+      if (!plus || plus.closest("[hidden]")) return { why: "no subtitle timing control" };
+      plus.click();
+      plus.click();
+      const shown = await wait(() => { const c = firstCue(); return c && Math.abs(c.startTime - start0 - 0.5) < 0.01; });
+      const after = await served();
+      document.querySelector(".sub-timing-reset").click();
+      await wait(async () => (await served()) === before);
+      const reset = await served();
+      return { ok: true, before, after, reset, shown: !!shown, label: document.querySelector(".sub-timing-value").textContent };`);
+    if (!res.ok) fail("subtitles", res.why);
+    else {
+      console.log(`  served ${res.before}, then ${res.after} at +500 ms, then ${res.reset} after Reset`);
+      // ffmpeg writes mm:ss.ttt and the shifted copy hh:mm:ss.ttt, so compare times.
+      const ms = (line) => line.split(" --> ").map((t) => t.split(":").reduce((acc, p) => acc * 60 + Number(p), 0) * 1000);
+      const [b0, b1] = ms(res.before), [a0, a1] = ms(res.after);
+      if (b0 !== 2000 || b1 !== 5000) fail("subtitles", `unexpected first cue ${res.before}`);
+      if (Math.round(a0 - b0) !== 500 || Math.round(a1 - b1) !== 500) fail("subtitles", `timing +500 ms served ${res.after}`);
+      if (!res.shown) fail("subtitles", "the player did not show the shifted cue");
+      if (res.reset !== res.before || res.label !== "0 ms") fail("subtitles", `Reset left ${res.reset} (${res.label})`);
+    }
+    if (exceptions.length) fail("subtitles", `threw: ${exceptions[0]}`);
+
+    console.log(`subtitles: delete on the item page (#/item/${ids.direct})`);
+    await s("Page.navigate", { url: `${base}/#/item/${ids.direct}` });
+    const del = await evaluate(`
+      const wait = async (fn, n = 60) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await new Promise((r) => setTimeout(r, 150)); } return null; };
+      const btn = await wait(() => document.querySelector(".sub-admin:not([hidden]) .sub-admin-row button"));
+      if (!btn) return { why: "no downloaded subtitle listed for the admin" };
+      btn.click();
+      const gone = await wait(() => document.querySelector(".sub-admin:not([hidden])") && !document.querySelector(".sub-admin-row"));
+      return gone ? { ok: true } : { why: "the subtitle was still listed after Delete" };`);
+    if (!del.ok) fail("subtitles delete", del.why);
+  }
   await s("Page.navigate", { url: `${base}/#/` });
   await sleep(500);
 
@@ -532,7 +608,10 @@ async function main() {
     if (!res.rows) fail(`#${path}`, "no History rows after playing the clip");
     if (res.error) fail(`#${path}`, "shows an error box");
     const junk = res.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
-    if (junk) fail(`#${path}`, `shows "${junk[0]}"`);
+    if (junk) {
+      const at = res.text.slice(Math.max(0, junk.index - 60), junk.index + 20).replace(/\s+/g, " ");
+      fail(`#${path}`, `shows "${junk[0]}" in "...${at}..."`);
+    }
     if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
   }
 }
@@ -549,11 +628,16 @@ async function hlsPlayer(s, evaluate, ids) {
         continue;
       }
       console.log(`play ${label} as Safari (#/play/${id})`);
+      // As in the plays above: the previous clip's player can still be on the page
+      // when this one is judged, so mark its video and read only a fresh one.
+      await evaluate(`document.querySelectorAll("video").forEach((v) => { v.dataset.stale = "1"; v.pause(); });`);
       await s("Page.navigate", { url: `${base}/#/play/${id}?start=0` });
       const res = await evaluate(`
-        for (let i = 0; i < 60 && !document.querySelector("video"); i++) await new Promise((r) => setTimeout(r, 150));
-        const v = document.querySelector("video");
+        const fresh = () => document.querySelector("video:not([data-stale])");
+        for (let i = 0; i < 60 && !fresh(); i++) await new Promise((r) => setTimeout(r, 150));
+        const v = fresh();
         if (!v) return { ok: false, why: document.getElementById("view").innerText.slice(0, 200) };
+        const player = v.closest(".player") || document;
         v.muted = true;
         v.play().catch(() => {});
         const advanced = async () => {
@@ -562,15 +646,15 @@ async function hlsPlayer(s, evaluate, ids) {
         };
         const ok = await advanced();
         const src = v.currentSrc;
-        const pill = document.querySelector(".player .pill");
+        const pill = player.querySelector(".pill");
         // Seek 30 s on: a new stream, and the clock shows the new position.
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
         for (let i = 0; i < 60 && v.currentSrc === src; i++) await new Promise((r) => setTimeout(r, 100));
         const seeked = v.currentSrc !== src && await advanced();
-        const clock = document.querySelector(".pc-time") ? document.querySelector(".pc-time").textContent : "";
+        const clock = player.querySelector(".pc-time") ? player.querySelector(".pc-time").textContent : "";
         return { ok, seeked, t: v.currentTime, src, err: v.error && v.error.code, clock, converted: !v.controls,
           pill: pill ? pill.textContent : null, ua: navigator.userAgent.includes("Version/18.0 Safari"),
-          why: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
+          why: player.querySelector(".overlay:not([hidden])") ? player.querySelector(".overlay").innerText : "" };`);
       if (!res.ua) fail(`play ${label}`, "the user agent override did not take");
       if (!res.ok) fail(`play ${label}`, `video did not advance (t=${res.t}, media error ${res.err}) ${res.why || ""}`);
       if (!/\/hls\/[0-9a-f]{16}\/index\.m3u8$/.test(res.src || "")) fail(`play ${label}`, `played ${res.src}, not an HLS playlist`);

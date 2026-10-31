@@ -56,6 +56,8 @@ type Track struct {
 	IsForced     bool    `json:"is_forced"`
 	IsExternal   bool    `json:"is_external"`
 	IsImageBased bool    `json:"is_image_based"`
+	// IsDownloaded marks a subtitle fetched from OpenSubtitles, stored by the server.
+	IsDownloaded bool `json:"is_downloaded"`
 }
 
 type Version struct {

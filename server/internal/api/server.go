@@ -22,6 +22,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
+	"github.com/pete-builds/vcrx-media-server/server/internal/subsearch"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 )
 
@@ -46,6 +47,9 @@ type Server struct {
 	// HLS writes converted streams as HLS for clients that report
 	// hls_stream (Safari). Nil turns it off.
 	HLS *remux.HLS
+	// SubSearch finds and downloads missing subtitles; nil or without a
+	// provider, search is off.
+	SubSearch *subsearch.Service
 	// Arr turns Radarr and Sonarr webhooks into scans; ArrToken guards it.
 	Arr      *arr.Dispatcher
 	ArrToken string
@@ -134,6 +138,10 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"HEAD", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"GET", "/api/v1/subtitles/{stream_id}", signedIn, s.subtitle},
+		{"GET", "/api/v1/versions/{version_id}/subtitles/search", signedIn, s.searchSubtitles},
+		{"POST", "/api/v1/versions/{version_id}/subtitles/download", signedIn, s.downloadSubtitle},
+		{"PUT", "/api/v1/versions/{version_id}/subtitle-offset", signedIn, s.setSubtitleOffset},
+		{"GET", "/api/v1/speedtest", signedIn, s.speedTest},
 		{"GET", "/api/v1/admin/libraries", adminOnly, s.adminLibraries},
 		{"POST", "/api/v1/admin/libraries", adminOnly, s.adminCreateLibrary},
 		{"POST", "/api/v1/admin/libraries/{library_id}/scan", adminOnly, s.adminScan},
@@ -146,6 +154,7 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/admin/layout/home", adminOnly, s.adminHomeLayout},
 		{"PUT", "/api/v1/admin/layout/home", adminOnly, s.adminSetHomeLayout},
 		{"DELETE", "/api/v1/admin/layout/home", adminOnly, s.adminResetHomeLayout},
+		{"GET", "/api/v1/admin/labels", adminOnly, s.adminLabels},
 		{"GET", "/api/v1/admin/activity/sessions", adminOnly, s.adminSessions},
 		{"GET", "/api/v1/admin/metadata/unmatched", adminOnly, s.unmatched},
 		{"GET", "/api/v1/admin/items/{item_id}/match", adminOnly, s.matchSearch},
@@ -163,6 +172,8 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/admin/newsletter", adminOnly, s.newsletterStatus},
 		{"PUT", "/api/v1/admin/newsletter", adminOnly, s.newsletterSave},
 		{"POST", "/api/v1/admin/newsletter/preview", adminOnly, s.newsletterPreview},
+		{"GET", "/api/v1/admin/items/{item_id}/subtitles", adminOnly, s.adminItemSubtitles},
+		{"DELETE", "/api/v1/admin/subtitles/{stream_id}", adminOnly, s.adminDeleteSubtitle},
 	}
 }
 

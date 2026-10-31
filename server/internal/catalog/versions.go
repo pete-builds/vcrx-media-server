@@ -90,7 +90,7 @@ func (c *Catalog) attachTracks(ctx context.Context, vs []Version) error {
 		ids[i] = v.ID
 	}
 	rows, err := c.DB.QueryContext(ctx, `SELECT id, version_id, kind, stream_index, codec, language, title, channels,
-			is_default, is_forced, is_external, is_image_based
+			is_default, is_forced, is_external, is_image_based, downloaded_id IS NOT NULL
 		FROM media_streams WHERE version_id IN (`+placeholders(len(ids))+`)
 		ORDER BY version_id, is_external, stream_index, id`, int64Args(ids)...)
 	if err != nil {
@@ -101,7 +101,8 @@ func (c *Catalog) attachTracks(ctx context.Context, vs []Version) error {
 		var vid int64
 		var sidx, ch sql.NullInt64
 		var codec, lang, title sql.NullString
-		if err := rows.Scan(&t.ID, &vid, &t.Kind, &sidx, &codec, &lang, &title, &ch, &t.IsDefault, &t.IsForced, &t.IsExternal, &t.IsImageBased); err != nil {
+		if err := rows.Scan(&t.ID, &vid, &t.Kind, &sidx, &codec, &lang, &title, &ch, &t.IsDefault, &t.IsForced, &t.IsExternal, &t.IsImageBased,
+			&t.IsDownloaded); err != nil {
 			return err
 		}
 		t.Index, t.Channels = ptr(sidx), ptr(ch)
@@ -117,6 +118,18 @@ func (c *Catalog) attachTracks(ctx context.Context, vs []Version) error {
 		}
 		return nil
 	})
+}
+
+// CanPlay reports whether the caller may still play a version: the version is
+// within their ceiling and its item is visible to them. Session routes check it
+// on every call, so a policy tightened mid-play applies at once.
+func (c *Catalog) CanPlay(ctx context.Context, pol policy.Policy, versionID int64) (bool, error) {
+	vc, vargs := pol.VersionCond("v")
+	cond, cargs := pol.ItemCond("i")
+	var n int
+	err := c.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM media_versions v JOIN items i ON i.id = v.item_id
+		WHERE v.id = ? AND `+vc+` AND `+cond, append(append([]any{versionID}, vargs...), cargs...)...).Scan(&n)
+	return n > 0, err
 }
 
 // VersionForPlayback returns one version and its library root if the caller may

@@ -161,7 +161,7 @@ func followingSQL(sameSeasonOnly, cond string) string {
 
 // Children lists a show's seasons or a season's episodes in order.
 func (c *Catalog) Children(ctx context.Context, pol policy.Policy, userID, id int64) ([]ItemSummary, error) {
-	ok, err := c.visible(ctx, pol, id)
+	ok, err := c.Visible(ctx, pol, id)
 	if err != nil {
 		return nil, err
 	}

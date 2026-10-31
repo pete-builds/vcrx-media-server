@@ -26,6 +26,8 @@ import (
 	"golang.org/x/image/math/f64"
 	"golang.org/x/image/math/fixed"
 	"golang.org/x/image/vector"
+
+	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 )
 
 // Spec is one overlay as configured for a library.
@@ -211,8 +213,9 @@ type Service struct {
 }
 
 // Plan returns the badges for an item's poster and their signature, or nil
-// when its library has no overlays or nothing applies.
-func (s *Service) Plan(ctx context.Context, itemID int64) ([]Badge, string, error) {
+// when its library has no overlays or nothing applies. The resolution badge
+// reads only the versions pol may play.
+func (s *Service) Plan(ctx context.Context, itemID int64, pol policy.Policy) ([]Badge, string, error) {
 	if s == nil || len(s.Specs) == 0 {
 		return nil, "", nil
 	}
@@ -225,7 +228,7 @@ func (s *Service) Plan(ctx context.Context, itemID int64) ([]Badge, string, erro
 	if len(specs) == 0 || (kind != "movie" && kind != "show") {
 		return nil, "", nil
 	}
-	f, err := s.facts(ctx, itemID, kind)
+	f, err := s.facts(ctx, itemID, kind, pol)
 	if err != nil {
 		return nil, "", err
 	}
@@ -233,7 +236,7 @@ func (s *Service) Plan(ctx context.Context, itemID int64) ([]Badge, string, erro
 	return bs, Signature(bs), nil
 }
 
-func (s *Service) facts(ctx context.Context, itemID int64, kind string) (Facts, error) {
+func (s *Service) facts(ctx context.Context, itemID int64, kind string, pol policy.Policy) (Facts, error) {
 	f := Facts{Ratings: map[string]float64{}, Votes: map[string]int64{}}
 	if err := s.ratings(ctx, itemID, &f); err != nil {
 		return f, err
@@ -241,13 +244,15 @@ func (s *Service) facts(ctx context.Context, itemID int64, kind string) (Facts, 
 	if kind != "movie" {
 		return f, nil
 	}
-	// The best version decides the resolution badge, as Kometa reads Plex's best media.
+	// The best version decides the resolution badge, as Kometa reads Plex's
+	// best media; but only among the versions this viewer may play.
 	var res, hdr sql.NullString
 	var compat sql.NullInt64
-	err := s.DB.QueryRowContext(ctx, `SELECT resolution, hdr_type, dv_compat_id FROM media_versions
-		WHERE item_id = ? AND missing_since IS NULL ORDER BY COALESCE(height, 0) DESC,
-		CASE hdr_type WHEN 'dolby_vision' THEN 0 WHEN 'hdr10+' THEN 1 WHEN 'hdr10' THEN 2 WHEN 'hlg' THEN 3 ELSE 4 END LIMIT 1`,
-		itemID).Scan(&res, &hdr, &compat)
+	vc, vargs := pol.VersionCond("v")
+	err := s.DB.QueryRowContext(ctx, `SELECT v.resolution, v.hdr_type, v.dv_compat_id FROM media_versions v
+		WHERE v.item_id = ? AND `+vc+` ORDER BY COALESCE(v.height, 0) DESC,
+		CASE v.hdr_type WHEN 'dolby_vision' THEN 0 WHEN 'hdr10+' THEN 1 WHEN 'hdr10' THEN 2 WHEN 'hlg' THEN 3 ELSE 4 END LIMIT 1`,
+		append([]any{itemID}, vargs...)...).Scan(&res, &hdr, &compat)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return f, err
 	}
@@ -291,8 +296,8 @@ func (s *Service) face(size float64) (font.Face, error) {
 }
 
 // Poster adapts Plan and Draw to the artwork service.
-func (s *Service) Poster(ctx context.Context, itemID int64) (string, func(*image.RGBA) error, error) {
-	bs, sig, err := s.Plan(ctx, itemID)
+func (s *Service) Poster(ctx context.Context, itemID int64, pol policy.Policy) (string, func(*image.RGBA) error, error) {
+	bs, sig, err := s.Plan(ctx, itemID, pol)
 	if err != nil || sig == "" {
 		return "", nil, err
 	}
