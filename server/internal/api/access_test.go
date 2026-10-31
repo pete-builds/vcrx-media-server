@@ -292,7 +292,8 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 	for _, id := range hiddenItems {
 		ps = append(ps,
 			at("GET /api/v1/items/{item_id}", id),
-			at("PUT /api/v1/items/{item_id}/watched", id).with(map[string]any{"played": true}))
+			at("PUT /api/v1/items/{item_id}/watched", id).with(map[string]any{"played": true}),
+			at("DELETE /api/v1/items/{item_id}/progress", id))
 	}
 	for _, id := range []int64{w.horrorShow, w.horrorSeason, w.strictSeason} {
 		ps = append(ps, at("GET /api/v1/items/{item_id}/children", id))
@@ -686,7 +687,7 @@ func TestLoginLANAccountBucketAndTailscale(t *testing.T) {
 
 	// Admin gating is unchanged: Tailscale IPv6 reaches admin routes, as
 	// Pete does from away; Tailscale IPv4 never did.
-	for addr, want := range map[string]int{"[fd7a:115c:a1e0::2]:5000": 200, "100.100.1.2:5000": 403, "192.168.1.20:5000": 200} {
+	for addr, want := range map[string]int{"[fd7a:115c:a1e0::2]:5000": 200, "100.101.102.103:5000": 403, "192.168.1.20:5000": 200} {
 		if r := f.do("GET", "/api/v1/admin/users", f.adminTok, nil, "RemoteAddr", addr); r.code != want {
 			t.Errorf("admin from %s: %d, want %d", addr, r.code, want)
 		}

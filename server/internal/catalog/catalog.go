@@ -506,7 +506,7 @@ func (c *Catalog) SetWatched(ctx context.Context, pol policy.Policy, userID, ite
 // another episode. Only the caller's own watch state changes; an item the
 // caller cannot see is ErrNotFound.
 func (c *Catalog) ClearProgress(ctx context.Context, pol policy.Policy, userID, itemID int64, now int64) error {
-	ok, err := c.visible(ctx, pol, itemID)
+	ok, err := c.Visible(ctx, pol, itemID)
 	if err != nil {
 		return err
 	}
