@@ -55,7 +55,7 @@ class ConnectViewModel(private val graph: AppGraph) : ViewModel() {
         if (busy) return
         val base = ServerAddress.normalize(address)
         if (base == null) {
-            error = "Enter the server's LAN address, for example 192.168.86.20:3750."
+            error = "Enter the server's LAN address, for example 192.168.1.20:3750."
             return
         }
         busy = true
@@ -109,7 +109,7 @@ fun ConnectScreen() {
                 value = vm.address,
                 onValueChange = { vm.address = it },
                 label = "Server address",
-                placeholder = "192.168.86.20:3750",
+                placeholder = "192.168.1.20:3750",
                 keyboardType = KeyboardType.Uri,
                 imeAction = ImeAction.Go,
                 onImeAction = submit,

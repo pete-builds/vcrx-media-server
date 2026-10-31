@@ -109,4 +109,17 @@ class ModelsTest {
         assertEquals(2, page.collection.itemCount)
         assertEquals("Part One", page.items.single().title)
     }
+
+    @Test
+    fun nowPlayingFromTheActivityApi() {
+        val now = json.decodeFromString(NowPlaying.serializer(), """{"stream_count": 1, "direct_play": 1, "converting": 0,
+            "bandwidth_bps": 2900000, "sessions": [{"id": "abc", "state": "playing", "decision": "direct_play",
+            "decision_reason": "fine", "user_id": 1, "username": "pete", "item_id": 8, "item_kind": "episode",
+            "item_title": "Quiet Street S02E01 Episode 1", "device_name": "Living Room TV", "position_ms": 14000,
+            "duration_ms": 40000, "progress": 0.35, "played_ms": 14000, "watched": false, "started_at": 1, "last_event_at": 2,
+            "ended_at": null, "terminated_message": null, "start_position_ms": 0}]}""")
+        assertEquals(1, now.streamCount)
+        assertEquals("Living Room TV", now.sessions.single().deviceName)
+        assertEquals(40_000L, now.sessions.single().durationMs)
+    }
 }

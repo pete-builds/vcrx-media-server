@@ -345,6 +345,21 @@ func (s *Server) setWatched(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// clearProgress drops the caller's resume position so the item leaves Continue
+// Watching. It does not mark the item played.
+func (s *Server) clearProgress(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r, "item_id")
+	if !ok {
+		return
+	}
+	ri := info(r)
+	if err := s.Catalog.ClearProgress(r.Context(), ri.Policy, ri.Session.User.ID, id, db.NowMs()); err != nil {
+		s.notFoundOr(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) artwork(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r, "item_id")
 	if !ok {
