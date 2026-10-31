@@ -74,8 +74,26 @@ func (c *Catalog) continueWatching(ctx context.Context, pol policy.Policy, userI
 	if err != nil {
 		return nil, err
 	}
+	dismissed := map[int64]int64{}
+	rows, err = c.DB.QueryContext(ctx, `SELECT show_id, dismissed_at FROM up_next_dismissed WHERE user_id = ?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	err = each(rows, func() error {
+		var show, at int64
+		if err := rows.Scan(&show, &at); err != nil {
+			return err
+		}
+		dismissed[show] = at
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	for _, f := range last {
-		if inProgressShows[f.show] || len(out) >= 40 {
+		// Removed from the row after this episode was finished: stay away until
+		// the next one is.
+		if inProgressShows[f.show] || len(out) >= 40 || dismissed[f.show] >= f.at {
 			continue
 		}
 		next, err := c.FollowingEpisode(ctx, pol, userID, f.ep)
