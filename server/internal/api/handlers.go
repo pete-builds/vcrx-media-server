@@ -134,6 +134,7 @@ func (d deviceJSON) device() auth.Device {
 func (s *Server) autoLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Device deviceJSON `json:"device"`
+		Cookie bool       `json:"cookie"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -159,6 +160,9 @@ func (s *Server) autoLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Log.Info("login", "user", sess.User.Username, "ip", ip, "device", dev.Name, "client", dev.Client, "method", "trusted_network")
+	if req.Cookie {
+		s.setSessionCookie(w, r, token)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": sess.ExpiresAt, "user": toUserJSON(sess.User)})
 }
 
@@ -183,6 +187,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		Username string     `json:"username"`
 		Password string     `json:"password"`
 		Device   deviceJSON `json:"device"`
+		Cookie   bool       `json:"cookie"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -210,6 +215,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Limiter.Reset(auth.UserKey(req.Username))
 	s.Log.Info("login", "user", sess.User.Username, "ip", ip, "device", dev.Name, "client", dev.Client)
+	if req.Cookie {
+		s.setSessionCookie(w, r, token)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": sess.ExpiresAt, "user": toUserJSON(sess.User)})
 }
 
@@ -225,6 +233,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	clearSessionCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }
 

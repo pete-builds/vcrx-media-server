@@ -51,6 +51,10 @@ type Server struct {
 	AutoSignInUser  string
 	TrustedNetworks []netip.Prefix
 
+	// WebDir, when set, serves the web app from disk instead of the copy built
+	// into the binary. For development only.
+	WebDir string
+
 	streams streamRegistry
 }
 
@@ -118,6 +122,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "No such API route.")
 	})
+	mux.Handle("/", s.webApp())
 	return s.recoverer(s.logRequests(mux))
 }
 
