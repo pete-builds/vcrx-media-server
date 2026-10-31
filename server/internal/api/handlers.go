@@ -470,6 +470,13 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	err := s.Playback.RecordEvent(r.Context(), ri.Session.User.ID, r.PathValue("session_id"), ev)
+	if err == nil && (ev.Type == "stop" || ev.Type == "error") {
+		// The client is done with this session, so any stream still open for it
+		// goes too. Otherwise a reader that keeps its connection open after
+		// stopping holds a conversion slot until it disconnects, and with only
+		// two transcode slots that refuses everyone else.
+		s.streams.cancel(r.PathValue("session_id"))
+	}
 	var term *playback.TerminatedError
 	switch {
 	case errors.Is(err, playback.ErrSessionNotFound):
@@ -483,6 +490,10 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.internal(w, r, err)
 	default:
+		if s.HLS != nil && (ev.Type == "stop" || ev.Type == "error") {
+			// The session is over: its HLS stream stops and its files go now.
+			s.HLS.Stop(r.PathValue("session_id"))
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

@@ -1,0 +1,61 @@
+# VCRX smart collections, read from /config/collections/*.yaml (or
+# collections_dir in vcrx.yaml, or VCRX_COLLECTIONS_DIR). Copy this file there:
+#   mkdir -p data/config/collections
+#   cp collections.example.yaml data/config/collections/labels.yaml
+#
+# These files are the source of truth. VCRX rebuilds the collections from them
+# after every scan, after TMDb fills in metadata, and every 15 minutes; `vcrx
+# metadata collections` does it now and prints any error. A file with a mistake
+# is refused whole (the error names the file and line) and its collections keep
+# their last good definition. An empty or cut-short file is refused the same
+# way; write `collections: []` to empty one on purpose. A deleted file's
+# collections and labels go once it has been gone for a minute.
+#
+# Each collection names a library and a smart rule. all: every rule must match.
+# any: at least one must. Lists nest. One condition per list entry. A list of
+# values means any of them: genre: [Horror, Thriller].
+#
+# Conditions, all from local metadata:
+#   genre, studio, director, writer, actor, country, network   (any case)
+#   decade: 1980s          year: 1999 or 1990-1999
+#   resolution: 4K         (any present version; SD 480p 576p 720p 1080p 4K 8K)
+#   hdr: true              or hdr10, hdr10plus, hlg, dolby_vision
+#   content_rating: R      label: some-label        added_within_days: 30
+#
+# label: stamps that hidden label on every match and takes it off titles that
+# stop matching. Only labels VCRX stamped are ever taken off: a label you set by
+# hand or that comes from an NFO file is left alone. A user's policy can then
+# allow or deny the label (PUT /api/v1/admin/users/{id}/policy, deny_labels).
+#
+# visible: where the collection is listed. library: in the library's collections
+# and on its titles. home and shared: kept for Home rows, which do not show
+# collections yet. All false means it only stamps its label.
+collections:
+  - name: 4K Resolution
+    library: Movies
+    smart:
+      all:
+        - resolution: 4K
+    label: 4K
+    visible: { library: false, home: false, shared: false }
+
+  - name: R-Rated Horror
+    library: Movies
+    smart:
+      all:
+        - genre: Horror
+        - content_rating: R
+    label: horror
+    visible: { library: false, home: false, shared: false }
+
+  # A visible collection with nested rules: 1980s comedies or thrillers from
+  # either studio, added in the last 90 days.
+  #- name: New 80s Picks
+  #  library: Movies
+  #  smart:
+  #    all:
+  #      - decade: 1980s
+  #      - added_within_days: 90
+  #      - any:
+  #          - genre: [Comedy, Thriller]
+  #          - studio: [Example Pictures, Sample Films]

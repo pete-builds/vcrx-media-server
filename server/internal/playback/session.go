@@ -65,8 +65,9 @@ type Stream struct {
 	URL      string  `json:"url"`
 	Protocol string  `json:"protocol"`
 	MimeType *string `json:"mime_type"`
-	// SeekURL, for protocol fmp4: GET it with position_ms to learn where a
-	// stream from there starts and the URL to play.
+	// SeekURL, for protocols fmp4 and hls: GET it with position_ms to learn
+	// where a stream from there starts and the URL to play. For hls, URL is
+	// the seek URL too, since every stream starts at a position.
 	SeekURL string `json:"seek_url,omitempty"`
 }
 
@@ -116,13 +117,18 @@ type Service struct {
 	DB        *sql.DB
 	Catalog   *catalog.Catalog
 	Heartbeat time.Duration
-	// CanTranscode is false until the HLS job manager lands; non-direct decisions
-	// are then refused with a clear message instead of failing on the TV.
+	// CanTranscode turns on video transcoding to H.264 inside a converted
+	// stream, for clients that report fmp4_stream (or hls_stream) and decode
+	// H.264. It needs an ffmpeg with libx264. Every other client that needs its
+	// video converted (the TV app today) is still refused with a clear message.
 	CanTranscode bool
 	// CanRemux turns on converted streams (video copied, audio copied or
 	// converted) for clients that report fmp4_stream.
 	CanRemux bool
-	Now      func() time.Time
+	// CanHLS also offers converted streams, written as HLS, to clients that
+	// report hls_stream.
+	CanHLS bool
+	Now    func() time.Time
 	// Notify, when set, receives play, stop and refused events for webhooks.
 	Notify func(notify.Notice)
 }
@@ -201,8 +207,9 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 		return nil, nil, err
 	}
 
-	converted := s.CanRemux && req.Capabilities.FMP4Stream && (d.Kind == Remux || d.Kind == AudioTranscode) &&
-		remux.MP4Video(s2(v.VideoCodec))
+	hls := s.CanHLS && req.Capabilities.HLSStream
+	converted := s.CanRemux && (req.Capabilities.FMP4Stream || hls) && (((d.Kind == Remux || d.Kind == AudioTranscode) &&
+		remux.MP4Video(s2(v.VideoCodec))) || (d.Kind == Transcode && s.CanTranscode && decodesH264(req.Capabilities)))
 	var refusal *Refusal
 	if d.Kind != DirectPlay {
 		switch {
@@ -210,7 +217,7 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 			refusal = &Refusal{Status: 403, Code: "playback_refused", Message: "This needs converting on the server, and your account is not allowed to do that. Reason: " + d.Reason + "."}
 		case !pol.IsAdmin && !pol.Allow4KTranscode && policy.ResolutionRank(s2(v.Resolution)) >= policy.ResolutionRank("4K"):
 			refusal = &Refusal{Status: 403, Code: "playback_refused", Message: "4K files cannot be converted for your account. Ask for a 1080p version. Reason: " + d.Reason + "."}
-		case !s.CanTranscode && !converted:
+		case !converted:
 			refusal = &Refusal{Status: 422, Code: "transcode_unavailable", Message: "This file needs " + describeKind(d.Kind) + " for this device, which VCRX cannot do yet. Reason: " + d.Reason + "."}
 		}
 	}
@@ -262,10 +269,14 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 
 	mime := mimeForContainer(s2(v.Container))
 	stream := Stream{URL: fmt.Sprintf("/api/v1/versions/%d/file?session=%s", v.ID, id), Protocol: "progressive", MimeType: mime}
-	if converted {
+	seek := "/api/v1/playback/sessions/" + id + "/seek"
+	switch {
+	case converted && hls:
+		m3u8 := "application/vnd.apple.mpegurl"
+		stream = Stream{URL: seek, Protocol: "hls", MimeType: &m3u8, SeekURL: seek}
+	case converted:
 		mp4 := "video/mp4"
-		stream = Stream{URL: "/api/v1/playback/sessions/" + id + "/stream.mp4", Protocol: "fmp4", MimeType: &mp4,
-			SeekURL: "/api/v1/playback/sessions/" + id + "/seek"}
+		stream = Stream{URL: "/api/v1/playback/sessions/" + id + "/stream.mp4", Protocol: "fmp4", MimeType: &mp4, SeekURL: seek}
 	}
 	out := &Session{
 		SessionID: id, Decision: d.Kind, Reason: d.Reason, ItemID: req.ItemID, Version: v,

@@ -16,13 +16,13 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 
 | Works now | Comes later |
 |---|---|
-| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, genre and decade filters | Collections from YAML rules |
+| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, smart collections and hidden labels from YAML rules, genre and decade filters | Online lists (IMDb Top 250 and the like), playlists, automatic director and studio collections |
 | Local accounts and per-user access: library grants, a resolution ceiling, a content-rating ceiling, label allow and deny lists, converting allowed or not, all edited in Settings > Users and enforced on every route (a test walks them all) | Access settings in the TV app |
-| Direct play over HTTP with Range; converted streams for clients that ask for them (video copied, audio converted to AAC, fragmented MP4); sidecar and embedded text subtitles (also as WebVTT for browsers) | Video transcoding, picture subtitle burn-in, VA-API hardware acceleration |
+| Direct play over HTTP with Range; converted streams for clients that ask for them (fragmented MP4, or HLS for Safari: video copied, or transcoded to H.264 when the client cannot decode it; audio copied or converted to AAC); sidecar and embedded text subtitles (also as WebVTT for browsers) | Video transcoding for the TV app (HLS), picture subtitle burn-in, VA-API hardware acceleration |
 | Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, per-title history, stats, per-user totals, stop a stream, webhooks, a watch state export for cleanup tools | Activity screens in a client |
-| Web app at `/`: browse, details, search, play in the browser with subtitles, Activity screens. REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Browser playback of files the browser cannot decode, other TV platforms |
+| Web app at `/`: browse, details, search, play in the browser with subtitles (including files whose video the browser cannot decode, transcoded on the server), Activity screens. REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Other TV platforms |
 
-A file the TV cannot play directly is refused with a message saying why ("needs video conversion: the device has no av1 video decoder"). Transcoding arrives in milestone 3.
+A file the TV cannot play directly is refused with a message saying why ("needs video conversion: the device has no av1 video decoder"). Transcoding for the TV app arrives with HLS in milestone 3; the web app already gets it.
 
 ## Run the server
 
@@ -84,7 +84,7 @@ vcrx healthcheck              what the container HEALTHCHECK runs
 
 ### Configuration
 
-Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its backups (before every migration, and a nightly snapshot kept for seven days, in `/config/backups`) and the settings file live in `/config`; resized artwork and other caches live in `/cache` and can be deleted at any time.
+Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its backups (before every migration, and a nightly snapshot kept for seven days, in `/config/backups`) and the settings file live in `/config`; resized artwork, Safari's HLS segments while they play, and other caches live in `/cache` and can be deleted at any time.
 
 ### TMDb posters and plots (optional)
 
@@ -106,7 +106,7 @@ Open `http://<server>:3750/` in a browser. It is part of the server: no separate
 - **Continue Watching** cards have a Remove button (on hover, always on touch screens, and reachable with Tab), and a details page with a resume position has Remove from Continue Watching. Either forgets your resume position without marking the title watched, and only for you (`DELETE /api/v1/items/{id}/progress`).
 - **Search as you type:** after two characters the search box lists up to eight matching titles with poster, year or episode, and kind. Arrow keys and Enter open one; Enter with none highlighted shows every result; Escape closes the list.
 - **Keyboard:** press `?` anywhere outside a text field for the list of shortcuts, `/` to jump to search. In the player: Space or K to play or pause, the arrow keys to skip back or forward, F for full screen, M to mute, Escape to leave.
-- **Play** in the browser, resuming where any device left off. The browser tells the server what it can decode. A file it cannot play directly because of its container or its audio (most often E-AC-3, AC-3 or DTS, which browsers do not decode) plays as a converted stream: the video is copied untouched and only the audio is converted to AAC, a fraction of one CPU core, with VCRX's own seek bar. Video the browser cannot decode at all is refused with the reason until full transcoding lands; the TV app still plays it. Subtitles: pick any text track, sidecar or inside the file.
+- **Play** in the browser, resuming where any device left off. The browser tells the server what it can decode. A file it cannot play directly because of its container or its audio (most often E-AC-3, AC-3 or DTS, which browsers do not decode) plays as a converted stream: the video is copied untouched and only the audio is converted to AAC, a fraction of one CPU core, with VCRX's own seek bar. Video the browser cannot decode at all (HEVC in Firefox, AV1 on older machines, VC-1 or MPEG-4 Part 2 anywhere) is transcoded to H.264 with libx264 in the same kind of stream: scaled down to the browser's reported size, never up, with a keyframe every 2 seconds, and HDR tone mapped to SDR for a screen without HDR when the server's ffmpeg has the zscale filter (the Docker image's does; without it HDR looks washed out). A seek starts the new stream exactly where you asked. Each transcode takes one or more CPU cores, so only `VCRX_MAX_TRANSCODES` (default 2, 0 turns it off) run at once and the next viewer is told the server is busy; the server logs at startup whether its ffmpeg can transcode. The usual policy applies: a non-admin needs "May use converted streams", and "Including 4K" for a 4K file. Safari (on a Mac, iPhone or iPad, and every browser on an iPhone or iPad) plays video only from a server that answers byte ranges, which a stream made on the fly cannot, so it gets the same conversions as HLS, which it plays natively: segments of about 4 seconds written under `/cache/hls` while the session plays, with the same limits and policy. The server keeps each Safari stream's files to about 1.5 GB by pausing ffmpeg when it is two minutes ahead of the player and deleting segments a minute behind it, and deletes them all when playback stops, after two idle minutes, and at startup. Subtitles: pick any text track, sidecar or inside the file.
 - **Activity** for admins: now playing with a Stop button, history, stats and users. A movie, show or episode page also shows admins its own History: the latest 20 plays with who, when, device, how much was watched and how far it got, and the totals.
 - **Sign-in:** with `auto_sign_in_user` set, a browser on a trusted network is signed straight in; otherwise it shows a sign-in form. The session is an HttpOnly cookie, and every change the page makes carries a header a cross-site page cannot send.
 
@@ -127,6 +127,28 @@ All three take `position`: `top_left`, `top_right`, `bottom_left` or `bottom_rig
 ### Collections
 
 Every film series (a TMDb collection) with two or more of its films in a movie library becomes a collection there, in release order, like Kometa's `franchise` default. The membership is rebuilt every 30 minutes, so a new sequel joins on its own; a series that drops to one film goes away. Names come from TMDb once, so this needs `VCRX_TMDB_API_KEY`; without it, series wait rather than get a made-up name. `vcrx metadata collections` builds them now. The web app shows them under a library's Collections button and links each film's page to its series. Libraries also filter by genre and decade.
+
+### Smart collections and hidden labels (Kometa style)
+
+Write collections as YAML files in `/config/collections/` (`collections_dir` in `vcrx.yaml` or `VCRX_COLLECTIONS_DIR` moves it); `deploy/collections.example.yaml` is a commented start. The files are the source of truth: the database copy is rebuilt from them after every scan, every TMDb pass and every 15 minutes, so losing the database loses nothing.
+
+```yaml
+collections:
+  - name: R-Rated Horror
+    library: Movies
+    smart:
+      all:                  # every rule matches; any: at least one does; lists nest
+        - genre: Horror
+        - content_rating: R
+    label: horror           # stamped on every match, taken off when a title stops matching
+    visible: { library: false, home: false, shared: false }   # label only, never listed
+```
+
+Rules use local metadata only: genre, studio, director, writer, actor, country, network, decade, year or a year range, resolution (of any present version), HDR, content rating, label and `added_within_days`. A list of values means any of them. A file with a mistake is refused whole, with the file and line in the log, in `vcrx metadata collections` (which builds everything now) and in `GET /api/v1/admin/collections`; its collections keep building from the last good copy, and nothing else changes. An empty, comment-only or cut-short file counts as a mistake, because editors and sync tools leave one mid-save; to empty a file on purpose, write `collections: []`. Deleting a file removes its collections and labels once it has stayed gone for a minute and a later build still finds it gone. If the directory itself is missing, nothing changes at all.
+
+Rebuilds also follow TMDb: after each enrichment pass that matched anything and after a Fix Match, a rebuild runs within seconds, so a deny label lands as soon as the genre or rating that triggers it arrives.
+
+`label:` is how friends' access follows your rules: deny `horror` in a user's policy and a title disappears for them as soon as a rebuild finds it matches, and comes back when it stops matching. VCRX only ever takes off labels it stamped. A label you set by hand or that an NFO file carries is never removed, and an NFO naming a stamped label takes it over. Collections with `visible.library: false` are left out of library collection lists, title pages and Home; `home` and `shared` are stored for Home rows, which do not show collections yet.
 
 ### Radarr and Sonarr
 
@@ -203,7 +225,7 @@ golangci-lint run
 govulncheck ./...
 ```
 
-To work on the web app or the API against a few generated test clips: `./scripts/dev-server.sh`, then open http://127.0.0.1:3751/. It builds the clips with ffmpeg on first run, serves the web files from `server/web/static` so an edit shows on reload, and signs the local browser in. `server/web/check-js.sh` is the web app's compile check, and `node scripts/web-smoke.mjs` drives every page (at desktop and phone width), both playback paths, Continue Watching removal, search as you type and the shortcuts list in headless Chrome against the dev server; CI runs both.
+To work on the web app or the API against a few generated test clips: `./scripts/dev-server.sh`, then open http://127.0.0.1:3751/. It builds the clips with ffmpeg on first run, serves the web files from `server/web/static` so an edit shows on reload, and signs the local browser in. `server/web/check-js.sh` is the web app's compile check, and `node scripts/web-smoke.mjs` drives every page (at desktop and phone width), all three playback paths (direct, audio converted, video transcoded, and HLS for Safari), Continue Watching removal, search as you type and the shortcuts list in headless Chrome against the dev server; CI runs both.
 
 On NixOS, run `nix-shell` at the repo root first: [shell.nix](shell.nix) provides these tools, plus the Docker client and adb for the TV app. The API contract is [server/api/openapi.yaml](server/api/openapi.yaml), served at `/api/v1/openapi.yaml`; a test fails when it and the registered routes disagree. Migrations are forward-only SQL files in `server/internal/db/migrations`.
 

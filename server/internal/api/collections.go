@@ -1,6 +1,10 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
+)
 
 func (s *Server) libraryCollections(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r, "library_id")
@@ -40,4 +44,21 @@ func (s *Server) collection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"collection": col, "items": items})
+}
+
+// adminSmartCollections lists the smart collection definitions loaded from
+// YAML and how the last build of each went, including files that were refused.
+func (s *Server) adminSmartCollections(w http.ResponseWriter, r *http.Request) {
+	var rep *collections.Report
+	if s.SmartCollections != nil {
+		rep = s.SmartCollections.Status()
+	}
+	if rep == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"built": false, "files": []any{}, "collections": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Built bool `json:"built"`
+		*collections.Report
+	}{true, rep})
 }

@@ -60,6 +60,11 @@ type probe struct {
 	owner string
 	// list probes: text the open friend sees and the restricted friend must not.
 	list []string
+	// pastPolicy, when set, is text in a 404 that only a handler step after
+	// the policy check writes (an HLS run that has not started). The open
+	// friend's 404 must carry it, proving the call got past the policy; the
+	// restricted friend's 404 must not.
+	pastPolicy string
 }
 
 var routeParam = regexp.MustCompile(`\{[a-z_]+\}`)
@@ -82,6 +87,7 @@ func (p probe) with(body any) probe        { p.body = body; return p }
 func (p probe) query(q string) probe       { p.path += "?" + q; return p }
 func (p probe) ownedBy(tok string) probe   { p.owner = tok; return p }
 func (p probe) hides(text ...string) probe { p.list = text; return p }
+func (p probe) past(text string) probe     { p.pastPolicy = text; return p }
 
 func (p probe) method() string { m, _, _ := strings.Cut(p.route, " "); return m }
 
@@ -104,8 +110,7 @@ func newWalkFixture(t *testing.T) *walkFixture {
 	t.Helper()
 	w := &walkFixture{fixture: newFixture(t)}
 	f := w.fixture
-	f.srv.Playback.CanRemux = true
-	f.srv.Remux = remux.New("ffmpeg", "ffprobe", 2, nil)
+	withHLS(t, f, remux.New("ffmpeg", "ffprobe", 2, nil))
 	now := time.Now().UnixMilli()
 	exec := func(q string, args ...any) int64 {
 		t.Helper()
@@ -319,7 +324,13 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 			at("POST /api/v1/playback/sessions/{session_id}/events", id).with(map[string]any{"type": "progress", "position_ms": 60000}).ownedBy(owner),
 			at("GET /api/v1/playback/sessions/{session_id}/seek", id).query("position_ms=1000").ownedBy(owner),
 			at("GET /api/v1/playback/sessions/{session_id}/stream.mp4", id).ownedBy(owner),
-			at("HEAD /api/v1/playback/sessions/{session_id}/stream.mp4", id).ownedBy(owner))
+			at("HEAD /api/v1/playback/sessions/{session_id}/stream.mp4", id).ownedBy(owner),
+			// No HLS run exists for these sessions (their client asked for
+			// fragmented MP4), so even the open friend gets a 404, but one
+			// written after the policy check.
+			at("GET /api/v1/playback/sessions/{session_id}/hls/{run}/index.m3u8", id, "1").ownedBy(owner).past("stream has ended"),
+			at("HEAD /api/v1/playback/sessions/{session_id}/hls/{run}/index.m3u8", id, "1").ownedBy(owner).past("stream has ended"),
+			at("GET /api/v1/playback/sessions/{session_id}/hls/{run}/{segment}", id, "1", "seg-00001.m4s").ownedBy(owner).past("No such segment"))
 	}
 	for _, s := range sessions {
 		sessionProbes(s, "")
@@ -430,6 +441,11 @@ func TestAccessWalkEveryRouteAppliesThePolicy(t *testing.T) {
 		}
 		r := call(p, tok)
 		switch {
+		case p.pastPolicy != "":
+			if r.code != 404 || !strings.Contains(string(r.body), p.pastPolicy) {
+				t.Errorf("control: %s answered %d %.120s, not the %q that shows it got past the policy", label(p), r.code, r.body, p.pastPolicy)
+				controlOK = false
+			}
 		case r.code == 401 || r.code == 403 || r.code == 404 || r.code >= 500:
 			t.Errorf("control: %s answered %d %.120s, so a 404 later would prove nothing", label(p), r.code, r.body)
 			controlOK = false
@@ -461,8 +477,8 @@ func TestAccessWalkEveryRouteAppliesThePolicy(t *testing.T) {
 			for _, p := range byRoute[key] {
 				r := call(p, w.friendTok)
 				if p.list == nil {
-					if r.code != http.StatusNotFound {
-						t.Errorf("%s: the restricted friend got %d %.200s, want 404", label(p), r.code, r.body)
+					if r.code != http.StatusNotFound || (p.pastPolicy != "" && strings.Contains(string(r.body), p.pastPolicy)) {
+						t.Errorf("%s: the restricted friend got %d %.200s, want the policy's 404", label(p), r.code, r.body)
 					}
 					continue
 				}
