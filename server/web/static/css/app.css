@@ -167,13 +167,13 @@ main { padding: 24px var(--pad) 64px; outline: none; }
 
 /* Activity */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 16px 0 24px; }
-.tabs a { padding: 10px 16px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
+.tabs a { white-space: nowrap; padding: 10px 16px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
 .tabs a.active { color: var(--text); border-color: var(--orange); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--gap); margin-bottom: 28px; }
 .tile { background: var(--surface); border-radius: var(--radius); padding: 16px; }
 .tile .k { color: var(--muted); font-size: 13px; }
 .tile .v { font-family: Rajdhani, sans-serif; font-weight: 700; font-size: 30px; }
-.sessions { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: var(--gap); }
+.sessions { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); gap: var(--gap); }
 .session { display: grid; grid-template-columns: 96px 1fr; gap: 16px; background: var(--surface); border-radius: var(--radius); padding: 14px; }
 .session .card .art { aspect-ratio: 2 / 3; }
 .session .s-title { font-weight: 600; }
@@ -225,9 +225,19 @@ table.list td.num, table.list th.num { text-align: right; font-variant-numeric: 
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface-2); border-left: 3px solid var(--orange); padding: 10px 18px; border-radius: var(--radius); z-index: 60; }
 
 @media (max-width: 720px) {
-  .topbar { gap: 10px; flex-wrap: wrap; }
-  .search { order: 3; width: 100%; }
+  /* Brand and Settings on the first line, the libraries as a scrolling row,
+     then search across the full width. */
+  .topbar { gap: 8px 12px; flex-wrap: wrap; }
+  .nav-settings { margin-left: auto; }
+  .nav { order: 3; width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .nav-link { white-space: nowrap; padding: 6px 10px; }
+  .search { order: 4; width: 100%; margin-left: 0; }
   .search input { width: 100%; }
+  .session { grid-template-columns: 72px minmax(0, 1fr); }
+  .s-foot { flex-wrap: wrap; }
+  .tabs { overflow-x: auto; }
+  .toolbar select { max-width: 100%; }
+  table.list { display: block; overflow-x: auto; }
   .hero .inner { flex-direction: column; align-items: flex-start; }
   .episode { grid-template-columns: 1fr; }
   .episode .card { width: 100%; }
