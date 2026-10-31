@@ -147,7 +147,23 @@ data class Item(
     val ratings: Map<String, Double> = emptyMap(),
     val versions: List<Version> = emptyList(),
     @SerialName("next_episode") val nextEpisode: Item? = null,
+    /** Collections this item is in, such as a film series. */
+    val collections: List<CollectionRef> = emptyList(),
 )
+
+@Serializable
+data class CollectionRef(val id: Long, val name: String)
+
+@Serializable
+data class CollectionInfo(
+    val id: Long,
+    @SerialName("library_id") val libraryId: Long = 0,
+    val name: String,
+    @SerialName("item_count") val itemCount: Int = 0,
+)
+
+@Serializable
+data class CollectionResponse(val collection: CollectionInfo, val items: List<Item> = emptyList())
 
 @Serializable
 data class ItemPage(

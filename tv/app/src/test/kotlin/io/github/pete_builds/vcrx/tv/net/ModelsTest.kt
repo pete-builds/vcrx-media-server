@@ -92,4 +92,21 @@ class ModelsTest {
         val old = json.decodeFromString(ServerInfo.serializer(), """{"name": "VCRX", "product": "vcrx-media-server", "api_version": 1}""")
         assertFalse(old.autoSignIn)
     }
+
+    @Test
+    fun collectionsOnItemsAndTheirPage() {
+        val item = json.decodeFromString(Item.serializer(), """{"id": 9, "kind": "movie", "library_id": 1, "title": "Part Two",
+            "has_poster": true, "has_backdrop": false, "has_thumb": false, "added_at": 1,
+            "collections": [{"id": 4, "name": "The Series Collection"}]}""")
+        assertEquals("The Series Collection", item.collections.single().name)
+        // Servers from before collections send no field.
+        assertTrue(json.decodeFromString(Item.serializer(), """{"id": 1, "kind": "movie", "library_id": 1, "title": "A",
+            "has_poster": false, "has_backdrop": false, "has_thumb": false, "added_at": 1}""").collections.isEmpty())
+        val page = json.decodeFromString(CollectionResponse.serializer(), """{"collection": {"id": 4, "library_id": 1,
+            "name": "The Series Collection", "item_count": 2, "poster_item_ids": [8, 9]},
+            "items": [{"id": 8, "kind": "movie", "library_id": 1, "title": "Part One", "has_poster": true,
+            "has_backdrop": false, "has_thumb": false, "added_at": 1}]}""")
+        assertEquals(2, page.collection.itemCount)
+        assertEquals("Part One", page.items.single().title)
+    }
 }

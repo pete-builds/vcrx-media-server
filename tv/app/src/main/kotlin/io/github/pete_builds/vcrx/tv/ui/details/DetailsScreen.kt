@@ -180,6 +180,15 @@ private fun Details(item: Item, vm: DetailsViewModel) {
                         val chosen = item.versions.firstOrNull { it.id == vm.versionId } ?: item.versions.first()
                         BrandButton("Version: ${versionLabel(chosen)}", onClick = { pickVersion = true })
                     }
+                    // A film series: open its other titles.
+                    if (item.collections.isNotEmpty()) {
+                        val actions = LocalAppActions.current
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            item.collections.forEach { c ->
+                                BrandButton("Part of ${c.name}", onClick = { actions.openCollection(c.id, c.name) })
+                            }
+                        }
+                    }
                     vm.actionError?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
                 }
             }

@@ -14,6 +14,7 @@ import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.ui.browse.BrowseScreen
 import io.github.pete_builds.vcrx.tv.ui.connect.ConnectScreen
 import io.github.pete_builds.vcrx.tv.ui.connect.LoginScreen
+import io.github.pete_builds.vcrx.tv.ui.collection.CollectionScreen
 import io.github.pete_builds.vcrx.tv.ui.details.DetailsScreen
 import io.github.pete_builds.vcrx.tv.ui.settings.AboutScreen
 import io.github.pete_builds.vcrx.tv.ui.theme.BrandTheme
@@ -39,6 +40,10 @@ class MainActivity : ComponentActivity() {
                         composable<LoginRoute> { LoginScreen() }
                         composable<BrowseRoute> { BrowseScreen() }
                         composable<DetailsRoute> { entry -> DetailsScreen(entry.toRoute<DetailsRoute>().itemId) }
+                        composable<CollectionRoute> { entry ->
+                            val route = entry.toRoute<CollectionRoute>()
+                            CollectionScreen(route.collectionId, route.name)
+                        }
                         composable<AboutRoute> { AboutScreen() }
                     }
                 }
