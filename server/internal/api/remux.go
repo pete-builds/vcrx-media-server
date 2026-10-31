@@ -181,13 +181,35 @@ func (s *Server) convertedStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Accept-Ranges", "none")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	err := s.Remux.Stream(ctx, &flushWriter{w: w}, opts)
+	err := streamUntilCancelled(ctx, w, func() error { return s.Remux.Stream(ctx, &flushWriter{w: w}, opts) })
 	switch {
 	case errors.Is(err, remux.ErrBusy):
 		writeError(w, http.StatusServiceUnavailable, "busy", "The server is converting as many streams as it allows. Try again shortly.")
 	case err != nil:
 		s.Log.Warn("converted stream failed", "session", id, "version", v.ID, "err", err)
 	}
+}
+
+// streamUntilCancelled runs stream and, if ctx is cancelled first (a stop, an
+// admin terminate, or the client leaving), fails the response's pending write at
+// once. Otherwise a reader that keeps the connection open but barely reads holds
+// ffmpeg's output copy, and with it the conversion slot, until it drains the
+// buffer. The deadline is set before this returns, never on a connection that
+// has moved on to its next request.
+func streamUntilCancelled(ctx context.Context, w http.ResponseWriter, stream func() error) error {
+	done, cut := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(cut)
+		select {
+		case <-ctx.Done():
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now())
+		case <-done:
+		}
+	}()
+	err := stream()
+	close(done)
+	<-cut
+	return err
 }
 
 func decodes(c playback.Capabilities, codec string) bool {
