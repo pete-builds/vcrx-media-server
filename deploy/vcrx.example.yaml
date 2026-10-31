@@ -22,6 +22,14 @@ server_name: VCRX
 # downloaded once a day. IMDb licenses it for personal, non-commercial use.
 #imdb_ratings: true
 
+# Skip Intro and Skip Credits: intros and end credits are found from each TV
+# season's audio, in the background, one season at a time at low priority, and
+# only in these hours of local time (set TZ in .env). Off: detect_markers: false.
+#detect_markers: true
+#marker_hours: "01:00-06:00"   # or "always"
+#marker_intro_minutes: 10      # how much of the start of each episode is compared
+#marker_credits_minutes: 8     # and of the end
+
 # Radarr and Sonarr webhooks find the folder by name in a library. If they see
 # the NAS at another path and folder names differ, map their prefix to VCRX's.
 #arr_path_map:

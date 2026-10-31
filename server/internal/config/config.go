@@ -17,6 +17,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/arr"
+	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 )
 
@@ -95,6 +96,18 @@ type Config struct {
 	// TMDbCountry picks the content rating shown, e.g. US for PG-13.
 	TMDbCountry string `yaml:"tmdb_country"`
 
+	// DetectMarkers finds intros and end credits in TV episodes from their
+	// audio, for Skip Intro and Skip Credits. On by default. It runs at low
+	// priority, one season at a time, only during MarkerHours.
+	DetectMarkers bool `yaml:"detect_markers"`
+	// MarkerHours is when detection may run, local time (set TZ): "01:00-06:00"
+	// by default, or "always".
+	MarkerHours string `yaml:"marker_hours"`
+	// MarkerIntroMinutes and MarkerCreditsMinutes are how much of the start
+	// and of the end of each episode are compared (10 and 8).
+	MarkerIntroMinutes   int `yaml:"marker_intro_minutes"`
+	MarkerCreditsMinutes int `yaml:"marker_credits_minutes"`
+
 	Libraries []LibrarySpec `yaml:"libraries"`
 }
 
@@ -115,6 +128,11 @@ func defaults() Config {
 		SessionTTL:       90 * 24 * time.Hour,
 		TMDbLanguage:     "en-US",
 		TMDbCountry:      "US",
+
+		DetectMarkers:        true,
+		MarkerHours:          "01:00-06:00",
+		MarkerIntroMinutes:   10,
+		MarkerCreditsMinutes: 8,
 	}
 }
 
@@ -186,6 +204,8 @@ func Load() (Config, error) {
 	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
 	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)
 	list("VCRX_ALLOWED_HOSTS", &c.AllowedHosts)
+	boolean("VCRX_DETECT_MARKERS", &c.DetectMarkers)
+	str("VCRX_MARKER_HOURS", &c.MarkerHours)
 	str("VCRX_TMDB_LANGUAGE", &c.TMDbLanguage)
 	str("VCRX_TMDB_COUNTRY", &c.TMDbCountry)
 	str("VCRX_TMDB_API_KEY", &c.TMDbAPIKey)
@@ -250,6 +270,12 @@ func (c *Config) validate() error {
 	}
 	if c.SessionTTL < time.Hour {
 		errs = append(errs, errors.New("session TTL must be at least one day"))
+	}
+	if _, err := markers.ParseHours(c.MarkerHours); err != nil {
+		errs = append(errs, fmt.Errorf("marker_hours: %w", err))
+	}
+	if c.MarkerIntroMinutes < 1 || c.MarkerIntroMinutes > 30 || c.MarkerCreditsMinutes < 1 || c.MarkerCreditsMinutes > 30 {
+		errs = append(errs, errors.New("marker_intro_minutes and marker_credits_minutes must be 1 to 30"))
 	}
 	for i, r := range c.MediaRoots {
 		if !filepath.IsAbs(r) {

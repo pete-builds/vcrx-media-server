@@ -1,6 +1,7 @@
 import { api, artUrl } from "../api.js";
 import { h, card, icon, runtime, clock, size, bitrate, episodeCode, toast } from "../dom.js";
 import { go, state } from "../app.js";
+import { markerEditor } from "./markers.js";
 
 // The details page for a movie, show, season or episode.
 export async function itemView({ match, params }) {
@@ -10,7 +11,8 @@ export async function itemView({ match, params }) {
   const children = playable ? null : await api(`/items/${id}/children`);
   const admin = state.me && state.me.is_admin && (item.kind === "movie" || item.kind === "show");
   const fix = admin ? fixMatch(item, params && params.get("fix") === "1") : null;
-  const el = h("div", {}, hero(item), fix, playable ? techFacts(item) : null, children ? childrenSection(item, children.items || []) : null);
+  const markers = state.me && state.me.is_admin && item.kind === "episode" ? markerEditor(item) : null;
+  const el = h("div", {}, hero(item), fix, markers, playable ? techFacts(item) : null, children ? childrenSection(item, children.items || []) : null);
   return { el, title: item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)}`.trim() : item.title };
 }
 

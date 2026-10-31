@@ -19,6 +19,7 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 | Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, genre and decade filters | Collections from YAML rules |
 | Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
 | Direct play over HTTP with Range; converted streams for clients that ask for them (video copied, audio converted to AAC, fragmented MP4); sidecar and embedded text subtitles (also as WebVTT for browsers) | Video transcoding, picture subtitle burn-in, VA-API hardware acceleration |
+| Skip Intro and Skip Credits (web and TV): intros and end credits found from each season's audio at night, chapter titles and Plex-style NFO markers honoured, an admin editor, and a per-user choice of button, automatic or off | Skip markers for movies other than by hand |
 | Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, stats, per-user totals, stop a stream, webhooks | Activity screens in a client |
 | Web app at `/`: browse, details, search, play in the browser with subtitles, Activity screens. REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Browser playback of files the browser cannot decode, other TV platforms |
 
@@ -122,6 +123,18 @@ All three take `position`: `top_left`, `top_right`, `bottom_left` or `bottom_rig
 ### Collections
 
 Every film series (a TMDb collection) with two or more of its films in a movie library becomes a collection there, in release order, like Kometa's `franchise` default. The membership is rebuilt every 30 minutes, so a new sequel joins on its own; a series that drops to one film goes away. Names come from TMDb once, so this needs `VCRX_TMDB_API_KEY`; without it, series wait rather than get a made-up name. `vcrx metadata collections` builds them now. The web app shows them under a library's Collections button and links each film's page to its series. Libraries also filter by genre and decade.
+
+### Skip Intro and Skip Credits
+
+A season's episodes share their theme song and usually their end credits. VCRX compares the first 10 minutes of each episode with its neighbours' by audio fingerprint, and the last 8 minutes likewise: the stretch heard in most of them is the intro (or the credits). A cold open before the theme is fine, and a recap ("previously on") is not mistaken for the intro because it repeats only one other episode. Credits followed by a scene end before the scene, so Skip Credits lands on it; credits that run to the end of the file become Next Episode, straight into Up Next. When nothing matches, a final stretch of black picture (5 s or more) or silence (15 s or more) counts as credits. A season that shares nothing gets no markers: a wrong Skip button is worse than none.
+
+How it stays out of the way: one season at a time, ffmpeg and the matching at `nice 19`, only between `marker_hours` (01:00 to 06:00 local time by default; set `TZ`), never in a library being scanned, and only for episodes it has not seen (fingerprints are cached under `/cache/markers`, about 30 KB per episode). It resumes after a restart. The existing library is backfilled the same way; Settings, Intros shows progress show by show (`GET /api/v1/admin/markers`). `detect_markers: false` turns it off.
+
+Markers from the file win over detection: a chapter titled Intro, Opening, Credits, End Credits and the like, or Plex-style `<Marker type="intro" startTimeOffset="0" endTimeOffset="51000"/>` elements (milliseconds) in the episode's NFO. An admin's own markers win over everything: on an episode's page, set or clear each one, copy it to the rest of the season (VCRX finds the same audio in each episode), or detect the season again. Cleared stays cleared.
+
+Each person chooses in Settings: show a Skip button (default), skip automatically, or off (`GET`/`PUT /api/v1/me/playback-settings`, field `skip_markers`: `button`, `auto` or `off`; the TV app reads the same value from each playback session). Skipping automatically acts only on intros detection is sure of (confidence 0.75 or more, or markers from the file or an admin); credits always wait for a press, so a scene after them is never skipped.
+
+Check detection against your own library without storing anything: `docker compose exec vcrx vcrx markers detect --dry-run "/media/TV/Some Show"` prints each season folder's episodes with the intro and credits it finds.
 
 ### Radarr and Sonarr
 

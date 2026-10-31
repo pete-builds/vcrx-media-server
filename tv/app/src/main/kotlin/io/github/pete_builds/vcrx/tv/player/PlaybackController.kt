@@ -28,8 +28,10 @@ import io.github.pete_builds.vcrx.tv.caps.CapabilityProbe
 import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.Item
+import io.github.pete_builds.vcrx.tv.net.Marker
 import io.github.pete_builds.vcrx.tv.net.PlaybackRequest
 import io.github.pete_builds.vcrx.tv.net.PlaybackSession
+import io.github.pete_builds.vcrx.tv.net.PlaybackSettings
 import io.github.pete_builds.vcrx.tv.net.streamRefusal
 import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +84,20 @@ class PlaybackController(
     var isPlaying by mutableStateOf(false)
         private set
 
+    /** This item's intro and credits, and the user's choice for them (player/SkipMarkers.kt). */
+    var markers by mutableStateOf<List<Marker>>(emptyList())
+        private set
+
+    /**
+     * button, auto or off: from the session, which carries the server-side setting. A
+     * settings screen that changes it mid-playback may set it here too.
+     */
+    var skipMode by mutableStateOf(PlaybackSettings.BUTTON)
+
+    /** What the Skip button does now; null when it is hidden. */
+    val skipAction: SkipAction?
+        get() = SkipMarkers.actionAt(markers, positionMs, durationMs, nextEpisode != null, skipMode)
+
     /** Where held left or right keys have moved the playhead to; committed on release. */
     var scrubTargetMs by mutableStateOf<Long?>(null)
         private set
@@ -131,6 +147,8 @@ class PlaybackController(
                 val start = startAtMs ?: if (fromStart) 0L else null
                 val created = graph.api.startPlayback(PlaybackRequest(itemId, versionId, start, capabilities))
                 if (released) return@launch
+                markers = created.markers
+                skipMode = created.skipMarkers
                 play(created)
             } catch (e: ApiException.Http) {
                 phase = if (e.status == 403 || e.status == 422) Phase.Refused(e.message.orEmpty()) else Phase.Failed(e.message.orEmpty(), false)
@@ -282,6 +300,23 @@ class PlaybackController(
         activity.finish()
     }
 
+    /**
+     * Skip Intro or Skip Credits. A seek goes through [skip], the controller's own seek
+     * path, so a converted stream reopens at the target. The delta is from [positionMs],
+     * at most half a second old, so the landing is that much past the target at worst.
+     * Next Episode ends this one (reported as finished) and starts the Up Next countdown.
+     */
+    fun skipMarker(action: SkipAction) {
+        val next = nextEpisode
+        if (action.playsNext && next != null) {
+            player.playWhenReady = false
+            reporter?.stop(durationMs, durationMs.takeIf { it > 0 })
+            upNext(next)
+            return
+        }
+        skip(action.targetMs - positionMs)
+    }
+
     fun togglePlayPause() {
         if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
         player.playWhenReady = !player.playWhenReady
@@ -366,6 +401,13 @@ class PlaybackController(
             }
             touch()
             return false
+        }
+        // The Skip button has focus while it shows: OK presses it.
+        skipAction?.let { action ->
+            if (SkipMarkers.isSelect(event.keyCode)) {
+                if (up) skipMarker(action)
+                return true
+            }
         }
         return when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {

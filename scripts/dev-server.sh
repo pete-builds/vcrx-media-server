@@ -76,6 +76,30 @@ if [ ! -f "$twin" ]; then
     -metadata:s:a:0 language=eng -metadata:s:a:1 language=ger "$twin"
 fi
 
+# A season with a shared theme and shared end credits, for Skip Intro and
+# Skip Credits: a cold open of a different length in each episode, then the
+# theme (20 s), the episode (noise unique to it), and the credits (15 s). The
+# server finds the markers itself once the scans are done (marker_hours below).
+theme="0.25*sin(2*PI*t*220*pow(2\,mod(floor(t*3)*5\,12)/12))*exp(-3*mod(t\,1/3))+0.15*sin(2*PI*(400*mod(t\,2)+400*mod(t\,2)*mod(t\,2)))+0.1*sin(2*PI*t*110*pow(2\,mod(floor(t/2)*7\,12)/12))*(0.6+0.4*sin(2*PI*5*t))"
+credits="(0.2*sin(2*PI*t*660*pow(2\,-mod(floor(t*4)*7+floor(t/1.1)*5\,12)/12))+0.1*sin(2*PI*t*1320*pow(2\,-mod(floor(t*4)*7+floor(t/1.1)*5\,12)/12)))*exp(-5*mod(t\,0.25))+0.12*sin(2*PI*(1800*mod(t\,1.7)-300*mod(t\,1.7)*mod(t\,1.7)))"
+bay="$media/TV/Lantern Bay/Season 01"
+if [ ! -f "$bay/Lantern Bay - S01E03.mp4" ]; then
+  mkdir -p "$bay"
+  e=0
+  for cold in 6 12 3; do
+    e=$((e + 1))
+    total=$((cold + 20 + 30 + 15))
+    ffmpeg -loglevel error -y \
+      -f lavfi -i "anoisesrc=color=pink:sample_rate=44100:amplitude=0.4:seed=${e}1:duration=$cold" \
+      -f lavfi -i "aevalsrc=exprs='$theme':s=44100:d=20" \
+      -f lavfi -i "anoisesrc=color=pink:sample_rate=44100:amplitude=0.4:seed=${e}2:duration=30" \
+      -f lavfi -i "aevalsrc=exprs='$credits':s=44100:d=15" \
+      -f lavfi -i "testsrc2=size=640x360:rate=24:duration=$total" \
+      -filter_complex "[0:a][1:a][2:a][3:a]concat=n=4:v=0:a=1,aformat=channel_layouts=stereo[a]" \
+      -map 4:v -map "[a]" -c:v libx264 -pix_fmt yuv420p -c:a aac -movflags +faststart -shortest "$bay/Lantern Bay - S01E0$e.mp4"
+  done
+fi
+
 # NFO ratings let the poster overlays show without network access.
 nfo() { # dir file rating votes
   [ -f "$1/$2" ] && return
@@ -91,6 +115,8 @@ cat > "$dir/config/vcrx.yaml" << YAML
 server_name: VCRX Dev
 auto_sign_in_user: dev
 trusted_networks: [127.0.0.0/8, "::1/128"]
+# Detect intros and credits at any hour (a real server waits for the night).
+marker_hours: always
 libraries:
   - name: Movies
     kind: movie

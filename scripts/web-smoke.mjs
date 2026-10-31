@@ -121,6 +121,7 @@ async function main() {
     ["/settings", ".settings h1"],
     ["/settings/libraries", "table.list"],
     ["/settings/users", ".add-user"],
+    ["/settings/markers", "table.list"],
   ];
   for (const [path, selector] of pages) {
     console.log(`page #${path}`);
@@ -179,6 +180,84 @@ async function main() {
     if (res.converted !== (wantDecision === "converted")) fail(`play ${label}`, `expected a ${wantDecision} stream`);
     if (exceptions.length) fail(`play ${label}`, `threw: ${exceptions[0]}`);
   }
+
+  // Skip Intro and Next Episode on the sample season with a shared theme. The
+  // server detects the markers in the background after its scans, so wait
+  // for them first.
+  console.log("skip intro (Lantern Bay)");
+  const bay = await evaluate(`
+    const j = (p) => fetch("/api/v1" + p).then((r) => r.json());
+    const found = (await j("/search?q=Lantern%20Bay")).items || [];
+    const show = found.find((i) => i.kind === "show" && i.title === "Lantern Bay");
+    if (!show) return { why: "no Lantern Bay show in the library" };
+    const season = (await j("/items/" + show.id + "/children")).items[0];
+    const eps = (await j("/items/" + season.id + "/children")).items;
+    const ep = eps[1];
+    for (let i = 0; i < 180; i++) {
+      const d = await j("/items/" + ep.id);
+      const intro = d.markers.find((m) => m.kind === "intro");
+      const credits = d.markers.find((m) => m.kind === "credits");
+      if (intro && credits) return { id: ep.id, intro, credits };
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return { why: "no intro and credits markers after 3 minutes" };`);
+  if (!bay.id) {
+    fail("skip intro", bay.why);
+  } else {
+    exceptions = [];
+    await s("Page.navigate", { url: `${base}/#/play/${bay.id}?start=${bay.intro.start_ms + 1000}` });
+    const res = await evaluate(`
+      for (let i = 0; i < 60 && !document.querySelector("video"); i++) await new Promise((r) => setTimeout(r, 150));
+      const v = document.querySelector("video");
+      if (!v) return { why: "no video" };
+      v.muted = true;
+      v.play().catch(() => {});
+      const shown = () => { const b = document.querySelector(".player .skip-btn"); return b && !b.hidden ? b : null; };
+      for (let i = 0; i < 60 && !shown(); i++) await new Promise((r) => setTimeout(r, 150));
+      const b = shown();
+      if (!b) return { why: "no Skip button inside the intro (t=" + v.currentTime + ")" };
+      const label = b.textContent;
+      b.click();
+      for (let i = 0; i < 40 && v.currentTime * 1000 < ${bay.intro.end_ms} - 500; i++) await new Promise((r) => setTimeout(r, 150));
+      return { label, t: v.currentTime, hidden: !shown() };`);
+    if (res.why) fail("skip intro", res.why);
+    else {
+      if (res.label !== "Skip Intro") fail("skip intro", `button says "${res.label}"`);
+      if (res.t * 1000 < bay.intro.end_ms - 500) fail("skip intro", `still at ${res.t} s, intro ends at ${bay.intro.end_ms / 1000} s`);
+      if (!res.hidden) fail("skip intro", "button still showing after the skip");
+    }
+    // Credits that run to the end, with an episode after: Next Episode, and Up Next.
+    await s("Page.navigate", { url: `${base}/#/play/${bay.id}?start=${bay.credits.start_ms + 1000}` });
+    const next = await evaluate(`
+      for (let i = 0; i < 60 && !document.querySelector("video"); i++) await new Promise((r) => setTimeout(r, 150));
+      const v = document.querySelector("video");
+      v.muted = true;
+      v.play().catch(() => {});
+      const shown = () => { const b = document.querySelector(".player .skip-btn"); return b && !b.hidden ? b : null; };
+      for (let i = 0; i < 60 && !shown(); i++) await new Promise((r) => setTimeout(r, 150));
+      const b = shown();
+      if (!b) return { why: "no button inside the credits" };
+      const label = b.textContent;
+      b.click();
+      for (let i = 0; i < 60 && !document.querySelector(".player .up-next"); i++) await new Promise((r) => setTimeout(r, 150));
+      return { label, upNext: !!document.querySelector(".player .up-next") };`);
+    if (next.why) fail("next episode", next.why);
+    else {
+      if (next.label !== "Next Episode") fail("next episode", `button says "${next.label}"`);
+      if (!next.upNext) fail("next episode", "Up Next did not appear");
+    }
+    if (exceptions.length) fail("skip intro", `threw: ${exceptions[0]}`);
+    // The admin's marker editor on the episode page, and detection's progress.
+    for (const [path, selector] of [[`/item/${bay.id}`, ".markers-edit .marker-row"], ["/settings/markers", "table.list"]]) {
+      await s("Page.navigate", { url: `${base}/#${path}` });
+      const page = await evaluate(`
+        for (let i = 0; i < 40 && !document.querySelector(${JSON.stringify(selector)}); i++) await new Promise((r) => setTimeout(r, 150));
+        const text = document.getElementById("view").innerText;
+        return { found: !!document.querySelector(${JSON.stringify(selector)}), junk: (text.match(/\\b(null|undefined|NaN)\\b/) || [])[0] || "" };`);
+      if (!page.found) fail(`#${path}`, `no ${selector}`);
+      if (page.junk) fail(`#${path}`, `shows "${page.junk}"`);
+    }
+  }
   await s("Page.navigate", { url: `${base}/#/` });
   await sleep(500);
 }
@@ -196,4 +275,4 @@ if (failures.length) {
   console.log(`\nweb-smoke: ${failures.length} failure(s)\n` + failures.map((f) => "  " + f).join("\n"));
   process.exit(1);
 }
-console.log("\nweb-smoke: every page and both playback paths passed");
+console.log("\nweb-smoke: every page, both playback paths and Skip Intro passed");

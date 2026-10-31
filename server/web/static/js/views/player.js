@@ -1,6 +1,7 @@
 import { api, ApiError } from "../api.js";
 import { h, icon, errorBox, episodeCode, clock, toast } from "../dom.js";
 import { capabilities } from "../caps.js";
+import { skipButtons } from "./skip.js";
 
 // The player: asks the server for a session with this browser's capabilities,
 // plays it, and reports start, pause, seek, progress and stop so resume points
@@ -181,6 +182,7 @@ export async function playerView({ match, params }) {
   shell.append(video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title), audioSel,
     converted ? h("span", { class: "pill", title: session.reason }, session.decision === "audio_transcode" ? "Audio converted" : "Repackaged") : null,
     subSel), controls, status, overlay);
+  skipButtons({ shell, video, session, pos, seekTo, durationMs: dur, hasNext: !!item.next_episode });
 
   video.addEventListener("loadedmetadata", () => {
     if (!converted && session.resume_position_ms > 0 && video.currentTime < 1) video.currentTime = session.resume_position_ms / 1000;

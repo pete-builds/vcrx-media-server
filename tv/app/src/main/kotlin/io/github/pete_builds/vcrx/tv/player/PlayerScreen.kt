@@ -77,6 +77,7 @@ fun PlayerScreen(controller: PlaybackController, onExit: () -> Unit) {
             }
             Phase.Playing -> if (controller.overlay != Overlay.Hidden) Chrome(controller)
         }
+        if (controller.phase == Phase.Playing && controller.dialog == null) SkipButton(controller)
         controller.dialog?.let { TrackDialog(controller, it) }
     }
 }

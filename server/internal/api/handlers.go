@@ -305,7 +305,12 @@ func (s *Server) item(w http.ResponseWriter, r *http.Request) {
 		s.notFoundOr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, d)
+	withMarkers, err := s.withMarkers(r.Context(), d)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, withMarkers)
 }
 
 func (s *Server) itemChildren(w http.ResponseWriter, r *http.Request) {
@@ -405,7 +410,12 @@ func (s *Server) startPlayback(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("playback start", "user", sess.User.Username, "item", req.ItemID, "version", out.Version.ID, "decision", out.Decision,
 		"reason", out.Reason, "session", out.SessionID, "device", sess.Device.Name)
-	writeJSON(w, http.StatusCreated, out)
+	withMarkers, err := s.sessionMarkers(r.Context(), ri.Policy, sess.User.ID, out)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, withMarkers)
 }
 
 func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {

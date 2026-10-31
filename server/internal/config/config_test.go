@@ -110,3 +110,37 @@ func TestTrustedNetworksHaveNoDefault(t *testing.T) {
 		t.Fatalf("env: %q %v %v %v", c.AutoSignInUser, c.TrustedNetworks, c.AllowedHosts, err)
 	}
 }
+
+// Marker detection is on by default, only at night, and an hours value that
+// cannot be read stops the server rather than running at any hour.
+func TestMarkerSettings(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("VCRX_CONFIG_DIR", dir)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.DetectMarkers || c.MarkerHours != "01:00-06:00" || c.MarkerIntroMinutes != 10 || c.MarkerCreditsMinutes != 8 {
+		t.Fatalf("defaults: on %v hours %q intro %d credits %d", c.DetectMarkers, c.MarkerHours, c.MarkerIntroMinutes, c.MarkerCreditsMinutes)
+	}
+	write := func(body string) {
+		if err := os.WriteFile(filepath.Join(dir, "vcrx.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("detect_markers: false\nmarker_hours: \"22:00-05:30\"\n")
+	if c, err = Load(); err != nil || c.DetectMarkers || c.MarkerHours != "22:00-05:30" {
+		t.Fatalf("yaml: %v %v %q", err, c.DetectMarkers, c.MarkerHours)
+	}
+	for _, bad := range []string{"marker_hours: \"\"\n", "marker_hours: evenings\n", "marker_intro_minutes: 0\n"} {
+		write(bad)
+		if _, err := Load(); err == nil {
+			t.Errorf("%q accepted", strings.TrimSpace(bad))
+		}
+	}
+	write("")
+	t.Setenv("VCRX_MARKER_HOURS", "always")
+	if c, err = Load(); err != nil || c.MarkerHours != "always" {
+		t.Fatalf("env: %v %q", err, c.MarkerHours)
+	}
+}
