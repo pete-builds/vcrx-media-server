@@ -70,5 +70,9 @@ func (e *Enricher) Fix(ctx context.Context, itemID, tmdbID int64) (Stats, error)
 	if err != nil {
 		return Stats{}, err
 	}
-	return e.item(ctx, c)
+	st, err := e.item(ctx, c)
+	if e.Changed != nil && st.Matched > 0 {
+		e.Changed()
+	}
+	return st, err
 }

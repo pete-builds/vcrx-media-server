@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -453,5 +454,40 @@ func TestTieSettledByPopularity(t *testing.T) {
 	v.run()
 	if got := v.str(`SELECT overview || '|' || (SELECT reason FROM tmdb_state WHERE item_id = items.id) FROM items WHERE id = ?`, id); got != "The famous one.|picked by popularity" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// Run calls AfterPass after a pass, where copies of one film that now share a
+// TMDb id are merged, and before Changed, so the smart collection rebuild
+// stamps the merged movie rather than a copy about to disappear.
+func TestRunMergesBeforeRebuild(t *testing.T) {
+	v := setup(t)
+	v.item(v.library("movie"), "movie", nil, "k", "Lantern Keeper", 2011, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var mu sync.Mutex
+	var order []string
+	done := make(chan struct{})
+	note := func(what string) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, what)
+		if len(order) == 2 {
+			close(done)
+			cancel()
+		}
+	}
+	v.e.AfterPass = func(context.Context) { note("merge") }
+	v.e.Changed = func() { note("rebuild") }
+	go v.e.Run(ctx, 0, time.Hour)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("a pass that matched did not call both AfterPass and Changed")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(order, []string{"merge", "rebuild"}) {
+		t.Fatalf("order = %q, want the merge before the rebuild", order)
 	}
 }

@@ -16,7 +16,7 @@ info:
     name: AGPL-3.0-or-later
     identifier: AGPL-3.0-or-later
 servers:
-  - url: http://192.168.86.20:3750
+  - url: http://192.168.1.20:3750
     description: nix1 on the LAN
 security:
   - bearer: []
@@ -301,6 +301,16 @@ paths:
       responses:
         "204": { description: Saved }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/items/{item_id}/progress:
+    delete:
+      operationId: clearProgress
+      summary: >-
+        Remove from Continue Watching: forget the caller's resume position without marking the item played or changing its
+        play count. On a show or season this applies to every episode. Only the caller's own watch state changes.
+      parameters: [{ $ref: "#/components/parameters/ItemID" }]
+      responses:
+        "204": { description: Cleared }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/items/{item_id}/artwork/{kind}:
     get:
       operationId: getArtwork
@@ -321,7 +331,13 @@ paths:
         with the device's capabilities, records the decision and its reason, and
         returns where to stream from. A policy refusal is 403 and a file this server
         cannot yet adapt for the device is 422; both carry a message to show on screen
-        and are still recorded in the activity history.
+        and are still recorded in the activity history. A client that reports
+        fmp4_stream gets files it cannot play directly as a converted stream (protocol
+        fmp4): video copied, or transcoded to H.264 when the device cannot decode it
+        (decision transcode; needs an ffmpeg with libx264 and a client that decodes
+        H.264). A client that reports hls_stream (Safari) gets the same conversion as
+        HLS instead (protocol hls), and gets HLS when it reports both. Any other client
+        is refused with transcode_unavailable when its video needs converting.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackRequest" } } }
@@ -352,12 +368,16 @@ paths:
     get:
       operationId: seekConvertedStream
       summary: >-
-        For a session with protocol fmp4: where a stream asked for at position_ms starts (the keyframe at or before
-        it, since copied video starts only on one) and the URL to play. The player's position is start_ms plus the
-        media element's own time.
+        For a session with protocol fmp4 or hls: where a stream asked for at position_ms starts and the URL to play.
+        When the video is copied that is the keyframe at or before position_ms, since copied video starts only on
+        one; when it is transcoded (decision transcode) it is position_ms itself. The player's position is start_ms
+        plus the media element's own time. For hls this also starts the stream, replacing the one the session had
+        (whose URLs then answer 404), and url is its playlist; audio picks the track by its stream index, and 503
+        (busy) means no conversion slot is free, as on the fmp4 stream.
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
         - { name: position_ms, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: audio, in: query, schema: { type: integer }, description: For hls only; fmp4 takes it on the stream URL. }
       responses:
         "200":
           description: OK
@@ -369,6 +389,55 @@ paths:
                 properties:
                   start_ms: { type: integer }
                   url: { type: string, description: Path relative to the server base URL. }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/v1/playback/sessions/{session_id}/hls/{run}/index.m3u8:
+    get:
+      operationId: getHLSPlaylist
+      summary: >-
+        For a session with protocol hls: the playlist of the stream the seek endpoint started, as an HLS EVENT
+        playlist of fragmented MP4 segments (about 4 s each; copied video is cut on its own keyframes) that grows
+        as the server converts, with EXT-X-ENDLIST once the file is done. Time 0 is the seek's start_ms. Waits for
+        three segments (or the end of a shorter file), since a player starts a growing playlist no closer than three
+        segments from its end. Only the session's owner gets it, and only while the session is open (409 once it has
+        ended, 410 when stopped from Activity). 404 once a seek has replaced the stream, and after two minutes in
+        which nothing of it was requested, when the server deletes it: seek again.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+        - { name: run, in: path, required: true, schema: { type: string }, description: The stream's id, from the seek endpoint's url. }
+      responses:
+        "200": { description: The playlist, content: { application/vnd.apple.mpegurl: {} } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+    head:
+      operationId: headHLSPlaylist
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+        - { name: run, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The stream exists }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+  /api/v1/playback/sessions/{session_id}/hls/{run}/{segment}:
+    get:
+      operationId: getHLSSegment
+      summary: >-
+        A segment the playlist names: init.mp4 or segNNNNN.m4s, nothing else. The same access rules as the
+        playlist. Segments well behind the player are deleted to bound disk use, so asking for one again is 404;
+        seek instead. Supports Range.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+        - { name: run, in: path, required: true, schema: { type: string } }
+        - { name: segment, in: path, required: true, schema: { type: string, pattern: '^(init\.mp4|seg[0-9]{5,9}\.m4s)$' } }
+      responses:
+        "200": { description: Fragmented MP4, content: { video/mp4: {} } }
+        "206": { description: Partial content }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
@@ -376,9 +445,13 @@ paths:
     get:
       operationId: getConvertedStream
       summary: >-
-        The file as fragmented MP4 from start_ms: video copied, audio copied when the device decodes a track MP4 can
-        carry, otherwise the default track converted to stereo AAC. Not seekable by byte range; seek by asking the seek
-        endpoint for a new stream. audio picks a track by its stream index.
+        The file as fragmented MP4 from start_ms: video copied, or for a transcode session re-encoded to H.264
+        (High profile, 8-bit 4:2:0, scaled down to fit the device's reported size and never up, a keyframe every
+        2 s, HDR tone mapped to SDR for a device that reports no HDR when ffmpeg has zscale); audio copied when the
+        device decodes a track MP4 can carry, otherwise the default track converted to stereo AAC. Not seekable by
+        byte range; seek by asking the seek endpoint for a new stream. audio picks a track by its stream index. 503
+        (busy) when the server is already running as many converted streams, or as many transcodes
+        (VCRX_MAX_TRANSCODES, default 2), as it allows.
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
         - { name: start_ms, in: query, schema: { type: integer, minimum: 0 } }
@@ -499,6 +572,63 @@ paths:
                 required: [scans]
                 properties:
                   scans: { type: array, items: { $ref: "#/components/schemas/ScanRun" } }
+  /api/v1/admin/collections:
+    get:
+      operationId: adminSmartCollections
+      summary: Smart collection definitions loaded from YAML and the last build of each
+      description: >-
+        Lists every YAML file in the collections directory, whether it loaded or
+        was refused (with the file and line of the error), and each definition's
+        last build: matching titles, its label and where it is visible. A refused
+        file's collections keep building from its last good load (last_good).
+        built is false until the first build after startup.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [built, files, collections]
+                properties:
+                  built: { type: boolean }
+                  dir: { type: string }
+                  built_at: { type: integer, description: Unix milliseconds. }
+                  error: { type: string, description: Set when the directory could not be read; nothing was changed. }
+                  labels_added: { type: integer }
+                  labels_removed: { type: integer }
+                  collections_removed: { type: integer }
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      required: [file, collections, last_good]
+                      properties:
+                        file: { type: string }
+                        error: { type: string }
+                        collections: { type: integer }
+                        last_good: { type: boolean }
+                  collections:
+                    type: array
+                    items:
+                      type: object
+                      required: [file, line, name, library, slug, visible, items, last_good]
+                      properties:
+                        file: { type: string }
+                        line: { type: integer }
+                        name: { type: string }
+                        library: { type: string }
+                        slug: { type: string }
+                        label: { type: string }
+                        visible:
+                          type: object
+                          properties:
+                            library: { type: boolean }
+                            home: { type: boolean }
+                            shared: { type: boolean }
+                        items: { type: integer }
+                        last_good: { type: boolean }
+                        error: { type: string }
   /api/v1/admin/users:
     get:
       operationId: adminListUsers
@@ -656,6 +786,122 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/items/{item_id}/history:
+    get:
+      operationId: adminItemHistory
+      summary: >-
+        One title's plays, newest first, like Tautulli's item page: who, when, device, how far, decision, plus totals over
+        every play. A show includes its episodes. Same plays as /admin/activity/history?item_id. Admin and LAN only.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item_id, kind, sessions, plays, users, watch_ms]
+                properties:
+                  item_id: { type: integer }
+                  kind: { type: string, enum: [movie, show, episode] }
+                  sessions: { type: array, items: { $ref: "#/components/schemas/ActivityEntry" } }
+                  plays: { type: integer, description: Every play of the title, not only this page. }
+                  users: { type: integer, description: People who played it. }
+                  watch_ms: { type: integer, description: Wall time spent playing it, summed. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/watch/export:
+    get:
+      operationId: adminWatchExport
+      summary: >-
+        Every movie and show still on disk with its files, size and watch state across all users, for a cleanup tool
+        deciding what to delete. Shows are rolled up from their episodes. Ordered by library, then title. The body is
+        streamed and its closing bracket is written last, so a cut-off response does not parse. Admin and LAN only.
+      parameters:
+        - { name: library_id, in: query, schema: { type: integer, minimum: 1 } }
+        - name: unplayed_days
+          in: query
+          schema: { type: integer, minimum: 0 }
+          description: Only titles nobody has played in this many days, titles never played included. 0 or absent means no filter.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generated_at, items, count]
+                properties:
+                  generated_at: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/TitleWatch" } }
+                  count: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/items/{item_id}/merge:
+    post:
+      operationId: adminMergeItems
+      summary: >-
+        Merge other movies of the same library into this one. Their files become its versions; watch state is combined per
+        user, playback history and collections move over, and this movie keeps its own title and match. Rescans keep the
+        merge. Movies whose content ratings or labels (set by hand or by an NFO) differ are refused with 422
+        access_differs, since access rules judge a movie by them. One transaction: on any error nothing changes. 409
+        scan_running while the library is being scanned.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [item_ids]
+              properties:
+                item_ids: { type: array, items: { type: integer }, description: The movies to fold into this one. }
+      responses:
+        "200":
+          description: Merged
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item_id]
+                properties:
+                  item_id: { type: integer, description: The merged movie, the one in the path. }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/versions/{version_id}/split:
+    post:
+      operationId: adminSplitVersion
+      summary: >-
+        Move one version out of its movie into a movie of its own, a copy of the old one's metadata and match. The split
+        is kept by rescans and by the automatic merge of copies with the same TMDb id. One transaction: on any error
+        nothing changes. 422 only_version for a movie's only file; 409 scan_running while the library is being scanned.
+      parameters:
+        - { name: version_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Split
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item_id]
+                properties:
+                  item_id: { type: integer, description: The new movie holding the version. }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
 
   /api/v1/admin/markers:
     get:
@@ -857,6 +1103,7 @@ paths:
                         last_title: { type: [string, "null"] }
                         last_device: { type: [string, "null"] }
                         last_ip: { type: [string, "null"] }
+                        last_location: { $ref: "#/components/schemas/Location" }
         "403": { $ref: "#/components/responses/Error" }
 
   /api/v1/admin/activity/sessions/{session_id}/terminate:
@@ -883,6 +1130,65 @@ paths:
               schema: { $ref: "#/components/schemas/ActivityEntry" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/newsletter:
+    get:
+      operationId: adminNewsletter
+      summary: >-
+        The weekly newsletter's settings and state: a digest of the movies and episodes added in the last 7 days,
+        posted through the webhooks at a weekday and hour in the server's time zone. Off by default.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewsletterStatus" }
+        "403": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: adminSetNewsletter
+      summary: >-
+        Switch the newsletter on or off, set when it goes out and whose view it uses. A change takes effect from the
+        next scheduled time; it never sends a past week's digest straight away. 400 when the audience is an admin,
+        disabled or missing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewsletterSettings" }
+      responses:
+        "200":
+          description: The settings and state as they now stand.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewsletterStatus" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/newsletter/preview:
+    post:
+      operationId: adminPreviewNewsletter
+      summary: >-
+        Send the last 7 days' digest to every webhook now, marked as a preview. Works while the newsletter is off and
+        does not count as the week's send. Built under the audience setting, like the weekly one. 409 no_webhooks when
+        no webhook takes the newsletter event, 409 bad_audience when the audience account is no longer valid,
+        409 nothing_added when the audience has nothing new, 502 webhook_failed when no webhook accepted it.
+      responses:
+        "200":
+          description: Sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sent, failed, movies, shows, episodes]
+                properties:
+                  sent: { type: integer, description: Webhooks that accepted it. }
+                  failed: { type: integer }
+                  movies: { type: integer }
+                  shows: { type: integer }
+                  episodes: { type: integer }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
 
 components:
   securitySchemes:
@@ -1055,6 +1361,14 @@ components:
             genres: { type: array, items: { type: string } }
             directors: { type: array, items: { type: string } }
             studios: { type: array, items: { type: string } }
+            cast:
+              type: array
+              description: Up to 20 actors in billing order; an episode lists its own guests before its show's cast.
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  role: { type: [string, "null"] }
             ratings: { type: object, additionalProperties: { type: number }, description: "Keyed by source: imdb, tmdb, nfo." }
             versions: { type: array, items: { $ref: "#/components/schemas/Version" }, description: Only versions the caller may play, best first. }
             collections:
@@ -1126,7 +1440,8 @@ components:
         max_width: { type: integer }
         max_height: { type: integer }
         max_bitrate: { type: integer }
-        fmp4_stream: { type: boolean, description: "The client plays a fragmented MP4 stream that seeks by asking for a new one. Only then are files it cannot play directly converted (video copied, audio converted)." }
+        fmp4_stream: { type: boolean, description: "The client plays a fragmented MP4 stream that seeks by asking for a new one. Only then are files it cannot play directly converted (video copied or transcoded to H.264, audio copied or converted)." }
+        hls_stream: { type: boolean, description: "The client plays HLS with fragmented MP4 segments natively (Safari). Files it cannot play directly are converted as for fmp4_stream and come as HLS (protocol hls)." }
         default_audio_only: { type: boolean, description: "The client plays only the default audio track (a browser), so that track is the one that has to decode." }
     PlaybackRequest:
       type: object
@@ -1162,9 +1477,9 @@ components:
           required: [url, protocol]
           properties:
             url: { type: string, description: Path relative to the server base URL; send the bearer header. }
-            protocol: { type: string, enum: [progressive, hls, fmp4], description: "fmp4: a converted stream; see seek_url." }
+            protocol: { type: string, enum: [progressive, hls, fmp4], description: "fmp4 and hls: a converted stream; see seek_url." }
             mime_type: { type: [string, "null"], description: "video/x-matroska, video/mp4, ..." }
-            seek_url: { type: string, description: For fmp4, the seek endpoint to call with position_ms before playing. }
+            seek_url: { type: string, description: "For fmp4 and hls, the seek endpoint to call with position_ms before playing. For hls, url is the seek endpoint too: every HLS stream starts at a position." }
         subtitles: { type: array, items: { $ref: "#/components/schemas/SubtitleSource" }, description: Sidecar files to add as side-loaded tracks. Embedded tracks come from the container. }
         webvtt_subtitles:
           type: array
@@ -1301,6 +1616,7 @@ components:
         client: { type: [string, "null"] }
         client_version: { type: [string, "null"] }
         ip: { type: [string, "null"] }
+        location: { $ref: "#/components/schemas/Location" }
         start_position_ms: { type: integer }
         position_ms: { type: integer }
         duration_ms: { type: [integer, "null"] }
@@ -1311,6 +1627,26 @@ components:
         last_event_at: { type: integer }
         ended_at: { type: [integer, "null"] }
         terminated_message: { type: [string, "null"] }
+    TitleWatch:
+      type: object
+      required: [item_id, kind, title, year, library_id, library, paths, size_bytes, added_at, last_played_at, play_count, finished_by]
+      properties:
+        item_id: { type: integer }
+        kind: { type: string, enum: [movie, show] }
+        title: { type: string }
+        year: { type: [integer, "null"] }
+        library_id: { type: integer }
+        library: { type: string }
+        paths: { type: array, items: { type: string }, description: "Absolute paths of the files on disk, as the server sees them; a show lists every episode's files." }
+        size_bytes: { type: integer }
+        added_at: { type: integer }
+        last_played_at:
+          type: [integer, "null"]
+          description: The latest play by anyone, a session in progress included. Null when nobody ever played it.
+        play_count: { type: integer, description: Times finished, summed over users (and episodes, for a show). }
+        finished_by: { type: array, items: { type: string }, description: "Users who have it marked watched; for a show, every episode on disk." }
+        episodes_total: { type: integer, description: Shows only. Episodes on disk. }
+        episodes_watched: { type: integer, description: Shows only. Episodes at least one user has watched. }
     Ranked:
       type: object
       required: [name, plays, watch_ms, users]
@@ -1322,7 +1658,7 @@ components:
         users: { type: integer }
     ActivityStats:
       type: object
-      required: [days, since, plays, watch_ms, users, refused, top_movies, top_shows, top_users, platforms, devices, decisions, by_day, by_hour, by_weekday]
+      required: [days, since, plays, watch_ms, users, refused, top_movies, top_shows, top_users, platforms, devices, decisions, by_day, by_hour, by_weekday, playback_types, platform_types, peak_streams, peak_at]
       properties:
         days: { type: integer }
         since: { type: integer }
@@ -1347,6 +1683,48 @@ components:
               watch_ms: { type: integer }
         by_hour: { type: array, items: { type: integer }, minItems: 24, maxItems: 24 }
         by_weekday: { type: array, items: { type: integer }, minItems: 7, maxItems: 7, description: Sunday first. }
+        playback_types:
+          type: array
+          items: { $ref: "#/components/schemas/Ranked" }
+          description: Counted plays by decision (direct_play, remux, audio_transcode, transcode), most first.
+        platform_types:
+          type: array
+          items: { $ref: "#/components/schemas/Ranked" }
+          description: Counted plays by kind of device, such as "Google TV" or "Web (Chrome)".
+        peak_streams: { type: integer, description: The most counted plays at once in the range. }
+        peak_at: { type: integer, description: When that peak began; 0 when there were no plays. }
+    Location:
+      type: string
+      enum: ["", This server, Tailscale, Local network, Internet]
+      description: >-
+        The kind of network an address is on, worked out offline. Public addresses are not placed on a map.
+    NewsletterSettings:
+      type: object
+      required: [enabled, weekday, hour]
+      properties:
+        enabled: { type: boolean }
+        weekday: { type: integer, minimum: 0, maximum: 6, description: 0 is Sunday. }
+        hour: { type: integer, minimum: 0, maximum: 23, description: In the server's time zone. }
+        audience_user_id:
+          type: integer
+          default: 0
+          description: >-
+            Whose view the digest is built from: an enabled account that is not an admin. It lists only what that
+            account may see (granted libraries, label rules). 0, the default, means only titles every enabled
+            non-admin account can see.
+    NewsletterStatus:
+      allOf:
+        - { $ref: "#/components/schemas/NewsletterSettings" }
+        - type: object
+          required: [time_zone, audience, webhooks, last_sent, next_send]
+          properties:
+            time_zone: { type: string }
+            audience: { type: string, description: Whose view the digest uses, in words. }
+            webhooks:
+              type: integer
+              description: How many webhook URLs take the newsletter; 0 when none is set or webhook_events leaves newsletter out.
+            last_sent: { type: [integer, "null"], description: When the last week was handled, or the settings last saved. }
+            next_send: { type: [integer, "null"], description: Null while off. }
     ActivitySession:
       type: object
       required: [id, decision, decision_reason, state, started_at]

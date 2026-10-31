@@ -215,6 +215,8 @@ data class Capabilities(
     @SerialName("max_width") val maxWidth: Int? = null,
     @SerialName("max_height") val maxHeight: Int? = null,
     @SerialName("max_bitrate") val maxBitrate: Long? = null,
+    /** This client plays a converted fragmented MP4 stream and seeks it through the seek endpoint. */
+    @SerialName("fmp4_stream") val fmp4Stream: Boolean = false,
 )
 
 @Serializable
@@ -241,6 +243,15 @@ data class StreamInfo(
     val url: String,
     val protocol: String = "progressive",
     @SerialName("mime_type") val mimeType: String? = null,
+    /** For protocol fmp4: the seek endpoint, asked with position_ms before every stream. */
+    @SerialName("seek_url") val seekUrl: String? = null,
+)
+
+/** The seek endpoint's answer: the converted stream asked for starts at [startMs] in the file. */
+@Serializable
+data class ConvertedStart(
+    @SerialName("start_ms") val startMs: Long,
+    val url: String,
 )
 
 @Serializable
@@ -268,6 +279,30 @@ data class PlaybackEvent(
     @SerialName("duration_ms") val durationMs: Long? = null,
     val message: String? = null,
 )
+
+/** One open playback session, as GET /api/v1/admin/activity/now lists it. */
+@Serializable
+data class NowSession(
+    val id: String,
+    val state: String = "",
+    val decision: String = "",
+    val username: String? = null,
+    @SerialName("item_title") val itemTitle: String? = null,
+    @SerialName("device_name") val deviceName: String? = null,
+    val client: String? = null,
+    @SerialName("version_summary") val versionSummary: String? = null,
+    @SerialName("position_ms") val positionMs: Long = 0,
+    @SerialName("duration_ms") val durationMs: Long? = null,
+)
+
+@Serializable
+data class NowPlaying(
+    val sessions: List<NowSession> = emptyList(),
+    @SerialName("stream_count") val streamCount: Int = 0,
+)
+
+@Serializable
+data class TerminateRequest(val message: String)
 
 /** A stretch of an episode a player may offer to skip. */
 @Serializable

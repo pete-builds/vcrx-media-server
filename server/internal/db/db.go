@@ -200,5 +200,24 @@ func Backup(ctx context.Context, conn *sql.DB, dir, tag string) (string, error) 
 	return dest, nil
 }
 
+// Prune deletes all but the newest keep backups with tag in dir, and returns
+// how many it removed. Backups with other tags (pre-migrate) are left alone.
+func Prune(dir, tag string, keep int) (int, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, "vcrx-"+tag+"-*.db"))
+	if err != nil {
+		return 0, err
+	}
+	// The timestamp in the name sorts in time order.
+	sort.Strings(matches)
+	removed := 0
+	for i := 0; i < len(matches)-keep; i++ {
+		if err := os.Remove(matches[i]); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
 // NowMs is the timestamp convention used in every table.
 func NowMs() int64 { return time.Now().UnixMilli() }

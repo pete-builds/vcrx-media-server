@@ -24,6 +24,11 @@ type Capabilities struct {
 	// seeked by byte range and seeks by asking for a new one. Only then are
 	// files it cannot play directly converted (video copied, audio converted).
 	FMP4Stream bool `json:"fmp4_stream"`
+	// HLSStream: the client plays HLS with fragmented MP4 segments natively
+	// (Safari, which cannot play a stream that does not answer byte ranges).
+	// Files it cannot play directly are converted the same way and written as
+	// HLS. A client that reports both gets HLS.
+	HLSStream bool `json:"hls_stream"`
 	// DefaultAudioOnly: the client plays only the file's default audio track
 	// (a browser <video>), so that is the one that has to decode.
 	DefaultAudioOnly bool `json:"default_audio_only"`
@@ -237,6 +242,54 @@ func ChooseAudio(v catalog.Version, caps Capabilities) (index int, transcode boo
 		return -1, false
 	}
 	return int(*d.Index), true
+}
+
+// decodesH264 reports whether the client plays H.264, which is what a video
+// transcode produces.
+func decodesH264(caps Capabilities) bool {
+	return h264Cap(caps) != nil
+}
+
+func h264Cap(caps Capabilities) *VideoCodecCap {
+	for i := range caps.VideoCodecs {
+		if strings.EqualFold(caps.VideoCodecs[i].Codec, "h264") {
+			return &caps.VideoCodecs[i]
+		}
+	}
+	return nil
+}
+
+// TranscodeVideo is how a transcode session re-encodes v for the client:
+// within the client's H.264 size and frame rate limits (or its overall size
+// limit), under its bitrate limit, and tone mapped to SDR when the source is
+// HDR and the client reports no HDR at all.
+func TranscodeVideo(v catalog.Version, caps Capabilities) remux.Video {
+	out := remux.Video{SrcWidth: int(n(v.Width)), SrcHeight: int(n(v.Height)), MaxWidth: caps.MaxWidth, MaxHeight: caps.MaxHeight,
+		MaxBitrate: caps.MaxBitrate}
+	if c := h264Cap(caps); c != nil {
+		if c.MaxWidth > 0 {
+			out.MaxWidth = c.MaxWidth
+		}
+		if c.MaxHeight > 0 {
+			out.MaxHeight = c.MaxHeight
+		}
+		out.MaxFPS = c.MaxFPS
+	}
+	if v.FrameRate != nil {
+		out.FPS = *v.FrameRate
+	}
+	out.HDR = strings.ToLower(s(v.HDRType))
+	if out.HDR == "dolby_vision" {
+		// The decoder outputs the base layer: SDR, HLG, or PQ like HDR10.
+		switch n(v.DVCompatID) {
+		case 2:
+			out.HDR = ""
+		case 4:
+			out.HDR = "hlg"
+		}
+	}
+	out.ToneMap = out.HDR != "" && len(caps.HDRTypes) == 0
+	return out
 }
 
 // Decide walks the ladder for one version: direct play, remux, audio transcode,

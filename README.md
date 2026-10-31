@@ -16,14 +16,14 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 
 | Works now | Comes later |
 |---|---|
-| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, genre and decade filters | Collections from YAML rules |
+| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, smart collections and hidden labels from YAML rules, genre and decade filters | Online lists (IMDb Top 250 and the like), playlists, automatic director and studio collections |
 | Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
-| Direct play over HTTP with Range; converted streams for clients that ask for them (video copied, audio converted to AAC, fragmented MP4); sidecar and embedded text subtitles (also as WebVTT for browsers) | Video transcoding, picture subtitle burn-in, VA-API hardware acceleration |
+| Direct play over HTTP with Range; converted streams for clients that ask for them (fragmented MP4, or HLS for Safari: video copied, or transcoded to H.264 when the client cannot decode it; audio copied or converted to AAC); sidecar and embedded text subtitles (also as WebVTT for browsers) | Video transcoding for the TV app (HLS), picture subtitle burn-in, VA-API hardware acceleration |
 | Skip Intro and Skip Credits (web and TV): intros and end credits found from each season's audio at night, chapter titles and Plex-style NFO markers honoured, an admin editor, and a per-user choice of button, automatic or off | Skip markers for movies other than by hand |
-| Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, stats, per-user totals, stop a stream, webhooks | Activity screens in a client |
-| Web app at `/`: browse, details, search, play in the browser with subtitles, Activity screens. REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Browser playback of files the browser cannot decode, other TV platforms |
+| Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, per-title history, stats, per-user totals, stop a stream, webhooks, a watch state export for cleanup tools | Activity screens in a client |
+| Web app at `/`: browse, details, search, play in the browser with subtitles (including files whose video the browser cannot decode, transcoded on the server), Activity screens. REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Other TV platforms |
 
-A file the TV cannot play directly is refused with a message saying why ("needs video conversion: the device has no av1 video decoder"). Transcoding arrives in milestone 3.
+A file the TV cannot play directly is refused with a message saying why ("needs video conversion: the device has no av1 video decoder"). Transcoding for the TV app arrives with HLS in milestone 3; the web app already gets it.
 
 ## Run the server
 
@@ -76,6 +76,8 @@ vcrx user add|grant|passwd|list
 vcrx library add|list|scan
 vcrx metadata refresh [-all]  fetch posters and plots from TMDb now
 vcrx metadata status          matched and unmatched counts, and why each miss was skipped
+vcrx watch export [-library NAME] [-unplayed-days N]
+                              every movie and show with its files and watch state, as JSON lines
 vcrx healthcheck              what the container HEALTHCHECK runs
 ```
 
@@ -83,7 +85,7 @@ vcrx healthcheck              what the container HEALTHCHECK runs
 
 ### Configuration
 
-Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its automatic pre-migration backups and the settings file live in `/config`; resized artwork and other caches live in `/cache` and can be deleted at any time.
+Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its backups (before every migration, and a nightly snapshot kept for seven days, in `/config/backups`) and the settings file live in `/config`; resized artwork, Safari's HLS segments while they play, and other caches live in `/cache` and can be deleted at any time.
 
 ### TMDb posters and plots (optional)
 
@@ -102,8 +104,11 @@ This product uses the TMDB API but is not endorsed or certified by TMDB.
 Open `http://<server>:3750/` in a browser. It is part of the server: no separate install, no build step, nothing loaded from the internet.
 
 - **Browse** Home (Continue Watching, recently added), each library with sort and filters, search, and details pages for movies, shows, seasons and episodes. Mark things watched or unwatched.
-- **Play** in the browser, resuming where any device left off. The browser tells the server what it can decode. A file it cannot play directly because of its container or its audio (most often E-AC-3, AC-3 or DTS, which browsers do not decode) plays as a converted stream: the video is copied untouched and only the audio is converted to AAC, a fraction of one CPU core, with VCRX's own seek bar. Video the browser cannot decode at all is refused with the reason until full transcoding lands; the TV app still plays it. Subtitles: pick any text track, sidecar or inside the file.
-- **Activity** for admins: now playing with a Stop button, history, stats and users.
+- **Continue Watching** cards have a Remove button (on hover, always on touch screens, and reachable with Tab), and a details page with a resume position has Remove from Continue Watching. Either forgets your resume position without marking the title watched, and only for you (`DELETE /api/v1/items/{id}/progress`).
+- **Search as you type:** after two characters the search box lists up to eight matching titles with poster, year or episode, and kind. Arrow keys and Enter open one; Enter with none highlighted shows every result; Escape closes the list.
+- **Keyboard:** press `?` anywhere outside a text field for the list of shortcuts, `/` to jump to search. In the player: Space or K to play or pause, the arrow keys to skip back or forward, F for full screen, M to mute, Escape to leave.
+- **Play** in the browser, resuming where any device left off. The browser tells the server what it can decode. A file it cannot play directly because of its container or its audio (most often E-AC-3, AC-3 or DTS, which browsers do not decode) plays as a converted stream: the video is copied untouched and only the audio is converted to AAC, a fraction of one CPU core, with VCRX's own seek bar. Video the browser cannot decode at all (HEVC in Firefox, AV1 on older machines, VC-1 or MPEG-4 Part 2 anywhere) is transcoded to H.264 with libx264 in the same kind of stream: scaled down to the browser's reported size, never up, with a keyframe every 2 seconds, and HDR tone mapped to SDR for a screen without HDR when the server's ffmpeg has the zscale filter (the Docker image's does; without it HDR looks washed out). A seek starts the new stream exactly where you asked. Each transcode takes one or more CPU cores, so only `VCRX_MAX_TRANSCODES` (default 2, 0 turns it off) run at once and the next viewer is told the server is busy; the server logs at startup whether its ffmpeg can transcode. The usual policy applies: a non-admin needs "May use converted streams", and "Including 4K" for a 4K file. Safari (on a Mac, iPhone or iPad, and every browser on an iPhone or iPad) plays video only from a server that answers byte ranges, which a stream made on the fly cannot, so it gets the same conversions as HLS, which it plays natively: segments of about 4 seconds written under `/cache/hls` while the session plays, with the same limits and policy. The server keeps each Safari stream's files to about 1.5 GB by pausing ffmpeg when it is two minutes ahead of the player and deleting segments a minute behind it, and deletes them all when playback stops, after two idle minutes, and at startup. Subtitles: pick any text track, sidecar or inside the file.
+- **Activity** for admins: now playing with a Stop button, history, stats and users. A movie, show or episode page also shows admins its own History: the latest 20 plays with who, when, device, how much was watched and how far it got, and the totals.
 - **Sign-in:** with `auto_sign_in_user` set, a browser on a trusted network is signed straight in; otherwise it shows a sign-in form. The session is an HttpOnly cookie, and every change the page makes carries a header a cross-site page cannot send.
 
 ### Poster overlays (Kometa style)
@@ -123,6 +128,28 @@ All three take `position`: `top_left`, `top_right`, `bottom_left` or `bottom_rig
 ### Collections
 
 Every film series (a TMDb collection) with two or more of its films in a movie library becomes a collection there, in release order, like Kometa's `franchise` default. The membership is rebuilt every 30 minutes, so a new sequel joins on its own; a series that drops to one film goes away. Names come from TMDb once, so this needs `VCRX_TMDB_API_KEY`; without it, series wait rather than get a made-up name. `vcrx metadata collections` builds them now. The web app shows them under a library's Collections button and links each film's page to its series. Libraries also filter by genre and decade.
+
+### Smart collections and hidden labels (Kometa style)
+
+Write collections as YAML files in `/config/collections/` (`collections_dir` in `vcrx.yaml` or `VCRX_COLLECTIONS_DIR` moves it); `deploy/collections.example.yaml` is a commented start. The files are the source of truth: the database copy is rebuilt from them after every scan, every TMDb pass and every 15 minutes, so losing the database loses nothing.
+
+```yaml
+collections:
+  - name: R-Rated Horror
+    library: Movies
+    smart:
+      all:                  # every rule matches; any: at least one does; lists nest
+        - genre: Horror
+        - content_rating: R
+    label: horror           # stamped on every match, taken off when a title stops matching
+    visible: { library: false, home: false, shared: false }   # label only, never listed
+```
+
+Rules use local metadata only: genre, studio, director, writer, actor, country, network, decade, year or a year range, resolution (of any present version), HDR, content rating, label and `added_within_days`. A list of values means any of them. A file with a mistake is refused whole, with the file and line in the log, in `vcrx metadata collections` (which builds everything now) and in `GET /api/v1/admin/collections`; its collections keep building from the last good copy, and nothing else changes. An empty, comment-only or cut-short file counts as a mistake, because editors and sync tools leave one mid-save; to empty a file on purpose, write `collections: []`. Deleting a file removes its collections and labels once it has stayed gone for a minute and a later build still finds it gone. If the directory itself is missing, nothing changes at all.
+
+Rebuilds also follow TMDb: after each enrichment pass that matched anything and after a Fix Match, a rebuild runs within seconds, so a deny label lands as soon as the genre or rating that triggers it arrives.
+
+`label:` is how friends' access follows your rules: deny `horror` in a user's policy and a title disappears for them as soon as a rebuild finds it matches, and comes back when it stops matching. VCRX only ever takes off labels it stamped. A label you set by hand or that an NFO file carries is never removed, and an NFO naming a stamped label takes it over. Collections with `visible.library: false` are left out of library collection lists, title pages and Home; `home` and `shared` are stored for Home rows, which do not show collections yet.
 
 ### Skip Intro and Skip Credits
 
@@ -154,13 +181,21 @@ Like Tautulli, without a second program. Every play request is logged with the d
 |---|---|
 | `GET /api/v1/admin/activity/now` | What is playing now: who, what, where, progress, direct play or not, bitrate, and the total bandwidth |
 | `GET /api/v1/admin/activity/history` | Finished plays, newest first, by user or by title (a show includes its episodes) |
-| `GET /api/v1/admin/activity/stats?days=30` | Plays and watch time, top movies, shows, users, clients and devices, plays by day, hour and weekday |
+| `GET /api/v1/admin/items/{id}/history` | One title's plays, newest first, with its totals: plays, people, watch time. What the details page shows |
+| `GET /api/v1/admin/watch/export` | Every movie and show with its file paths, size, when it was added and last played, play count and who finished it, for a cleanup tool (see below) |
+| `GET /api/v1/admin/activity/stats?days=30` | Plays and watch time, top movies, shows, users, clients, devices and platforms, plays by day, hour and weekday, direct play against converted, and the most streams at once |
 | `GET /api/v1/admin/activity/users` | Every account with its totals and when and where it was last seen |
 | `POST /api/v1/admin/activity/sessions/{id}/terminate` | Stop a stream now, with a message the viewer sees |
 
-A play counts in stats once 30 seconds have actually played, and is watched at 90%. Days and hours follow the container's `TZ`.
+A play counts in stats once 30 seconds have actually played, and is watched at 90%. Days and hours follow the container's `TZ`. Each chart on the Stats page has a "Show as a table" view with the same numbers.
+
+Addresses are labelled by the kind of network they are on: This server, Local network, Tailscale (100.64.0.0/10 and its IPv6 prefix) or Internet. That works offline; public addresses are not placed on a map.
+
+**Watch state for cleanup tools:** a script that deletes watched or never-played media needs to know, per title, whether anyone watched it and when. `GET /api/v1/admin/watch/export` answers that for every movie and show still on disk, a show rolled up from its episodes: `item_id`, `kind`, `title`, `year`, `library`, `paths` (absolute, as the server sees them), `size_bytes`, `added_at`, `last_played_at` (any user, a stream in progress included; `null` if never), `play_count` (times finished, all users), `finished_by` (usernames), and for shows `episodes_total` and `episodes_watched`. `?library_id=` narrows it to one library, and `?unplayed_days=30` keeps only titles nobody has played in 30 days, never-played ones included. On the host, `vcrx watch export -library Movies -unplayed-days 30` prints the same rows as JSON lines. The paths are the container's; map them to the host's before deleting anything.
 
 **Webhooks:** set `VCRX_WEBHOOK_URLS` in `.env` to one or more URLs, comma separated. Each gets a JSON post for `play`, `stop`, `refused`, `terminated` and `added` (new titles after a scan, such as `＋ New in Movies: The Film (2024), Show (3 new episodes)`; narrow the events with `webhook_events` in `vcrx.yaml`). A Discord webhook URL gets a plain Discord message instead, such as `▶ pete started The Film on Living Room TV (direct play)`.
+
+**Newsletter:** Settings > Newsletter sends a weekly digest of what was added in the last seven days (new movies, and new episodes grouped by show) to the same webhooks, on a weekday and hour you pick in the server's time zone. It lists only what its audience may see: by default, titles every friend (non-admin) account can see, so a library only some are granted and a title with a label any of them is denied stay out; or pick one friend account whose view it uses. Add `newsletter` to `webhook_events` if you narrow the events. Discord gets a card per title with its TMDb poster (posters that exist only on disk have no public link), cut to fit Discord's limits with "and N more"; other URLs get the full list as JSON (`event: newsletter`). It is off by default, sends nothing in a week when nothing was added, and remembers the last week it sent, so a restart never sends it twice. "Send a preview now" posts the last seven days straight away.
 
 ## Run the TV app
 
@@ -207,7 +242,7 @@ golangci-lint run
 govulncheck ./...
 ```
 
-To work on the web app or the API against a few generated test clips: `./scripts/dev-server.sh`, then open http://127.0.0.1:3751/. It builds the clips with ffmpeg on first run, serves the web files from `server/web/static` so an edit shows on reload, and signs the local browser in. `server/web/check-js.sh` is the web app's compile check, and `node scripts/web-smoke.mjs` drives every page and both playback paths in headless Chrome against the dev server; CI runs both.
+To work on the web app or the API against a few generated test clips: `./scripts/dev-server.sh`, then open http://127.0.0.1:3751/. It builds the clips with ffmpeg on first run, serves the web files from `server/web/static` so an edit shows on reload, and signs the local browser in. `server/web/check-js.sh` is the web app's compile check, and `node scripts/web-smoke.mjs` drives every page (at desktop and phone width), all three playback paths (direct, audio converted, video transcoded, and HLS for Safari), Continue Watching removal, search as you type and the shortcuts list in headless Chrome against the dev server; CI runs both.
 
 On NixOS, run `nix-shell` at the repo root first: [shell.nix](shell.nix) provides these tools, plus the Docker client and adb for the TV app. The API contract is [server/api/openapi.yaml](server/api/openapi.yaml), served at `/api/v1/openapi.yaml`; a test fails when it and the registered routes disagree. Migrations are forward-only SQL files in `server/internal/db/migrations`.
 

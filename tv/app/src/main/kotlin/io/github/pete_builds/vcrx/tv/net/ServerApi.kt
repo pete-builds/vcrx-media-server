@@ -70,6 +70,14 @@ class ServerApi(
 
     suspend fun item(itemId: Long): Item = get("/api/v1/items/$itemId", Item.serializer())
 
+    /** What is playing now on every device. Admin only, from the LAN. */
+    suspend fun nowPlaying(): NowPlaying = get("/api/v1/admin/activity/now", NowPlaying.serializer())
+
+    /** Stops someone's stream; [message] is shown to the viewer. */
+    suspend fun terminate(sessionId: String, message: String) {
+        send<Unit>(post("/api/v1/admin/activity/sessions/$sessionId/terminate", TerminateRequest(message), TerminateRequest.serializer()), null)
+    }
+
     /** A collection, such as a film series, and its titles in order. */
     suspend fun collection(collectionId: Long): CollectionResponse =
         get("/api/v1/collections/$collectionId", CollectionResponse.serializer())
@@ -94,6 +102,12 @@ class ServerApi(
 
     suspend fun postEvent(sessionId: String, event: PlaybackEvent) {
         send<Unit>(post("/api/v1/playback/sessions/$sessionId/events", event, PlaybackEvent.serializer()), null)
+    }
+
+    /** For a converted session: where a stream asked for at [positionMs] starts, and its URL. */
+    suspend fun convertedStart(seekPath: String, positionMs: Long): ConvertedStart {
+        val url = url(seekPath).newBuilder().setQueryParameter("position_ms", positionMs.coerceAtLeast(0).toString()).build()
+        return send(Request.Builder().url(url).build(), ConvertedStart.serializer())
     }
 
     /** Absolute artwork URL; the server answers 404 when there is none and the card draws a placeholder. */

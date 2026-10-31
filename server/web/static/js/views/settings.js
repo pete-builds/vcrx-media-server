@@ -2,6 +2,7 @@ import { signOut } from "../api.js";
 import { h, toast } from "../dom.js";
 import { state, go } from "../app.js";
 import { librariesTab, usersTab } from "./manage.js";
+import { newsletterTab } from "./newsletter.js";
 import { markersTab, skipSetting } from "./markers.js";
 
 export async function settingsView({ match }) {
@@ -9,7 +10,7 @@ export async function settingsView({ match }) {
   const admin = !!(state.me && state.me.is_admin);
   if (admin && tab !== "account") {
     const body = h("div", {});
-    const cleanup = await ({ libraries: librariesTab, markers: markersTab }[tab] || usersTab)(body);
+    const cleanup = await ({ libraries: librariesTab, newsletter: newsletterTab, markers: markersTab }[tab] || usersTab)(body);
     return { el: h("div", { class: "settings wide-settings" }, h("h1", {}, "Settings"), tabs(tab, admin), body), title: "Settings", cleanup };
   }
   const me = state.me || {};
@@ -49,6 +50,6 @@ export async function settingsView({ match }) {
 function tabs(active, admin) {
   if (!admin) return null;
   return h("nav", { class: "tabs", "aria-label": "Settings" },
-    [["account", "Account"], ["libraries", "Libraries"], ["users", "Users"], ["markers", "Intros"]]
+    [["account", "Account"], ["libraries", "Libraries"], ["users", "Users"], ["newsletter", "Newsletter"], ["markers", "Intros"]]
       .map(([k, label]) => h("a", { href: `#/settings/${k}`, class: k === active ? "active" : "" }, label)));
 }

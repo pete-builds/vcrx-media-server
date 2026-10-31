@@ -350,6 +350,21 @@ func (s *Server) setWatched(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// clearProgress drops the caller's resume position so the item leaves Continue
+// Watching. It does not mark the item played.
+func (s *Server) clearProgress(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r, "item_id")
+	if !ok {
+		return
+	}
+	ri := info(r)
+	if err := s.Catalog.ClearProgress(r.Context(), ri.Policy, ri.Session.User.ID, id, db.NowMs()); err != nil {
+		s.notFoundOr(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) artwork(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r, "item_id")
 	if !ok {
@@ -424,6 +439,13 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := s.Playback.RecordEvent(r.Context(), info(r).Session.User.ID, r.PathValue("session_id"), ev)
+	if err == nil && (ev.Type == "stop" || ev.Type == "error") {
+		// The client is done with this session, so any stream still open for it
+		// goes too. Otherwise a reader that keeps its connection open after
+		// stopping holds a conversion slot until it disconnects, and with only
+		// two transcode slots that refuses everyone else.
+		s.streams.cancel(r.PathValue("session_id"))
+	}
 	var term *playback.TerminatedError
 	switch {
 	case errors.Is(err, playback.ErrSessionNotFound):
@@ -437,6 +459,10 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.internal(w, r, err)
 	default:
+		if s.HLS != nil && (ev.Type == "stop" || ev.Type == "error") {
+			// The session is over: its HLS stream stops and its files go now.
+			s.HLS.Stop(r.PathValue("session_id"))
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

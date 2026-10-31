@@ -42,13 +42,24 @@ private fun defaultMessage(status: Int): String = when (status) {
 
 /**
  * What to tell the viewer when the server refuses a stream mid-play. A 410 means
- * an admin stopped it from Activity, and the body carries their message.
+ * an admin stopped it from Activity, and the body carries their message. A 503
+ * busy means every converted-stream slot on the server is taken.
  */
 fun streamRefusal(status: Int, body: ByteArray?, json: Json): String {
     val error = httpError(status, body?.toString(Charsets.UTF_8), json)
-    return if (error is ApiException.Http && error.code == "session_terminated") {
-        "Playback was stopped on the server: ${error.message}"
-    } else {
-        "The server refused the stream (HTTP $status)."
+    return when {
+        error is ApiException.Http && error.code == "session_terminated" -> "Playback was stopped on the server: ${error.message}"
+        error is ApiException.Http && error.code == BUSY -> BUSY_MESSAGE
+        else -> "The server refused the stream (HTTP $status)."
     }
 }
+
+/** True for the server's 503 busy answer: it is converting as many streams as it allows. */
+fun isBusy(error: ApiException): Boolean = error is ApiException.Http && error.status == 503 && error.code == BUSY
+
+/** The error code of a 503 from a converted stream when every slot is taken. */
+const val BUSY = "busy"
+
+/** Shown for [BUSY], on the TV's own terms: nothing is wrong, the server is full. */
+const val BUSY_MESSAGE =
+    "The server is converting as many streams as it allows right now. Try again in a minute, or stop playback on another screen."

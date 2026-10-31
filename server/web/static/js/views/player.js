@@ -9,10 +9,15 @@ import { skipButtons } from "./skip.js";
 //
 // Two kinds of stream:
 // - progressive: the file itself, seekable by range; native controls.
-// - fmp4: a converted stream (video copied, audio converted) that cannot be
-//   seeked by range. Seeking asks the server for a new stream; the server says
-//   where it starts (a keyframe), and the position is that start plus the
-//   element's own time. These get VCRX controls.
+// - fmp4: a converted stream (video copied or transcoded, audio copied or
+//   converted) that cannot be seeked by range. Seeking asks the server for a
+//   new stream; the server says where it starts (the keyframe before the
+//   position when the video is copied, the position itself when it is
+//   transcoded), and the position is that start plus the element's own time.
+//   These get VCRX controls.
+// - hls: the same converted stream as an HLS playlist, for Safari, which
+//   cannot play the fmp4 one. It seeks the same way: the seek endpoint starts
+//   a stream at the position and answers with its playlist.
 export async function playerView({ match, params }) {
   const itemId = Number(match[1]);
   const body = { item_id: itemId, capabilities: capabilities() };
@@ -33,7 +38,8 @@ export async function playerView({ match, params }) {
     return { el: shell, title: "Cannot play" };
   }
 
-  const converted = session.stream.protocol === "fmp4";
+  const hls = session.stream.protocol === "hls";
+  const converted = hls || session.stream.protocol === "fmp4";
   const totalMs = session.version.duration_ms || 0;
   const title = item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)} · ${item.title}` : item.title;
   const video = h("video", { autoplay: true, playsinline: true, preload: "auto" });
@@ -43,6 +49,13 @@ export async function playerView({ match, params }) {
   let offsetMs = 0; // where the current converted stream starts in the file
   const pos = () => offsetMs + Math.round((video.currentTime || 0) * 1000);
   const dur = () => (converted ? totalMs || null : Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null);
+
+  // An iPhone puts only a <video> full screen, with its own controls.
+  const fullscreen = () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else if (shell.requestFullscreen) shell.requestFullscreen().catch(() => {});
+    else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+  };
 
   function showStatus(msg) {
     status.textContent = msg;
@@ -101,10 +114,13 @@ export async function playerView({ match, params }) {
     const seq = ++loadSeq;
     showStatus("Loading");
     const target = Math.max(0, Math.min(ms, totalMs ? totalMs - 1000 : ms));
-    const at = await api(`/playback/sessions/${session.session_id}/seek?position_ms=${target}`);
+    // The audio track goes on the fmp4 stream's URL, or to the seek that
+    // starts an HLS stream.
+    const audio = audioIndex === null ? "" : `&audio=${audioIndex}`;
+    const at = await api(`/playback/sessions/${session.session_id}/seek?position_ms=${target}${hls ? audio : ""}`);
     if (seq !== loadSeq) return;
     offsetMs = at.start_ms;
-    video.src = audioIndex === null ? at.url : `${at.url}&audio=${audioIndex}`;
+    video.src = hls ? at.url : at.url + audio;
     applyCues();
     video.play().catch(() => {});
   }
@@ -145,7 +161,7 @@ export async function playerView({ match, params }) {
     };
     playBtn.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
     muteBtn.addEventListener("click", () => { video.muted = !video.muted; draw(); });
-    fsBtn.addEventListener("click", () => (document.fullscreenElement ? document.exitFullscreen() : shell.requestFullscreen().catch(() => {})));
+    fsBtn.addEventListener("click", fullscreen);
     bar.addEventListener("input", () => { dragging = true; draw(); });
     bar.addEventListener("change", () => { dragging = false; seekTo(Number(bar.value)); });
     for (const ev of ["timeupdate", "play", "pause", "volumechange"]) video.addEventListener(ev, draw);
@@ -180,20 +196,31 @@ export async function playerView({ match, params }) {
   }
 
   shell.append(video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title), audioSel,
-    converted ? h("span", { class: "pill", title: session.reason }, session.decision === "audio_transcode" ? "Audio converted" : "Repackaged") : null,
+    converted ? h("span", { class: "pill", title: session.reason }, convertedLabel(session.decision)) : null,
     subSel), controls, status, overlay);
   skipButtons({ shell, video, session, pos, seekTo, durationMs: dur, hasNext: !!item.next_episode });
 
   video.addEventListener("loadedmetadata", () => {
     if (!converted && session.resume_position_ms > 0 && video.currentTime < 1) video.currentTime = session.resume_position_ms / 1000;
   }, { once: true });
+  // An HLS stream nobody asks anything of for two minutes is deleted, and a
+  // paused Safari may ask nothing, so after a long pause the stream starts
+  // again where it stopped.
+  let pausedAt = 0;
+  video.addEventListener("play", () => {
+    if (hls && pausedAt && Date.now() - pausedAt > 90000) loadAt(pos()).catch((e) => toast(e.message));
+    pausedAt = 0;
+  });
+  let recoveries = 0;
   video.addEventListener("playing", () => {
+    recoveries = 0;
     showStatus("");
     if (!started) { started = true; report("start"); }
     else if (paused) { paused = false; report("resume"); }
   });
   video.addEventListener("waiting", () => { if (converted) showStatus("Loading"); });
   video.addEventListener("pause", () => {
+    pausedAt = Date.now();
     if (started && !video.ended && !ended) { paused = true; report("pause"); }
   });
   if (!converted) {
@@ -238,6 +265,17 @@ export async function playerView({ match, params }) {
       if (r.status === 410) return terminated();
     } catch { /* fall through */ }
     const code = video.error ? video.error.code : 0;
+    // An HLS stream can lose a segment the server already deleted (a seek
+    // far back in the native player); starting again there recovers.
+    if (hls && code !== 4 && recoveries < 2) {
+      recoveries++;
+      loadAt(pos()).catch((e) => {
+        ended = true;
+        overlay.replaceChildren(errorBox("Playback failed", e.message, h("button", { class: "btn", type: "button", onclick: back }, "Back")));
+        overlay.hidden = false;
+      });
+      return;
+    }
     const msg = code === 4 ? "The browser cannot decode this file." : "The stream was interrupted.";
     report("error", { message: `web: ${msg} (media error ${code})` });
     ended = true;
@@ -274,7 +312,7 @@ export async function playerView({ match, params }) {
     if (e.key === " " || e.key === "k") { e.preventDefault(); video.paused ? video.play() : video.pause(); }
     else if (e.key === "ArrowRight") seekTo(pos() + (converted ? 30000 : 10000));
     else if (e.key === "ArrowLeft") seekTo(Math.max(0, pos() - (converted ? 30000 : 10000)));
-    else if (e.key === "f") document.fullscreenElement ? document.exitFullscreen() : shell.requestFullscreen().catch(() => {});
+    else if (e.key === "f") fullscreen();
     else if (e.key === "m") video.muted = !video.muted;
     else if (e.key === "Escape" && !document.fullscreenElement) back();
   };
@@ -359,4 +397,9 @@ async function fetchVTT(url, onWait) {
     try { msg = (await r.json()).message || msg; } catch { /* keep default */ }
     throw new Error(msg);
   }
+}
+
+function convertedLabel(decision) {
+  if (decision === "transcode") return "Video converted";
+  return decision === "audio_transcode" ? "Audio converted" : "Repackaged";
 }

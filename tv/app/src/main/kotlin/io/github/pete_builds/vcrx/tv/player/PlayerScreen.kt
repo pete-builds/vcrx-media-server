@@ -59,7 +59,11 @@ fun PlayerScreen(controller: PlaybackController, onExit: () -> Unit) {
             }
             is Phase.Failed -> BlackField {
                 MessageView(
-                    if (phase.unreachable) "Server unreachable" else "Playback stopped",
+                    when {
+                        phase.unreachable -> "Server unreachable"
+                        phase.busy -> "Server busy"
+                        else -> "Playback stopped"
+                    },
                     phase.message,
                     primary = "Retry" to controller::retry,
                     secondary = "Back" to onExit,
@@ -128,7 +132,15 @@ private fun Chrome(controller: PlaybackController) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Mark(height = 22.dp)
-                Text(controller.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    controller.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                // Which kind of stream this is, as the web player's pill says it.
+                controller.streamLabel?.let { Label(it, style = MaterialTheme.typography.labelLarge, color = Orange) }
             }
         }
         Spacer(Modifier.weight(1f))
@@ -169,8 +181,10 @@ private fun status(controller: PlaybackController, target: Long?): String = when
         val delta = target - controller.positionMs
         (if (delta >= 0) "Forward " else "Back ") + formatTime(kotlin.math.abs(delta))
     }
+    controller.reloading -> "Loading"
     !controller.isPlaying && !controller.player.playWhenReady -> "Paused"
-    else -> ""
+    // A converted stream says so whenever the bar is up; direct play shows nothing here.
+    else -> controller.streamLabel.orEmpty()
 }
 
 /** Orange fill on a graphite track, and an orange scrubber at the playhead or seek target. */
@@ -212,6 +226,9 @@ private fun TrackDialog(controller: PlaybackController, kind: TrackKind) {
     ) {
         if (options.isEmpty()) {
             Label("No tracks in this file", style = MaterialTheme.typography.labelMedium)
+        }
+        if (kind == TrackKind.Subtitles && controller.streamLabel != null) {
+            Label("Subtitles are not available on converted streams yet", style = MaterialTheme.typography.labelMedium)
         }
         options.forEachIndexed { index, option ->
             BrandRow(

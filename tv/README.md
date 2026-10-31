@@ -87,8 +87,8 @@ ADB runs from any machine on the same LAN. On this NixOS box, `nix-shell -p andr
 4. Pair, then connect to the port shown on the Wireless debugging screen (not the pairing port):
 
    ```sh
-   adb pair 192.168.86.50:37123 123456
-   adb connect 192.168.86.50:41235
+   adb pair 192.168.1.50:37123 123456
+   adb connect 192.168.1.50:41235
    ```
 
 5. Install, or upgrade in place:
@@ -109,7 +109,7 @@ VCRX appears in the TV's app row with its banner. Some Google TV launchers hide 
 
 ## Connect to the server
 
-On first launch, enter the server's LAN address with its port, for example `192.168.86.20:3750` or `http://192.168.86.20:3750`. A bare address gets `http://` and port 3750. The app checks `GET /api/v1/server` and refuses anything that is not `vcrx-media-server` speaking API version 1, then asks for a username and password.
+On first launch, enter the server's LAN address with its port, for example `192.168.1.20:3750` or `http://192.168.1.20:3750`. A bare address gets `http://` and port 3750. The app checks `GET /api/v1/server` and refuses anything that is not `vcrx-media-server` speaking API version 1, then asks for a username and password.
 
 Plain HTTP is allowed because LAN addresses cannot be listed ahead of time (`res/xml/network_security_config.xml`). HTTPS comes later through a reverse proxy; enter the `https://` address then and it works with publicly trusted certificates.
 
@@ -129,6 +129,12 @@ The bearer token is encrypted with an AES-GCM key held in the Android Keystore; 
 | Player, controls shown | Back | Hide the controls |
 
 Pressing Home during playback ends the session and saves the position. The final stop event is written to disk before it is sent and retried on the next launch if the network was down.
+
+## Files the TV cannot play directly
+
+Every play request says the app takes a converted stream (`fmp4_stream`). When the server's decision is anything but direct play, it answers with protocol `fmp4`: a fragmented MP4 piped from ffmpeg, with the video copied (or re-encoded once the server can) and the audio copied or converted to AAC. The app plays it as a progressive stream. It cannot be seeked by byte range, so every seek (left, right, the 10 s buttons) asks `GET /api/v1/playback/sessions/{id}/seek` where a stream from that point starts, a keyframe at or before it, and opens a new stream there. The position on screen and in every playback event is that start plus the player's own time, so resume points and Activity read the same as direct play.
+
+The bar shows which kind it is: Audio converted, Repackaged, or Video converted. Subtitles are not offered on a converted stream yet: the stream carries none, and side-loaded files would drift after the first seek. A converted stream that ends well before the file does is treated as cut off, not finished, so the item is not marked played.
 
 ## Brand
 
@@ -165,6 +171,7 @@ It needs `/dev/kvm` on the Docker host, publishes no ports and uses no network. 
 | "answered, but it is not a VCRX Media Server" | Something else listens on that port. Check the port the server is configured to use. |
 | Sent back to Sign in | The server answered 401: the token expired or was revoked. Sign in again. |
 | "Cannot play this here" | The server refused (403 policy) or cannot adapt that file for this device yet (422). The message is the server's. |
+| "Server busy" | The server is converting as many streams as it allows (503 `busy`). Retry in a minute, or stop a converted stream on another screen. |
 | No sound on some files | Settings, About shows whether the FFmpeg extension loaded and lists every decoder and passthrough format the TV reported. |
 | `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | The installed copy was signed with a different key. Restore `tv/signing/` from backup, or `adb uninstall io.github.pete_builds.vcrx.tv` and reinstall (this clears the sign in). |
 | `INSTALL_FAILED_NO_MATCHING_ABIS` | The device is 32-bit x86. Add `x86` to `abiFilters` in `app/build.gradle.kts` and to the ABI list in the Dockerfile's ffmpeg stage. |
