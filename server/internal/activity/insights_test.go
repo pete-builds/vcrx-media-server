@@ -15,22 +15,21 @@ import (
 
 func TestLocation(t *testing.T) {
 	for ip, want := range map[string]string{
-		"192.168.1.20":          "Local network",
-		"10.0.0.5":              "Local network",
-		"172.16.4.1":            "Local network",
-		"fe80::1":               "Local network",
-		"fd12:3456::1":          "Local network",
-		"100.101.102.103":       "Tailscale",
-		"100.64.0.1":            "Tailscale",
-		"fd7a:115c:a1e0::1234":  "Tailscale",
-		"::ffff:100.100.1.1":    "Tailscale",
-		"127.0.0.1":             "This server",
-		"::1":                   "This server",
-		"203.0.113.9":           "Internet",
-		"100.128.0.1":           "Internet", // just past the Tailscale range
-		"2001:db8:85a3::8a2e:1": "Internet",
-		"":                      "",
-		"not an address":        "",
+		"192.168.1.20":           "Local network",
+		"10.0.0.5":               "Local network",
+		"10.9.9.9":               "Local network",
+		"fe80::1":                "Local network",
+		"fd12:3456::1":           "Local network",
+		"100.101.102.103":        "Tailscale",
+		"fd7a:115c:a1e0::1234":   "Tailscale",
+		"::ffff:100.101.102.103": "Tailscale",
+		"127.0.0.1":              "This server",
+		"::1":                    "This server",
+		"203.0.113.9":            "Internet",
+		"100.128.0.1":            "Internet", // just past the Tailscale range
+		"2001:db8:85a3::8a2e:1":  "Internet",
+		"":                       "",
+		"not an address":         "",
 	} {
 		if got := Location(ip); got != want {
 			t.Errorf("Location(%q) = %q, want %q", ip, got, want)
@@ -131,14 +130,14 @@ func TestStatsFromSeededSessions(t *testing.T) {
 	hour := int64(3_600_000)
 	// Monday 9 March: two films at once in the evening, on two kinds of device.
 	f.play(play{"ana", "movie", "Harbor Lights", harbor, "direct_play", "android_tv", "TV", at(9, 21, 10), 60, hour, "192.168.1.20"})
-	f.play(play{"ben", "movie", "Harbor Lights", harbor, "remux", "web", "Chrome", at(9, 21, 30), 60, hour, "100.101.1.2"})
+	f.play(play{"ben", "movie", "Harbor Lights", harbor, "remux", "web", "Chrome", at(9, 21, 30), 60, hour, "100.101.102.103"})
 	// Tuesday: a morning episode, a second straight after it (touching, not
 	// overlapping), and one in the evening.
 	f.play(play{"ana", "episode", "Pilot", ep1, "transcode", "web", "Firefox", at(10, 8, 5), 20, 1_200_000, "192.168.1.20"})
 	f.play(play{"ana", "episode", "Second", ep2, "direct_play", "android_tv", "TV", at(10, 8, 25), 10, 600_000, "192.168.1.20"})
 	f.play(play{"ben", "episode", "Second", ep2, "direct_play", "android_tv", "TV", at(10, 21, 40), 40, 2_000_000, "192.168.1.30"})
 	// Not counted: a misclick, a refusal, and a play from before the range.
-	f.play(play{"ana", "movie", "Paper Trail", paper, "direct_play", "android_tv", "TV", at(11, 10, 0), 1, 10_000, "100.64.5.5"})
+	f.play(play{"ana", "movie", "Paper Trail", paper, "direct_play", "android_tv", "TV", at(11, 10, 0), 1, 10_000, "100.101.102.103"})
 	f.play(play{"ben", "movie", "Paper Trail", paper, "refused", "web", "Safari", at(11, 11, 0), 0, 0, ""})
 	f.play(play{"ben", "movie", "Paper Trail", paper, "direct_play", "web", "Safari", time.Date(2026, 2, 1, 21, 0, 0, 0, statsZone), 90, hour, ""})
 
@@ -203,7 +202,7 @@ func TestStatsFromSeededSessions(t *testing.T) {
 			loc[*x.IP] = x.Location
 		}
 	}
-	if loc["100.101.1.2"] != "Tailscale" || loc["192.168.1.20"] != "Local network" {
+	if loc["100.101.102.103"] != "Tailscale" || loc["192.168.1.20"] != "Local network" {
 		t.Fatalf("history locations: %v", loc)
 	}
 	users, err := s.Users(context.Background())

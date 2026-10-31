@@ -16,7 +16,7 @@ info:
     name: AGPL-3.0-or-later
     identifier: AGPL-3.0-or-later
 servers:
-  - url: http://192.168.86.20:3750
+  - url: http://192.168.1.20:3750
     description: nix1 on the LAN
 security:
   - bearer: []
@@ -286,6 +286,16 @@ paths:
                 played: { type: boolean }
       responses:
         "204": { description: Saved }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/items/{item_id}/progress:
+    delete:
+      operationId: clearProgress
+      summary: >-
+        Remove from Continue Watching: forget the caller's resume position without marking the item played or changing its
+        play count. On a show or season this applies to every episode. Only the caller's own watch state changes.
+      parameters: [{ $ref: "#/components/parameters/ItemID" }]
+      responses:
+        "204": { description: Cleared }
         "404": { $ref: "#/components/responses/Error" }
   /api/v1/items/{item_id}/artwork/{kind}:
     get:
@@ -988,6 +998,14 @@ components:
             genres: { type: array, items: { type: string } }
             directors: { type: array, items: { type: string } }
             studios: { type: array, items: { type: string } }
+            cast:
+              type: array
+              description: Up to 20 actors in billing order; an episode lists its own guests before its show's cast.
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  role: { type: [string, "null"] }
             ratings: { type: object, additionalProperties: { type: number }, description: "Keyed by source: imdb, tmdb, nfo." }
             versions: { type: array, items: { $ref: "#/components/schemas/Version" }, description: Only versions the caller may play, best first. }
             collections:

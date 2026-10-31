@@ -110,6 +110,7 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/items/{item_id}", signedIn, s.item},
 		{"GET", "/api/v1/items/{item_id}/children", signedIn, s.itemChildren},
 		{"PUT", "/api/v1/items/{item_id}/watched", signedIn, s.setWatched},
+		{"DELETE", "/api/v1/items/{item_id}/progress", signedIn, s.clearProgress},
 		{"GET", "/api/v1/items/{item_id}/artwork/{kind}", signedIn, s.artwork},
 		{"POST", "/api/v1/playback/sessions", signedIn, s.startPlayback},
 		{"POST", "/api/v1/playback/sessions/{session_id}/events", signedIn, s.playbackEvent},

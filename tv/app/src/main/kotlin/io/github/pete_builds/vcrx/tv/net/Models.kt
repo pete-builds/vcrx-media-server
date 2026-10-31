@@ -264,3 +264,27 @@ data class PlaybackEvent(
     @SerialName("duration_ms") val durationMs: Long? = null,
     val message: String? = null,
 )
+
+/** One open playback session, as GET /api/v1/admin/activity/now lists it. */
+@Serializable
+data class NowSession(
+    val id: String,
+    val state: String = "",
+    val decision: String = "",
+    val username: String? = null,
+    @SerialName("item_title") val itemTitle: String? = null,
+    @SerialName("device_name") val deviceName: String? = null,
+    val client: String? = null,
+    @SerialName("version_summary") val versionSummary: String? = null,
+    @SerialName("position_ms") val positionMs: Long = 0,
+    @SerialName("duration_ms") val durationMs: Long? = null,
+)
+
+@Serializable
+data class NowPlaying(
+    val sessions: List<NowSession> = emptyList(),
+    @SerialName("stream_count") val streamCount: Int = 0,
+)
+
+@Serializable
+data class TerminateRequest(val message: String)

@@ -76,13 +76,15 @@ if [ ! -f "$twin" ]; then
     -metadata:s:a:0 language=eng -metadata:s:a:1 language=ger "$twin"
 fi
 
-# NFO ratings let the poster overlays show without network access.
-nfo() { # dir file rating votes
+# NFO ratings let the poster overlays show without network access; the optional
+# fifth argument is more NFO XML, such as an invented cast.
+nfo() { # dir file rating votes [extra-xml]
   [ -f "$1/$2" ] && return
-  printf '<?xml version="1.0" encoding="UTF-8"?>\n<%s><ratings><rating name="imdb" max="10"><value>%s</value><votes>%s</votes></rating></ratings></%s>\n' \
-    "${2%.nfo}" "$3" "$4" "${2%.nfo}" > "$1/$2"
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<%s><ratings><rating name="imdb" max="10"><value>%s</value><votes>%s</votes></rating></ratings>%s</%s>\n' \
+    "${2%.nfo}" "$3" "$4" "${5:-}" "${2%.nfo}" > "$1/$2"
 }
-nfo "$media/Movies/Harbor Lights (2001)" movie.nfo 8.4 310000
+nfo "$media/Movies/Harbor Lights (2001)" movie.nfo 8.4 310000 \
+  '<actor><name>Mara Quill</name><role>Lighthouse Keeper</role><order>0</order></actor><actor><name>Tomas Brandt</name><role>Harbor Master</role><order>1</order></actor><actor><name>June Okafor</name><order>2</order></actor>'
 nfo "$media/Movies/Copper Valley (2015)" movie.nfo 6.9 41000
 nfo "$media/Movies/Paper Trail (1998)" movie.nfo 7.7 88000
 nfo "$media/TV/Quiet Street" tvshow.nfo 8.8 120000

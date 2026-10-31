@@ -291,7 +291,7 @@ func serve() error {
 	if cfg.ScanOnStartup {
 		go scans.Schedule(ctx)
 	}
-	go housekeeping(ctx, log, pb, authStore)
+	go housekeeping(ctx, log, pb, authStore, a.db, cfg.BackupDir())
 	if cfg.TMDbAPIKey != "" {
 		enr := newEnricher(a)
 		enr.Busy = scans.Running
@@ -377,7 +377,10 @@ func rootStates(ctx context.Context, adm *admin.Admin) (map[string]string, error
 	return out, nil
 }
 
-func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, as *auth.Store) {
+// nightlyBackups is how many daily database snapshots are kept in /config/backups.
+const nightlyBackups = 7
+
+func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, as *auth.Store, conn *sql.DB, backupDir string) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for i := 0; ; i++ {
@@ -391,12 +394,30 @@ func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, a
 				log.Warn("purge expired sessions", "err", err)
 			}
 		}
+		// Ten minutes after start, then daily: a consistent snapshot of the
+		// database (watch history, resume points, matches), keeping a week.
+		if i%1440 == 10 {
+			nightlyBackup(ctx, log, conn, backupDir)
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
 	}
+}
+
+func nightlyBackup(ctx context.Context, log *slog.Logger, conn *sql.DB, dir string) {
+	path, err := db.Backup(ctx, conn, dir, "nightly")
+	if err != nil {
+		log.Warn("nightly database backup failed", "err", err)
+		return
+	}
+	removed, err := db.Prune(dir, "nightly", nightlyBackups)
+	if err != nil {
+		log.Warn("pruning old database backups failed", "err", err)
+	}
+	log.Info("database backed up", "path", path, "pruned", removed)
 }
 
 func readPassword(prompt string) (string, error) {

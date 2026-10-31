@@ -6,13 +6,13 @@
 # converted stream for a file whose audio a browser cannot decode, collections,
 # filters and (as an admin on the LAN) Activity.
 #
-#   VCRX_URL=http://192.168.86.20:3750 VCRX_USER=pete VCRX_PASSWORD=... scripts/smoke-api.sh
+#   VCRX_URL=http://192.168.1.20:3750 VCRX_USER=pete VCRX_PASSWORD=... scripts/smoke-api.sh
 #
 # Needs curl and jq. Leaves one finished playback session in the activity log and
 # a resume point on the movie it picked; pass VCRX_KEEP_POSITION=0 to clear it.
 set -euo pipefail
 
-url="${VCRX_URL:?set VCRX_URL, e.g. http://192.168.86.20:3750}"
+url="${VCRX_URL:?set VCRX_URL, e.g. http://192.168.1.20:3750}"
 user="${VCRX_USER:?set VCRX_USER}"
 pass="${VCRX_PASSWORD:?set VCRX_PASSWORD}"
 keep="${VCRX_KEEP_POSITION:-1}"
