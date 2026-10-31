@@ -837,7 +837,7 @@ func TestMaliciousPeerAnswersAreBoundedAndChecked(t *testing.T) {
 	// and streams only what is video.
 	fp.on("POST /api/v1/playback/sessions", jsonAnswer(map[string]any{
 		"session_id": strings.Repeat("ab", 16), "decision": "direct_play", "reason": "<b>ok</b>", "item_id": 1,
-		"version":          map[string]any{"id": 7, "file_name": "/home/someone/film.mkv", "duration_ms": 1000},
+		"version":          map[string]any{"id": 7, "file_name": "/srv/peer-media/film.mkv", "duration_ms": 1000},
 		"stream":           map[string]any{"url": internal.URL + "/steal", "protocol": "progressive", "mime_type": "text/html"},
 		"webvtt_subtitles": []map[string]any{{"track_id": 9, "url": internal.URL + "/subs"}},
 	}))
@@ -852,7 +852,7 @@ func TestMaliciousPeerAnswersAreBoundedAndChecked(t *testing.T) {
 	r = b.do("POST", fmt.Sprintf("/api/v1/peers/%d/playback/sessions", id), b.adminTok, map[string]any{"item_id": 1, "capabilities": tclCaps()})
 	var s peerPlay
 	r.json(t, &s)
-	if r.code != 201 || strings.Contains(string(r.body), internal.URL) || strings.Contains(string(r.body), "/home/") || strings.Contains(string(r.body), "text/html") ||
+	if r.code != 201 || strings.Contains(string(r.body), internal.URL) || strings.Contains(string(r.body), "/srv/peer-media/") || strings.Contains(string(r.body), "text/html") ||
 		s.Stream.URL != fmt.Sprintf("/api/v1/peers/%d/playback/sessions/%s/file", id, s.SessionID) {
 		t.Fatalf("start through a malicious peer: %d %s", r.code, r.body)
 	}
