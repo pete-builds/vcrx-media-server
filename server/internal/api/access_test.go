@@ -48,6 +48,7 @@ var publicRoutes = map[string]string{
 var noItemRoutes = map[string]string{
 	"POST /api/v1/auth/logout": "ends the caller's own session",
 	"GET /api/v1/me":           "the caller's own account",
+	"GET /api/v1/speedtest":    "random filler bytes for timing the connection; reads nothing from the library",
 }
 
 type probe struct {
@@ -315,6 +316,13 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 	ps = append(ps, at("POST /api/v1/playback/sessions").with(map[string]any{"item_id": f.movieID, "version_id": f.v4k, "capabilities": tclCaps()}))
 	for _, v := range w.hiddenVersions {
 		ps = append(ps, at("GET /api/v1/versions/{version_id}/file", v), at("HEAD /api/v1/versions/{version_id}/file", v))
+		// Subtitle search is off in the fixture, so even the open friend gets a
+		// 404, but only one written after the version passed the policy.
+		const off = "Subtitle search is not set up"
+		ps = append(ps,
+			at("GET /api/v1/versions/{version_id}/subtitles/search", v).past(off),
+			at("POST /api/v1/versions/{version_id}/subtitles/download", v).with(map[string]any{"file_id": 1}).past(off),
+			at("PUT /api/v1/versions/{version_id}/subtitle-offset", v).with(map[string]any{"offset_ms": 250}))
 	}
 	for _, s := range w.hiddenSubs {
 		ps = append(ps, at("GET /api/v1/subtitles/{stream_id}", s))
