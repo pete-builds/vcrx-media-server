@@ -417,6 +417,120 @@ paths:
                 properties:
                   sessions: { type: array, items: { $ref: "#/components/schemas/ActivitySession" } }
 
+  /api/v1/admin/activity/now:
+    get:
+      operationId: adminActivityNow
+      summary: Every open playback session with progress, device, decision and bitrate, plus header totals. Admin and LAN only.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions, stream_count, direct_play, converting, bandwidth_bps]
+                properties:
+                  sessions: { type: array, items: { $ref: "#/components/schemas/ActivityEntry" } }
+                  stream_count: { type: integer }
+                  direct_play: { type: integer }
+                  converting: { type: integer }
+                  bandwidth_bps: { type: integer, description: Sum of the bitrates of sessions that are not paused. }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/activity/history:
+    get:
+      operationId: adminActivityHistory
+      summary: Ended sessions, newest first. Refusals and sessions that never played are left out unless include_refused is true.
+      parameters:
+        - { name: user_id, in: query, schema: { type: integer } }
+        - { name: item_id, in: query, schema: { type: integer }, description: "A movie, an episode, or a show (all its episodes)." }
+        - { name: include_refused, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions, total]
+                properties:
+                  sessions: { type: array, items: { $ref: "#/components/schemas/ActivityEntry" } }
+                  total: { type: integer }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/activity/stats:
+    get:
+      operationId: adminActivityStats
+      summary: >-
+        Totals over the last days days (default 30): plays and watch time, top movies, shows, users, clients and devices,
+        and plays by day, hour and weekday in the server's time zone. A play counts once 30 seconds have actually played.
+      parameters:
+        - { name: days, in: query, schema: { type: integer, default: 30, maximum: 3650 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivityStats" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/activity/users:
+    get:
+      operationId: adminActivityUsers
+      summary: Every account with all-time plays and watch time and its latest session.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items:
+                      type: object
+                      required: [user_id, username, is_admin, plays, watch_ms]
+                      properties:
+                        user_id: { type: integer }
+                        username: { type: string }
+                        is_admin: { type: boolean }
+                        plays: { type: integer }
+                        watch_ms: { type: integer }
+                        last_seen: { type: [integer, "null"] }
+                        last_title: { type: [string, "null"] }
+                        last_device: { type: [string, "null"] }
+                        last_ip: { type: [string, "null"] }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/activity/sessions/{session_id}/terminate:
+    post:
+      operationId: adminTerminateSession
+      summary: >-
+        Stop someone's stream. Open file responses for the session are cut off, and its stream URL and events then answer
+        410 session_terminated with the message, which clients show to the viewer.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message: { type: string, maxLength: 200, description: Shown to the viewer. A default is used when empty. }
+      responses:
+        "200":
+          description: The session as it now stands.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivityEntry" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearer:
@@ -741,6 +855,74 @@ components:
         deny_labels: { type: array, items: { type: string } }
         allow_transcode: { type: boolean }
         allow_4k_transcode: { type: boolean }
+    ActivityEntry:
+      type: object
+      required: [id, state, decision, decision_reason, start_position_ms, position_ms, played_ms, watched, started_at, last_event_at]
+      properties:
+        id: { type: string }
+        state: { type: string, enum: [created, playing, paused, buffering, stopped, error, refused] }
+        decision: { type: string, enum: [direct_play, remux, audio_transcode, transcode, refused] }
+        decision_reason: { type: string }
+        user_id: { type: [integer, "null"] }
+        username: { type: [string, "null"] }
+        item_id: { type: [integer, "null"] }
+        item_kind: { type: [string, "null"] }
+        item_title: { type: [string, "null"], description: Snapshot at play time; episodes read "Show S01E02 Title". }
+        show_id: { type: [integer, "null"], description: "For an episode, its show, for the poster." }
+        version_summary: { type: [string, "null"] }
+        bitrate: { type: [integer, "null"] }
+        device_name: { type: [string, "null"] }
+        device_model: { type: [string, "null"] }
+        platform: { type: [string, "null"] }
+        client: { type: [string, "null"] }
+        client_version: { type: [string, "null"] }
+        ip: { type: [string, "null"] }
+        start_position_ms: { type: integer }
+        position_ms: { type: integer }
+        duration_ms: { type: [integer, "null"] }
+        progress: { type: [number, "null"], description: 0 to 1. }
+        played_ms: { type: integer, description: Wall time actually spent playing. }
+        watched: { type: boolean, description: Reached 90%. }
+        started_at: { type: integer }
+        last_event_at: { type: integer }
+        ended_at: { type: [integer, "null"] }
+        terminated_message: { type: [string, "null"] }
+    Ranked:
+      type: object
+      required: [name, plays, watch_ms, users]
+      properties:
+        id: { type: [integer, "null"] }
+        name: { type: string }
+        plays: { type: integer }
+        watch_ms: { type: integer }
+        users: { type: integer }
+    ActivityStats:
+      type: object
+      required: [days, since, plays, watch_ms, users, refused, top_movies, top_shows, top_users, platforms, devices, decisions, by_day, by_hour, by_weekday]
+      properties:
+        days: { type: integer }
+        since: { type: integer }
+        plays: { type: integer }
+        watch_ms: { type: integer }
+        users: { type: integer }
+        refused: { type: integer }
+        top_movies: { type: array, items: { $ref: "#/components/schemas/Ranked" } }
+        top_shows: { type: array, items: { $ref: "#/components/schemas/Ranked" } }
+        top_users: { type: array, items: { $ref: "#/components/schemas/Ranked" } }
+        platforms: { type: array, items: { $ref: "#/components/schemas/Ranked" } }
+        devices: { type: array, items: { $ref: "#/components/schemas/Ranked" } }
+        decisions: { type: array, items: { $ref: "#/components/schemas/Ranked" } }
+        by_day:
+          type: array
+          items:
+            type: object
+            required: [date, plays, watch_ms]
+            properties:
+              date: { type: string, format: date }
+              plays: { type: integer }
+              watch_ms: { type: integer }
+        by_hour: { type: array, items: { type: integer }, minItems: 24, maxItems: 24 }
+        by_weekday: { type: array, items: { type: integer }, minItems: 7, maxItems: 7, description: Sunday first. }
     ActivitySession:
       type: object
       required: [id, decision, decision_reason, state, started_at]

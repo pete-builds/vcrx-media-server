@@ -33,6 +33,7 @@ services:
       VCRX_TMDB_API_KEY: ${VCRX_TMDB_API_KEY:-}
       VCRX_TMDB_LANGUAGE: ${VCRX_TMDB_LANGUAGE:-en-US}
       VCRX_TMDB_COUNTRY: ${VCRX_TMDB_COUNTRY:-US}
+      VCRX_WEBHOOK_URLS: ${VCRX_WEBHOOK_URLS:-}
       TZ: ${TZ:-UTC}
     volumes:
       - ${VCRX_DATA_DIR:-./data}/config:/config

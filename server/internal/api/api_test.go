@@ -15,14 +15,17 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/pete-builds/vcrx-media-server/server/internal/activity"
 	"github.com/pete-builds/vcrx-media-server/server/internal/admin"
 	"github.com/pete-builds/vcrx-media-server/server/internal/artwork"
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
+	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 )
@@ -151,7 +154,8 @@ func newFixture(t *testing.T) *fixture {
 	cat := &catalog.Catalog{DB: conn}
 	f.srv = &Server{DB: conn, Log: log, Version: "test", ServerName: "Test", Auth: store, Limiter: auth.NewLimiter(10, time.Minute),
 		Catalog: cat, Playback: &playback.Service{DB: conn, Catalog: cat}, Artwork: artwork.New(conn, filepath.Join(dir, "cache"), "ffmpeg"),
-		Admin: adm, Scans: &fakeScans{}, Subtitles: subtitles.New(filepath.Join(dir, "subs"), "ffmpeg", log)}
+		Admin: adm, Scans: &fakeScans{}, Subtitles: subtitles.New(filepath.Join(dir, "subs"), "ffmpeg", log),
+		Activity: &activity.Service{DB: conn}}
 	f.h = f.srv.Handler()
 	f.adminTok = f.login("pete", "adminpass1")
 	f.friendTok = f.login("friend", "friendpass1")
@@ -730,5 +734,155 @@ func TestWebVTTSubtitles(t *testing.T) {
 	}
 	if r := f.do("GET", url, f.strangerTok, nil); r.code != 404 {
 		t.Fatalf("ungranted user fetching a subtitle: %d, want 404", r.code)
+	}
+}
+
+func TestActivityNowHistoryStatsAndTerminate(t *testing.T) {
+	f := newFixture(t)
+	var mu sync.Mutex
+	var hooks []map[string]any
+	recv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&m)
+		mu.Lock()
+		hooks = append(hooks, m)
+		mu.Unlock()
+	}))
+	defer recv.Close()
+	f.srv.Webhooks = notify.New([]string{recv.URL}, nil, "Test", nil)
+	f.srv.Playback.Notify = f.srv.Webhooks.Send
+
+	start := func(tok string, item int64) string {
+		t.Helper()
+		r := f.do("POST", "/api/v1/playback/sessions", tok, map[string]any{"item_id": item, "capabilities": tclCaps()})
+		if r.code != 201 {
+			t.Fatalf("start: %d %s", r.code, r.body)
+		}
+		var s struct {
+			SessionID string `json:"session_id"`
+		}
+		r.json(t, &s)
+		return s.SessionID
+	}
+	event := func(tok, id, typ string, pos int64) resp {
+		t.Helper()
+		return f.do("POST", "/api/v1/playback/sessions/"+id+"/events", tok, map[string]any{"type": typ, "position_ms": pos, "duration_ms": 6_000_000})
+	}
+
+	// The admin watches the movie and stops; the friend is mid-episode.
+	movie := start(f.adminTok, f.movieID)
+	event(f.adminTok, movie, "start", 0)
+	event(f.adminTok, movie, "progress", 5_500_000)
+	event(f.adminTok, movie, "stop", 5_500_000)
+	ep := start(f.friendTok, f.episodeID)
+	event(f.friendTok, ep, "start", 0)
+	event(f.friendTok, ep, "progress", 60_000)
+	// Credit real watch time, as heartbeats would have over an hour.
+	if _, err := f.db.Exec(`UPDATE playback_sessions SET played_ms = 3600000 WHERE id IN (?, ?)`, movie, ep); err != nil {
+		t.Fatal(err)
+	}
+	// A misclick: opened and stopped at once. It is history, not a counted play.
+	blip := start(f.adminTok, f.episodeID)
+	event(f.adminTok, blip, "start", 0)
+	event(f.adminTok, blip, "stop", 4_000)
+
+	// Admin only, and LAN only like the rest of /admin.
+	if r := f.do("GET", "/api/v1/admin/activity/now", f.friendTok, nil); r.code != 403 {
+		t.Fatalf("friend reading activity: %d", r.code)
+	}
+
+	var now activity.NowPlaying
+	r := f.do("GET", "/api/v1/admin/activity/now", f.adminTok, nil)
+	r.json(t, &now)
+	if r.code != 200 || now.StreamCount != 1 || now.DirectPlay != 1 || now.Sessions[0].ID != ep || *now.Sessions[0].Username != "friend" ||
+		now.Sessions[0].ShowID == nil || *now.Sessions[0].ShowID != f.showID {
+		t.Fatalf("now playing: %d %s", r.code, r.body)
+	}
+
+	var hist activity.History
+	f.do("GET", "/api/v1/admin/activity/history", f.adminTok, nil).json(t, &hist)
+	if hist.Total != 2 || hist.Sessions[0].ID != blip || !hist.Sessions[1].Watched {
+		t.Fatalf("history: %+v", hist)
+	}
+	f.do("GET", fmt.Sprintf("/api/v1/admin/activity/history?item_id=%d", f.showID), f.adminTok, nil).json(t, &hist)
+	if hist.Total != 1 || hist.Sessions[0].ID != blip {
+		t.Fatalf("history for the show (its episodes): %+v", hist)
+	}
+
+	var st activity.Stats
+	f.do("GET", "/api/v1/admin/activity/stats?days=7", f.adminTok, nil).json(t, &st)
+	if st.Plays != 2 || st.Users != 2 || len(st.TopMovies) != 1 || st.TopMovies[0].Name != "The Film" ||
+		len(st.TopShows) != 1 || st.TopShows[0].Name != "Show" || len(st.ByDay) != 7 || st.ByDay[6].Plays != 2 {
+		t.Fatalf("stats: %+v", st)
+	}
+
+	var users struct{ Users []activity.UserStat }
+	f.do("GET", "/api/v1/admin/activity/users", f.adminTok, nil).json(t, &users)
+	byName := map[string]activity.UserStat{}
+	for _, u := range users.Users {
+		byName[u.Username] = u
+	}
+	if byName["pete"].Plays != 1 || byName["friend"].Plays != 1 || byName["stranger"].Plays != 0 || byName["friend"].LastSeen == nil {
+		t.Fatalf("users: %+v", users.Users)
+	}
+
+	// Stopping the friend's stream: the file and further events answer 410 with the message.
+	r = f.do("POST", "/api/v1/admin/activity/sessions/"+ep+"/terminate", f.adminTok, map[string]any{"message": "Bedtime."})
+	if r.code != 200 {
+		t.Fatalf("terminate: %d %s", r.code, r.body)
+	}
+	if r := f.do("POST", "/api/v1/admin/activity/sessions/"+ep+"/terminate", f.adminTok, nil); r.code != 404 {
+		t.Fatalf("terminating an ended session: %d, want 404", r.code)
+	}
+	if r := f.do("GET", fmt.Sprintf("/api/v1/versions/%d/file?session=%s", f.episodeVerID, ep), f.friendTok, nil); r.code != 410 ||
+		!strings.Contains(string(r.body), "Bedtime.") {
+		t.Fatalf("stream after terminate: %d %s", r.code, r.body)
+	}
+	if r := event(f.friendTok, ep, "progress", 70_000); r.code != 410 || !strings.Contains(string(r.body), "Bedtime.") {
+		t.Fatalf("event after terminate: %d %s", r.code, r.body)
+	}
+	f.do("GET", "/api/v1/admin/activity/now", f.adminTok, nil).json(t, &now)
+	if now.StreamCount != 0 {
+		t.Fatalf("terminated session still listed: %+v", now)
+	}
+
+	// Webhooks: play and stop for each session, then the termination.
+	deadline := time.Now().Add(3 * time.Second)
+	want := map[string]int{"play": 3, "stop": 2, "terminated": 1}
+	for {
+		mu.Lock()
+		got := map[string]int{}
+		for _, h := range hooks {
+			got[h["event"].(string)]++
+		}
+		mu.Unlock()
+		if fmt.Sprint(got) == fmt.Sprint(want) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("webhook events %v, want %v", got, want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestTerminateCutsAnOpenStream(t *testing.T) {
+	var g streamRegistry
+	ctx, cancel := context.WithCancel(context.Background())
+	g.add("s1", &cancel)
+	rd := ctxReader{ctx: ctx, rs: strings.NewReader("abcdef")}
+	buf := make([]byte, 2)
+	if n, err := rd.Read(buf); n != 2 || err != nil {
+		t.Fatalf("read before cancel: %d %v", n, err)
+	}
+	if n := g.cancel("s1"); n != 1 {
+		t.Fatalf("cancelled %d streams, want 1", n)
+	}
+	if _, err := rd.Read(buf); err == nil {
+		t.Fatal("read after terminate should fail so ServeContent stops")
+	}
+	g.remove("s1", &cancel)
+	if g.cancel("s1") != 0 {
+		t.Fatal("removed stream still registered")
 	}
 }

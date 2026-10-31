@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
+	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 )
@@ -22,6 +23,12 @@ var (
 	ErrSessionNotFound = errors.New("playback session not found")
 	ErrSessionEnded    = errors.New("playback session already ended")
 )
+
+// TerminatedError is returned for events on a session an admin stopped. Message
+// is what the admin wrote for the viewer.
+type TerminatedError struct{ Message string }
+
+func (e *TerminatedError) Error() string { return "playback session terminated: " + e.Message }
 
 // Refusal is a recorded "no": a policy block (403) or a file this server cannot
 // adapt for the device yet (422). Message is safe to show on a TV.
@@ -109,6 +116,14 @@ type Service struct {
 	// are then refused with a clear message instead of failing on the TV.
 	CanTranscode bool
 	Now          func() time.Time
+	// Notify, when set, receives play, stop and refused events for webhooks.
+	Notify func(notify.Notice)
+}
+
+func (s *Service) notify(n notify.Notice) {
+	if s.Notify != nil {
+		s.Notify(n)
+	}
 }
 
 func (s *Service) now() time.Time {
@@ -221,6 +236,8 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 		return nil, nil, err
 	}
 	if refusal != nil {
+		s.notify(notify.Notice{Event: notify.Refused, SessionID: id, Username: c.Username, Title: title, Version: summarize(v),
+			Device: c.DeviceName, Client: c.ClientName, IP: c.IP, Decision: Refused, Reason: refusal.Message})
 		return nil, refusal, nil
 	}
 
@@ -401,8 +418,13 @@ func (s *Service) RecordEvent(ctx context.Context, userID int64, sessionID strin
 	var itemID, versionID sql.NullInt64
 	var lastEvent, playedMs int64
 	var duration sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT state, item_id, version_id, last_event_at, played_ms, duration_ms
-		FROM playback_sessions WHERE id = ? AND user_id = ?`, sessionID, userID).Scan(&state, &itemID, &versionID, &lastEvent, &playedMs, &duration)
+	var terminated sql.NullString
+	var n notify.Notice
+	var uname, title, vsum, device, client, ip sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT state, item_id, version_id, last_event_at, played_ms, duration_ms, terminated_message,
+			username, item_title, version_summary, device_name, client, ip, decision
+		FROM playback_sessions WHERE id = ? AND user_id = ?`, sessionID, userID).Scan(&state, &itemID, &versionID, &lastEvent, &playedMs,
+		&duration, &terminated, &uname, &title, &vsum, &device, &client, &ip, &n.Decision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrSessionNotFound
 	}
@@ -411,11 +433,16 @@ func (s *Service) RecordEvent(ctx context.Context, userID int64, sessionID strin
 	}
 	switch state {
 	case "stopped", "error", "refused":
+		if terminated.Valid {
+			return &TerminatedError{Message: terminated.String}
+		}
 		if ev.Type == "stop" && state == "stopped" {
 			return nil
 		}
 		return ErrSessionEnded
 	}
+	n.SessionID, n.Username, n.Title, n.Version = sessionID, uname.String, title.String, vsum.String
+	n.Device, n.Client, n.IP = device.String, client.String, ip.String
 	now := s.now().UnixMilli()
 	if state == "playing" {
 		// Credit wall time since the last event, capped so a lost heartbeat cannot
@@ -446,7 +473,19 @@ func (s *Service) RecordEvent(ctx context.Context, userID int64, sessionID strin
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	n.PositionMs, n.DurationMs, n.PlayedMs = ev.PositionMs, duration.Int64, playedMs
+	switch {
+	case state == "created" && nextState == "playing":
+		n.Event = notify.Play
+		s.notify(n)
+	case nextState == "stopped":
+		n.Event = notify.Stop
+		s.notify(n)
+	}
+	return nil
 }
 
 func updateWatch(ctx context.Context, tx *sql.Tx, userID, itemID int64, versionID sql.NullInt64, pos int64, duration sql.NullInt64, now int64) error {
@@ -483,6 +522,13 @@ func (s *Service) SweepStale(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// Terminated returns the admin's message when a session was stopped from Activity.
+func (s *Service) Terminated(ctx context.Context, sessionID string) (string, bool) {
+	var msg sql.NullString
+	err := s.DB.QueryRowContext(ctx, `SELECT terminated_message FROM playback_sessions WHERE id = ?`, sessionID).Scan(&msg)
+	return msg.String, err == nil && msg.Valid
 }
 
 // OwnsSession reports whether a session belongs to a user, for stream accounting.

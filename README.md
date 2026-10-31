@@ -19,7 +19,7 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 | Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key) | Collections, overlays, manual match fixes |
 | Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
 | Direct play over HTTP with Range, sidecar and embedded text subtitles (also as WebVTT for browsers) | Remux and HLS transcoding, picture subtitle burn-in, VA-API hardware acceleration |
-| Every playback logged with its decision and reason, resume positions, Continue Watching | Activity screens, stats, webhooks |
+| Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, stats, per-user totals, stop a stream, webhooks | Activity screens in a client |
 | REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Web client, other TV platforms |
 
 A file the TV cannot play directly is refused with a message saying why ("needs video conversion: the device has no av1 video decoder"). Transcoding arrives in milestone 3.
@@ -91,6 +91,22 @@ Set `VCRX_TMDB_API_KEY` in `.env` to your own [TMDb](https://www.themoviedb.org/
 - Images are kept in `/config/metadata/tmdb`. `VCRX_TMDB_LANGUAGE` (default `en-US`) and `VCRX_TMDB_COUNTRY` (default `US`, for content ratings) are optional.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.
+
+### Activity and notifications
+
+Like Tautulli, without a second program. Every play request is logged with the device, address, version, decision and reason, and the admin API reads it back (admin account, from the LAN):
+
+| Endpoint | What it gives |
+|---|---|
+| `GET /api/v1/admin/activity/now` | What is playing now: who, what, where, progress, direct play or not, bitrate, and the total bandwidth |
+| `GET /api/v1/admin/activity/history` | Finished plays, newest first, by user or by title (a show includes its episodes) |
+| `GET /api/v1/admin/activity/stats?days=30` | Plays and watch time, top movies, shows, users, clients and devices, plays by day, hour and weekday |
+| `GET /api/v1/admin/activity/users` | Every account with its totals and when and where it was last seen |
+| `POST /api/v1/admin/activity/sessions/{id}/terminate` | Stop a stream now, with a message the viewer sees |
+
+A play counts in stats once 30 seconds have actually played, and is watched at 90%. Days and hours follow the container's `TZ`.
+
+**Webhooks:** set `VCRX_WEBHOOK_URLS` in `.env` to one or more URLs, comma separated. Each gets a JSON post for `play`, `stop`, `refused` and `terminated` (narrow it with `webhook_events` in `vcrx.yaml`). A Discord webhook URL gets a plain Discord message instead, such as `▶ pete started The Film on Living Room TV (direct play)`.
 
 ## Run the TV app
 
