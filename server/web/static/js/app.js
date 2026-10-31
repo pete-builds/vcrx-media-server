@@ -3,7 +3,7 @@
 // function that runs when the user leaves it.
 
 import { api, autoSignIn, whenSignedOut, ApiError } from "./api.js";
-import { h, errorBox } from "./dom.js";
+import { h, errorBox, skeleton } from "./dom.js";
 import { homeView } from "./views/home.js";
 import { libraryView } from "./views/library.js";
 import { libraryCollectionsView, collectionView } from "./views/collections.js";
@@ -64,8 +64,13 @@ async function render() {
   }
   document.getElementById("topbar").hidden = !state.me || path.startsWith("/play/");
   markNav(path);
-  view.replaceChildren(h("div", { class: "loading", "aria-live": "polite" }, "Loading"));
+  setMenu(false);
+  // While a page with a hero loads, its skeleton already sits under the
+  // translucent top bar, so the bar does not flash solid and back.
+  setHero(path === "/" || path.startsWith("/item/"));
+  view.replaceChildren(skeleton(path));
   if (!viewFn) {
+    setHero(false);
     view.replaceChildren(errorBox("Not found", "There is nothing at this address.", h("a", { class: "btn", href: "#/" }, "Home")));
     return;
   }
@@ -76,6 +81,7 @@ async function render() {
       return;
     }
     view.replaceChildren(out.el);
+    setHero(!!out.hero);
     cleanup = out.cleanup || null;
     if (out.title) document.title = `${out.title} · VCRX`;
     else document.title = "VCRX";
@@ -85,6 +91,7 @@ async function render() {
     console.error(err);
     const msg = err instanceof ApiError ? err.message : "Something went wrong in the browser.";
     const title = err instanceof ApiError && err.status === 404 ? "Not found" : "Could not load this page";
+    setHero(false);
     view.replaceChildren(errorBox(title, msg, h("a", { class: "btn", href: "#/" }, "Home")));
   }
 }
@@ -101,7 +108,48 @@ export function drawNav() {
   const links = [h("a", { class: "nav-link", href: "#/" }, "Home")];
   for (const lib of state.libraries) links.push(h("a", { class: "nav-link", href: `#/library/${lib.id}` }, lib.name));
   if (state.me && state.me.is_admin) links.push(h("a", { class: "nav-link", href: "#/activity" }, "Activity"));
+  // On a phone the top bar has no room for Settings, so the menu carries it.
+  links.push(h("a", { class: "nav-link nav-phone-only", href: "#/settings" }, "Settings"));
   nav.replaceChildren(...links);
+}
+
+// The top bar is see-through over a page's hero art until the page scrolls.
+function setHero(on) {
+  document.body.classList.toggle("over-hero", on);
+}
+
+// The phone menu: the library links drop down under the menu button.
+function setMenu(open) {
+  const btn = document.getElementById("menu-btn");
+  document.getElementById("topbar").classList.toggle("menu-open", open);
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function installChrome() {
+  const bar = document.getElementById("topbar");
+  const btn = document.getElementById("menu-btn");
+  const onScroll = () => document.body.classList.toggle("scrolled", window.scrollY > 8);
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+  btn.addEventListener("click", () => {
+    const open = !bar.classList.contains("menu-open");
+    setMenu(open);
+    if (open) document.querySelector("#nav a").focus();
+  });
+  bar.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && bar.classList.contains("menu-open")) {
+      setMenu(false);
+      btn.focus();
+    }
+  });
+  document.addEventListener("click", (e) => {
+    if (bar.classList.contains("menu-open") && !bar.contains(e.target)) setMenu(false);
+  });
+  // The skip link moves focus to the page without touching the hash, which is the route.
+  document.querySelector(".skip-link").addEventListener("click", (e) => {
+    e.preventDefault();
+    document.getElementById("view").focus();
+  });
 }
 
 // signedIn loads who we are and the libraries, then draws the shell.
@@ -125,6 +173,7 @@ async function boot() {
   });
   searchSuggest(document.getElementById("search"));
   installShortcuts();
+  installChrome();
   try {
     state.server = await api("/server");
   } catch {

@@ -1,25 +1,111 @@
-import { api } from "../api.js";
-import { h, card, icon, toast } from "../dom.js";
+import { api, artUrl } from "../api.js";
+import { h, card, icon, toast, fadeImg, runtime, episodeCode } from "../dom.js";
+import { go } from "../app.js";
 
-// Home shows the server's rows: Continue Watching, then recently added per library.
+// Home shows a featured title, then the server's rows: Continue Watching, then
+// recently added per library.
 export async function homeView() {
   const data = await api("/home");
   const rows = (data.rows || []).filter((r) => r.items && r.items.length);
   if (!rows.length) {
     return { el: h("div", { class: "empty" }, "Nothing here yet. Once a library has been scanned, its titles show up here."), title: "Home" };
   }
-  const el = h("div", {}, rows.map((row) => {
+  const featured = await feature(rows);
+  const el = h("div", { class: "home" + (featured ? " with-feature" : "") }, featured, h("div", { class: "rows" }, rows.map((row) => {
     const continuing = row.id === "continue_watching";
     const landscape = continuing || row.items.every((i) => i.kind === "episode");
     const more = row.library_id ? h("a", { href: `#/library/${row.library_id}?sort=added` }, "See all") : null;
-    const section = h("section", { class: "row", "data-row": row.id },
+    const section = h("section", { class: "row", "data-row": row.id, "aria-label": row.title },
       h("div", { class: "row-head" }, h("h2", {}, row.title), more));
     const strip = h("div", { class: "strip" + (landscape ? " wide" : "") },
       row.items.map((i) => (continuing ? continueCard(i, section) : card(i, { landscape }))));
-    section.append(strip);
+    section.append(scroller(strip, row.title));
     return section;
-  }));
-  return { el, title: "Home" };
+  })));
+  return { el, title: "Home", hero: !!featured };
+}
+
+// feature is the large title at the top of Home, like a streaming service's:
+// one movie or show from the recently added rows, preferring ones with
+// backdrop art. The pick changes once a day rather than on every visit, so
+// Home does not reshuffle under someone coming back to it.
+async function feature(rows) {
+  const pool = [];
+  for (const row of rows) {
+    if (row.id === "continue_watching") continue;
+    for (const i of row.items) {
+      if ((i.kind === "movie" || i.kind === "show") && !pool.some((p) => p.id === i.id)) pool.push(i);
+    }
+  }
+  const withArt = pool.filter((i) => i.has_backdrop);
+  const choices = (withArt.length ? withArt : pool).slice(0, 8);
+  if (!choices.length) return null;
+  const pick = choices[Math.floor(Date.now() / 86400000) % choices.length];
+  // The summary has no plot or rating; the details do. Without them the
+  // feature still shows, with what the summary has.
+  const item = await api(`/items/${pick.id}`).catch(() => pick);
+
+  const art = h("div", { class: "feature-art" });
+  if (item.has_backdrop) {
+    art.append(fadeImg(artUrl(item.id, "backdrop", 1920), { lazy: false,
+      srcset: `${artUrl(item.id, "backdrop", 960)} 960w, ${artUrl(item.id, "backdrop", 1920)} 1920w`, sizes: "100vw" }));
+  } else if (item.has_poster) {
+    // No backdrop: the poster, blurred into a wash of its colours.
+    art.classList.add("from-poster");
+    art.append(fadeImg(artUrl(item.id, "poster", 320) + "&overlays=0", { lazy: false }));
+  }
+
+  const chips = [];
+  if (item.year) chips.push(h("span", {}, String(item.year)));
+  if (item.content_rating) chips.push(h("span", { class: "chip" }, item.content_rating));
+  if (item.runtime_ms) chips.push(h("span", {}, runtime(item.runtime_ms)));
+  if (item.kind === "show" && item.child_count) chips.push(h("span", {}, `${item.child_count} season${item.child_count === 1 ? "" : "s"}`));
+  if (item.resolution) chips.push(h("span", { class: "chip" }, item.resolution));
+  const score = item.ratings && (item.ratings.imdb || item.ratings.tmdb);
+  if (score) chips.push(h("span", { class: "score" }, icon("star"), score.toFixed(1)));
+
+  const buttons = h("div", { class: "actions" });
+  const w = item.watch || {};
+  if (item.kind === "movie") {
+    const resume = w.position_ms > 0 && !w.played;
+    buttons.append(h("button", { class: "btn btn-primary btn-large", type: "button", onclick: () => go(resume ? `/play/${item.id}` : `/play/${item.id}?start=0`) },
+      icon("play"), resume ? "Resume" : "Play"));
+  } else if (item.next_episode) {
+    const n = item.next_episode;
+    buttons.append(h("button", { class: "btn btn-primary btn-large", type: "button", onclick: () => go(`/play/${n.id}`) },
+      icon("play"), `${n.watch && n.watch.position_ms > 0 ? "Resume" : "Play"} ${episodeCode(n)}`.trim()));
+  }
+  buttons.append(h("a", { class: "btn btn-glass btn-large", href: `#/item/${item.id}` }, icon("info"), "More info"));
+
+  const overview = item.overview || item.tagline;
+  return h("section", { class: "feature", "aria-label": `Featured: ${item.title}` }, art,
+    h("div", { class: "feature-body" },
+      h("p", { class: "eyebrow" }, item.kind === "show" ? "Featured show" : "Featured movie"),
+      h("h1", { class: "feature-title" }, item.title),
+      chips.length ? h("div", { class: "chips" }, chips) : null,
+      overview ? h("p", { class: "feature-overview" }, overview) : null,
+      buttons));
+}
+
+// scroller wraps a row's strip with Back and Next buttons for mouse users;
+// touch screens swipe and keyboards tab through the cards. The buttons hide at
+// either end and when everything fits.
+function scroller(strip, label) {
+  const prev = h("button", { class: "row-arrow prev", type: "button", "aria-label": `Scroll ${label} back` }, icon("left"));
+  const next = h("button", { class: "row-arrow next", type: "button", "aria-label": `Scroll ${label} forward` }, icon("right"));
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const by = (dir) => strip.scrollBy({ left: dir * Math.max(200, strip.clientWidth * 0.85), behavior: reduce.matches ? "auto" : "smooth" });
+  prev.addEventListener("click", () => by(-1));
+  next.addEventListener("click", () => by(1));
+  const update = () => {
+    const max = strip.scrollWidth - strip.clientWidth;
+    prev.hidden = strip.scrollLeft <= 2;
+    next.hidden = strip.scrollLeft >= max - 2;
+  };
+  strip.addEventListener("scroll", update, { passive: true });
+  // Sizes are known only once the row is on the page, and change with the window.
+  new ResizeObserver(update).observe(strip);
+  return h("div", { class: "scroller" }, prev, strip, next);
 }
 
 // continueCard is a Continue Watching card with a Remove button beside the

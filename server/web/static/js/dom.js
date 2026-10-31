@@ -44,6 +44,12 @@ export function icon(name) {
     back: "M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z",
     stop: "M6 6h12v12H6z",
     close: "M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z",
+    left: "M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z",
+    right: "M8.6 16.6 10 18l6-6-6-6-1.4 1.4 4.6 4.6z",
+    info: "M11 7h2v2h-2zm0 4h2v6h-2zm1-9a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16z",
+    restart: "M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z",
+    menu: "M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z",
+    star: "m12 17.3 6.2 3.7-1.6-7 5.4-4.7-7.2-.6L12 2 9.2 8.7 2 9.3l5.4 4.7-1.6 7z",
   };
   return s("svg", { viewBox: "0 0 24 24", "aria-hidden": "true" }, s("path", { d: paths[name] }));
 }
@@ -108,19 +114,28 @@ export function subtitle(item) {
   }
 }
 
-function img(src, alt, onFail) {
-  const el = h("img", { src, alt, loading: "lazy", decoding: "async" });
-  el.addEventListener("error", () => { el.remove(); onFail(); }, { once: true });
+// fadeImg is an image that fades in once it has loaded (the art box shows its
+// own colour until then) and calls onFail if the server has none after all.
+export function fadeImg(src, { alt = "", lazy = true, onFail, srcset, sizes } = {}) {
+  const el = h("img", { src, srcset, sizes, alt, loading: lazy ? "lazy" : null, decoding: "async", class: "fade" });
+  el.addEventListener("load", () => el.classList.add("loaded"), { once: true });
+  el.addEventListener("error", () => { el.remove(); if (onFail) onFail(); }, { once: true });
   return el;
 }
 
-// card draws a poster (or, landscape, a thumbnail) linking to the item page.
-export function card(item, { landscape = false, href } = {}) {
+// placeholderArt stands in for missing artwork: the title on a dark gradient.
+export function placeholderArt(text) {
+  return h("div", { class: "placeholder" }, h("span", {}, text));
+}
+
+// cardArt is a card's picture: the poster (or, landscape, a still or backdrop)
+// with its watched badge and progress bar, or a placeholder when there is none.
+export function cardArt(item, { landscape = false } = {}) {
   const kind = landscape ? (item.has_thumb ? "thumb" : "backdrop") : "poster";
   const has = landscape ? (item.has_thumb || item.has_backdrop) : item.has_poster;
   const art = h("div", { class: "art" });
-  const placeholder = () => art.prepend(h("div", { class: "placeholder" }, item.kind === "episode" ? episodeCode(item) || item.title : item.title));
-  if (has) art.append(img(artUrl(item.id, kind, landscape ? 480 : 300), "", placeholder));
+  const placeholder = () => art.prepend(placeholderArt(item.kind === "episode" ? episodeCode(item) || item.title : item.title));
+  if (has) art.append(fadeImg(artUrl(item.id, kind, landscape ? 480 : 320), { onFail: placeholder }));
   else placeholder();
   const w = item.watch || {};
   if (item.kind === "show" || item.kind === "season") {
@@ -132,10 +147,31 @@ export function card(item, { landscape = false, href } = {}) {
   if (w.position_ms > 0 && w.duration_ms) {
     art.append(h("div", { class: "progress" }, h("i", { style: { width: `${Math.min(100, (100 * w.position_ms) / w.duration_ms)}%` } })));
   }
+  return art;
+}
+
+// card draws a poster (or, landscape, a thumbnail) linking to the item page.
+export function card(item, { landscape = false, href } = {}) {
+  const art = cardArt(item, { landscape });
   const title = item.kind === "episode" && landscape ? `${episodeCode(item)} ${item.title}`.trim() : item.title;
   const sub = item.kind === "episode" && landscape ? item.show_title || "" : subtitle(item);
   return h("a", { class: "card" + (landscape ? " landscape" : ""), href: href || `#/item/${item.id}`, title: item.title },
     art, h("div", { class: "title" }, title), sub ? h("div", { class: "sub" }, sub) : null);
+}
+
+// skeleton is what a page shows while it loads: grey shapes in the layout the
+// page will have, rather than the word "Loading". Screen readers hear "Loading".
+export function skeleton(path) {
+  const bar = (cls) => h("div", { class: "sk " + cls });
+  const posters = (n, cls = "") => h("div", { class: "sk-strip " + cls }, Array.from({ length: n }, () => bar("sk-poster")));
+  let body;
+  if (path.startsWith("/play/")) body = [];
+  else if (path === "/") body = [bar("sk-feature"), bar("sk-heading"), posters(8), bar("sk-heading"), posters(8)];
+  else if (path.startsWith("/item/")) body = [h("div", { class: "sk-hero" }, bar("sk-hero-poster"), h("div", { class: "sk-lines" }, bar("sk-title"), bar("sk-line"), bar("sk-line short"), bar("sk-button")))];
+  else if (/^\/(library|collection|search)/.test(path)) body = [bar("sk-title"), h("div", { class: "sk-grid" }, Array.from({ length: 18 }, () => bar("sk-poster")))];
+  else body = [bar("sk-title"), bar("sk-line"), bar("sk-line"), bar("sk-line short")];
+  return h("div", { class: "skeleton" + (path === "/" || path.startsWith("/item/") ? " sk-over-hero" : ""), "aria-busy": "true" },
+    h("span", { class: "sr-only", role: "status" }, "Loading"), body);
 }
 
 export function errorBox(title, message, action) {
