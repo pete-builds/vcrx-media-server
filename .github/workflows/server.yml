@@ -3,9 +3,9 @@ name: server
 on:
   push:
     branches: [main]
-    paths: ["server/**", "Dockerfile", ".dockerignore", "deploy/**", ".github/workflows/server.yml"]
+    paths: ["server/**", "Dockerfile", ".dockerignore", "deploy/**", "scripts/**", ".github/workflows/server.yml"]
   pull_request:
-    paths: ["server/**", "Dockerfile", ".dockerignore", "deploy/**", ".github/workflows/server.yml"]
+    paths: ["server/**", "Dockerfile", ".dockerignore", "deploy/**", "scripts/**", ".github/workflows/server.yml"]
 
 permissions:
   contents: read
@@ -71,3 +71,34 @@ jobs:
         env:
           VCRX_MOVIES_DIR: /tmp
           VCRX_TV_DIR: /tmp
+
+  # The web app in a real browser: every page renders without throwing or showing
+  # "null", and a direct and a converted stream both play. Runs against
+  # scripts/dev-server.sh and its generated clips; Chrome comes with the runner.
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Install ffmpeg for the sample clips
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Start the dev server and wait for its first scans
+        run: |
+          VCRX_DEV_DIR="$RUNNER_TEMP/vcrx-dev" ./scripts/dev-server.sh > "$RUNNER_TEMP/dev.log" 2>&1 &
+          for _ in $(seq 1 180); do
+            [ "$(grep -c '^scan ' "$RUNNER_TEMP/dev.log" || true)" -ge 2 ] && exit 0
+            sleep 1
+          done
+          echo "dev server did not finish its scans"; tail -50 "$RUNNER_TEMP/dev.log"; exit 1
+      - name: Web smoke test in headless Chrome
+        run: node scripts/web-smoke.mjs http://127.0.0.1:3751
+      - name: Server log
+        if: failure()
+        run: tail -100 "$RUNNER_TEMP/dev.log"
