@@ -25,7 +25,7 @@ const routes = [
   [/^\/search$/, () => searchView],
   [/^\/play\/(\d+)$/, () => playerView],
   [/^\/activity(?:\/(now|history|stats|users))?$/, () => activityView],
-  [/^\/settings(?:\/(account|libraries|users))?$/, () => settingsView],
+  [/^\/settings(?:\/(account|libraries|users|newsletter))?$/, () => settingsView],
   [/^\/login$/, () => loginView],
 ];
 

@@ -64,6 +64,7 @@ type Session struct {
 	Client            *string  `json:"client"`
 	ClientVersion     *string  `json:"client_version"`
 	IP                *string  `json:"ip"`
+	Location          string   `json:"location"`
 	StartPositionMs   int64    `json:"start_position_ms"`
 	PositionMs        int64    `json:"position_ms"`
 	DurationMs        *int64   `json:"duration_ms"`
@@ -103,6 +104,7 @@ func scanSessions(rows *sql.Rows) ([]Session, error) {
 		x.Username, x.ItemKind, x.ItemTitle, x.VersionSummary = str(uname), str(kind), str(title), str(vsum)
 		x.DeviceName, x.DeviceModel, x.Platform, x.Client = str(dname), str(dmodel), str(platform), str(client)
 		x.ClientVersion, x.IP, x.TerminatedMessage = str(cver), str(ip), str(term)
+		x.Location = Location(ip.String)
 		if x.DurationMs != nil && *x.DurationMs > 0 {
 			p := min(1, float64(x.PositionMs)/float64(*x.DurationMs))
 			x.Progress = &p
@@ -227,6 +229,13 @@ type Stats struct {
 	ByDay     []DayCount `json:"by_day"`
 	ByHour    [24]int    `json:"by_hour"`
 	ByWeekday [7]int     `json:"by_weekday"`
+	// Counted plays by how they were delivered (direct play, remux, audio or
+	// full conversion), and by kind of device, with browsers told apart.
+	PlaybackTypes []Ranked `json:"playback_types"`
+	PlatformTypes []Ranked `json:"platform_types"`
+	// The most streams playing at once in the range, and when that began.
+	PeakStreams int   `json:"peak_streams"`
+	PeakAt      int64 `json:"peak_at"`
 }
 
 type statRow struct {
@@ -235,6 +244,7 @@ type statRow struct {
 	itemID, showID        sql.NullInt64
 	showTitle             sql.NullString
 	platform, device      sql.NullString
+	kindOf, model         sql.NullString
 	decision              string
 	playedMs, startedAt   int64
 }
@@ -249,7 +259,8 @@ func (s *Service) Stats(ctx context.Context, days int) (Stats, error) {
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -(days - 1))
 	st := Stats{Days: days, Since: start.UnixMilli()}
 	rows, err := s.DB.QueryContext(ctx, `SELECT ps.user_id, ps.username, ps.item_title, ps.item_kind, ps.item_id, sh.id, sh.title,
-			COALESCE(NULLIF(ps.client, ''), ps.platform), ps.device_name, ps.decision, ps.played_ms, ps.started_at`+sessionJoins+`
+			COALESCE(NULLIF(ps.client, ''), ps.platform), ps.device_name, ps.decision, ps.played_ms, ps.started_at,
+			ps.platform, ps.device_model`+sessionJoins+`
 		WHERE ps.started_at >= ?`, st.Since)
 	if err != nil {
 		return st, err
@@ -261,6 +272,7 @@ func (s *Service) Stats(ctx context.Context, days int) (Stats, error) {
 		users map[int64]bool
 	}
 	movies, shows, users, platforms, devices, decisions := map[string]*acc{}, map[string]*acc{}, map[string]*acc{}, map[string]*acc{}, map[string]*acc{}, map[string]*acc{}
+	playbackTypes, platformTypes := map[string]*acc{}, map[string]*acc{}
 	add := func(m map[string]*acc, key string, id *int64, name string, uid int64, ms int64) {
 		a := m[key]
 		if a == nil {
@@ -276,7 +288,7 @@ func (s *Service) Stats(ctx context.Context, days int) (Stats, error) {
 	for rows.Next() {
 		var r statRow
 		if err := rows.Scan(&r.userID, &r.username, &r.title, &r.kind, &r.itemID, &r.showID, &r.showTitle, &r.platform, &r.device,
-			&r.decision, &r.playedMs, &r.startedAt); err != nil {
+			&r.decision, &r.playedMs, &r.startedAt, &r.kindOf, &r.model); err != nil {
 			return st, err
 		}
 		add(decisions, r.decision, nil, r.decision, r.userID.Int64, 0)
@@ -294,6 +306,9 @@ func (s *Service) Stats(ctx context.Context, days int) (Stats, error) {
 		add(users, "u"+r.username.String, i64(r.userID), orUnknown(r.username), uid, r.playedMs)
 		add(platforms, r.platform.String, nil, orUnknown(r.platform), uid, r.playedMs)
 		add(devices, r.device.String, nil, orUnknown(r.device), uid, r.playedMs)
+		add(playbackTypes, r.decision, nil, r.decision, uid, r.playedMs)
+		pt := PlatformName(r.kindOf.String, r.model.String)
+		add(platformTypes, pt, nil, pt, uid, r.playedMs)
 		switch {
 		case r.kind.String == "episode" && r.showID.Valid:
 			add(shows, "s"+r.showTitle.String, i64(r.showID), r.showTitle.String, uid, r.playedMs)
@@ -340,6 +355,10 @@ func (s *Service) Stats(ctx context.Context, days int) (Stats, error) {
 	}
 	st.TopMovies, st.TopShows, st.TopUsers = top(movies, 10), top(shows, 10), top(users, 10)
 	st.Platforms, st.Devices, st.Decisions = top(platforms, 10), top(devices, 10), top(decisions, 0)
+	st.PlaybackTypes, st.PlatformTypes = top(playbackTypes, 0), top(platformTypes, 10)
+	if st.PeakStreams, st.PeakAt, err = s.peak(ctx, st.Since); err != nil {
+		return st, err
+	}
 	// Every day in the window, zeros included, so a chart has no gaps.
 	for d := start; !d.After(now); d = d.AddDate(0, 0, 1) {
 		k := d.Format("2006-01-02")
@@ -363,6 +382,8 @@ type UserStat struct {
 	LastTitle  *string `json:"last_title"`
 	LastDevice *string `json:"last_device"`
 	LastIP     *string `json:"last_ip"`
+	// LastLocation names the kind of network LastIP is on.
+	LastLocation string `json:"last_location"`
 }
 
 // Users lists every account with its play totals and its latest session.
@@ -387,6 +408,7 @@ func (s *Service) Users(ctx context.Context) ([]UserStat, error) {
 			return nil, err
 		}
 		u.LastSeen, u.LastTitle, u.LastDevice, u.LastIP = i64(seen), str(title), str(device), str(ip)
+		u.LastLocation = Location(ip.String)
 		out = append(out, u)
 	}
 	return out, rows.Err()
