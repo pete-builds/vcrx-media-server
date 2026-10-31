@@ -83,7 +83,7 @@ private fun artworkFor(item: Item, shape: CardShape): Pair<String, Boolean> = wh
     }
 }
 
-fun subtitle(item: Item): String? = when (item.kind) {
+fun subtitle(item: Item): String? = item.note ?: when (item.kind) {
     "episode" -> listOfNotNull(episodeCode(item), item.showTitle).joinToString("  ").ifEmpty { null }
     "season" -> item.childCount?.let { if (it == 1) "1 episode" else "$it episodes" }
     "show" -> item.childCount?.let { if (it == 1) "1 season" else "$it seasons" } ?: item.year?.toString()

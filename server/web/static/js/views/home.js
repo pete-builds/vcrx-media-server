@@ -3,30 +3,31 @@ import { h, card, icon, toast, fadeImg, runtime, episodeCode } from "../dom.js";
 import { go } from "../app.js";
 import { sourceBadge } from "./peer.js";
 
-// Home shows a featured title, then the server's rows: Continue Watching, then
-// recently added per library, with friends' servers' titles after Continue
-// Watching once they arrive.
+// Home shows a featured title, then the server's rows in the order the user
+// chose (Customize Home): Continue Watching, recently added, seasonal picks,
+// trending, top rated and the rest. The client draws whatever rows come. Friends' servers' titles
+// come in after Continue Watching once they arrive.
 export async function homeView() {
   const data = await api("/home");
   const rows = (data.rows || []).filter((r) => r.items && r.items.length);
+  const customize = h("p", { class: "home-foot" }, h("a", { class: "btn btn-small", href: "#/settings/home" }, "Customize Home"));
   if (!rows.length) {
     const empty = h("div", { class: "empty" }, "Nothing here yet. Once a library has been scanned, its titles show up here.");
     const list = h("div", { class: "rows" }, empty);
     friendsRow(list, () => empty.remove());
-    return { el: h("div", { class: "home" }, list), title: "Home" };
+    return { el: h("div", { class: "home" }, list, customize), title: "Home" };
   }
   const featured = await feature(rows);
   const el = h("div", { class: "home" + (featured ? " with-feature" : "") }, featured, h("div", { class: "rows" }, rows.map((row) => {
     const continuing = row.id === "continue_watching";
     const landscape = continuing || row.items.every((i) => i.kind === "episode");
-    const more = row.library_id ? h("a", { href: `#/library/${row.library_id}?sort=added` }, "See all") : null;
     const section = h("section", { class: "row", "data-row": row.id, "aria-label": row.title },
-      h("div", { class: "row-head" }, h("h2", {}, row.title), more));
+      h("div", { class: "row-head" }, h("h2", {}, row.title), seeAll(row)));
     const strip = h("div", { class: "strip" + (landscape ? " wide" : "") },
       row.items.map((i) => (continuing ? continueCard(i, section) : card(i, { landscape }))));
     section.append(scroller(strip, row.title));
     return section;
-  })));
+  })), customize);
   friendsRow(el.querySelector(".rows"));
   return { el, title: "Home", hero: !!featured };
 }
@@ -68,13 +69,26 @@ async function friendsRow(rowsEl, onShown) {
   if (onShown) onShown();
 }
 
+// seeAll links a row to its full list: a library's own page for Recently
+// Added (it pages and filters), the row's grid for the rest.
+function seeAll(row) {
+  if (!row.see_all) return null;
+  const label = `See all ${row.title}`;
+  if (row.library_id && row.kind && row.kind.startsWith("recently_added")) {
+    return h("a", { href: `#/library/${row.library_id}?sort=added`, "aria-label": label }, "See all");
+  }
+  return h("a", { href: `#/row/${encodeURIComponent(row.id)}`, "aria-label": label }, "See all");
+}
+
 // feature is the large title at the top of Home, like a streaming service's:
 // one movie or show from the recently added rows, preferring ones with
 // backdrop art. The pick changes once a day rather than on every visit, so
 // Home does not reshuffle under someone coming back to it.
 async function feature(rows) {
   const pool = [];
-  for (const row of rows) {
+  // Recently added first, as before Home had more rows; then the others.
+  const recent = (r) => !!r.kind && r.kind.startsWith("recently_added");
+  for (const row of [...rows.filter(recent), ...rows.filter((r) => !recent(r))]) {
     if (row.id === "continue_watching") continue;
     for (const i of row.items) {
       if ((i.kind === "movie" || i.kind === "show") && !pool.some((p) => p.id === i.id)) pool.push(i);

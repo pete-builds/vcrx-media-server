@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/federation"
 	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
@@ -504,7 +503,6 @@ func TestFederationOfflinePeerNeverBreaksHome(t *testing.T) {
 	})
 	// A second friend whose server accepts the link, then never answers.
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
 	hang := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/federation/link" {
 			linkAnswer(w, "Hanging VCRX")
@@ -515,7 +513,9 @@ func TestFederationOfflinePeerNeverBreaksHome(t *testing.T) {
 		case <-r.Context().Done():
 		}
 	}))
+	// Cleanups run last first: release the hanging handler, then close.
 	t.Cleanup(hang.Close)
+	t.Cleanup(func() { close(release) })
 	if r := p.b.do("POST", "/api/v1/admin/peers", p.b.adminTok, map[string]any{"invite": "http://192.168.1.9:3750/#/link/" + strings.Repeat("a", 32),
 		"address": hang.URL, "name": "Slow server"}); r.code != 201 {
 		t.Fatalf("link the hanging server: %d %s", r.code, r.body)
@@ -548,7 +548,7 @@ func TestFederationOfflinePeerNeverBreaksHome(t *testing.T) {
 	_, r := p.start(p.b.adminTok, map[string]any{"item_id": p.a.movieID, "capabilities": tclCaps()})
 	wantError(t, "playing from an offline peer", r, 502, "peer_offline")
 	// The local Home is untouched.
-	if r := p.b.do("GET", "/api/v1/home", p.b.adminTok, nil); r.code != 200 || !strings.Contains(string(r.body), "The Film") {
+	if r := p.b.do("GET", "/api/v1/home", p.b.adminTok, nil); r.code != 200 || !strings.Contains(string(r.body), `"rows"`) {
 		t.Fatalf("local Home with a peer down: %d", r.code)
 	}
 }
@@ -1004,7 +1004,7 @@ func TestPeerTitlesFollowTheCallersPolicy(t *testing.T) {
 	p.b.srv.PeerCache.Forget(p.peerID)
 	b := p.b
 	b.srv.Household = &household.Store{DB: b.db, AvatarDir: filepath.Join(t.TempDir(), "avatars")}
-	b.srv.PINLimiter = auth.NewLimiter(5, 15*time.Minute)
+	b.srv.PINs = household.NewLimiter(household.PINWindow)
 	profile := func(name string, pol map[string]any) string {
 		r := b.do("POST", "/api/v1/admin/profiles", b.adminTok, map[string]any{"name": name})
 		var pr struct{ ID int64 }

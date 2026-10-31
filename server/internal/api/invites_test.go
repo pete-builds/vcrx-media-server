@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -719,6 +720,27 @@ func TestPlaybackRecordsThePrincipal(t *testing.T) {
 func TestNoTokenRouteServesAWholeFile(t *testing.T) {
 	f := newFixture(t)
 	d := f.invite(map[string]any{"allow_transcode": true})
+	// A local trailer beside the film: extras are files too.
+	trailer := filepath.Join(f.root, "Film 2001 1080p", "Trailers", "Teaser.mkv")
+	if err := os.MkdirAll(filepath.Dir(trailer), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(trailer, content(4000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.db.Exec(`INSERT INTO item_extras (item_id, library_id, kind, title, path, rel_path, size, mtime, container, duration_ms,
+			video_codec, resolution, audio_streams, probe_status, added_at, updated_at)
+		VALUES (?, (SELECT library_id FROM items WHERE id = ?), 'trailer', 'Teaser', ?, 'Film 2001 1080p/Trailers/Teaser.mkv', 4000, 0, 'mkv',
+			90000, 'hevc', '1080p', '[{"index":1,"codec":"eac3","channels":2,"default":true}]', 'ok', 0, 0)`, f.movieID, f.movieID, trailer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extraID, _ := res.LastInsertId()
+	// Control: the household's own account gets the trailer whole, so the
+	// walk below would see it if a route handed it to the device.
+	if r := f.do("GET", fmt.Sprintf("/api/v1/extras/%d/file", extraID), f.friendTok, nil); r.code != 200 || !bytes.Equal(r.body, content(4000)) {
+		t.Fatalf("a friend's account, whole trailer: %d", r.code)
+	}
 	if got := wholeFileRoutes(t, f, f.srv.Routes(), d.token); len(got) > 0 {
 		t.Fatalf("routes serving an invited device a whole file: %v", got)
 	}
@@ -745,6 +767,22 @@ func TestNoTokenRouteServesAWholeFile(t *testing.T) {
 	r.json(t, &s)
 	if sr := f.do("GET", s.Stream.URL, d.token, nil, "Range", "bytes=0-99"); sr.code != 206 {
 		t.Fatalf("streaming in its session: %d %s", sr.code, sr.body)
+	}
+	// A trailer plays inside its own session too, which records the device.
+	xr := f.do("POST", "/api/v1/playback/sessions", d.token, map[string]any{"extra_id": extraID, "capabilities": tclCaps()})
+	var xs struct {
+		SessionID string `json:"session_id"`
+		Stream    struct{ URL string }
+	}
+	xr.json(t, &xs)
+	if sr := f.do("GET", xs.Stream.URL, d.token, nil, "Range", "bytes=0-99"); xr.code != 201 || sr.code != 206 {
+		t.Fatalf("the trailer in its session: start %d %s, stream %d", xr.code, xr.body, sr.code)
+	}
+	var kind string
+	var tokenID int64
+	_ = f.db.QueryRow(`SELECT principal_kind, COALESCE(token_id, 0) FROM playback_sessions WHERE id = ?`, xs.SessionID).Scan(&kind, &tokenID)
+	if kind != "token" || tokenID != d.id {
+		t.Errorf("the trailer's playback row: %s %d, want token %d", kind, tokenID, d.id)
 	}
 	// Someone else's session, or one that ended, does not count.
 	fr := f.do("POST", "/api/v1/playback/sessions", f.friendTok, map[string]any{"item_id": f.movieID, "version_id": f.v1080, "capabilities": tclCaps()})
@@ -774,9 +812,18 @@ func wholeFileRoutes(t *testing.T, f *fixture, routes []route, tok string) []str
 		SessionID string `json:"session_id"`
 	}
 	r.json(t, &s)
+	var extra int64
+	_ = f.db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM item_extras`).Scan(&extra)
 	fill := map[string]string{"version_id": fmt.Sprint(f.v1080), "item_id": fmt.Sprint(f.movieID), "kind": "poster",
-		"stream_id": fmt.Sprint(sub), "session_id": s.SessionID, "library_id": "1", "run": "1", "segment": "seg-00001.m4s"}
-	whole := content(10_000)
+		"stream_id": fmt.Sprint(sub), "session_id": s.SessionID, "library_id": "1", "run": "1", "segment": "seg-00001.m4s",
+		"extra_id": fmt.Sprint(extra)}
+	// Every media file the library holds, versions and extras alike.
+	var wholes [][]byte
+	queryRows(t, f, `SELECT path FROM media_versions UNION ALL SELECT path FROM item_extras`, func(vals []any) {
+		if b, err := os.ReadFile(fmt.Sprint(vals[0])); err == nil {
+			wholes = append(wholes, b)
+		}
+	})
 	var bad []string
 	for _, rt := range routes {
 		if rt.Method != "GET" && rt.Method != "HEAD" {
@@ -798,7 +845,10 @@ func wholeFileRoutes(t *testing.T, f *fixture, routes []route, tok string) []str
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, req)
 			ok := rec.Code == 200 || rec.Code == 206
-			full := bytes.Equal(rec.Body.Bytes(), whole) || (rt.Method == "HEAD" && rec.Header().Get("Content-Length") == fmt.Sprint(len(whole)))
+			full := false
+			for _, whole := range wholes {
+				full = full || bytes.Equal(rec.Body.Bytes(), whole) || (rt.Method == "HEAD" && rec.Header().Get("Content-Length") == fmt.Sprint(len(whole)))
+			}
 			if ok && (full || strings.Contains(strings.ToLower(rec.Header().Get("Content-Disposition")), "attachment")) {
 				bad = append(bad, rt.Method+" "+rt.Path)
 				break

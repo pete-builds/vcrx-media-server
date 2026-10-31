@@ -67,7 +67,10 @@ class LoginViewModel(private val graph: AppGraph) : ViewModel() {
         if (autoTried) return
         autoTried = true
         val base = graph.settings.serverUrl
-        if (base == null) {
+        // Switch user asked for the form: someone else is signing in on this TV.
+        val skip = graph.settings.skipAutoSignIn
+        graph.settings.skipAutoSignIn = false
+        if (base == null || skip) {
             checkingAuto = false
             return
         }

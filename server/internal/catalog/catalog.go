@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +14,19 @@ var ErrNotFound = errors.New("not found")
 
 type Catalog struct {
 	DB *sql.DB
+	// TrailersYouTube offers the YouTube trailer TMDb lists when an item has no
+	// local one (the trailers_youtube setting, which needs a TMDb key).
+	TrailersYouTube bool
+	// Seasons are Home's holiday rows; nil means DefaultSeasons.
+	Seasons []Season
+	// Now and Location exist for tests. Today, when set, is the date Home's
+	// seasons and daily rotation go by, instead of now in Location.
+	Now      func() time.Time
+	Today    func() time.Time
+	Location *time.Location
+
+	seasonCache seasonCache
+	playsCache  idCache
 }
 
 // each calls fn for every row and always closes rows.
@@ -363,14 +375,7 @@ func (c *Catalog) enrich(ctx context.Context, pol policy.Policy, userID int64, b
 			append([]any{id}, chArgs...)...).Scan(&children); err != nil {
 			return err
 		}
-		epScope := "e.parent_id = ?"
-		if s.Kind == "show" {
-			epScope = "e.parent_id IN (SELECT id FROM items WHERE parent_id = ?)"
-		}
-		q := `SELECT COUNT(*), COALESCE(SUM(CASE WHEN w.played = 1 THEN 0 ELSE 1 END), 0)
-			FROM items e LEFT JOIN watch_state w ON w.item_id = e.id AND w.user_id = ?
-			WHERE e.kind = 'episode' AND ` + epScope + ` AND ` + cond
-		if err := c.DB.QueryRowContext(ctx, q, append([]any{userID, id}, cargs...)...).Scan(&episodes, &unplayed); err != nil {
+		if err := c.DB.QueryRowContext(ctx, episodeCountSQL(s.Kind, cond), append([]any{userID, id}, cargs...)...).Scan(&episodes, &unplayed); err != nil {
 			return err
 		}
 		s.ChildCount = &children
@@ -378,6 +383,24 @@ func (c *Catalog) enrich(ctx context.Context, pol policy.Policy, userID int64, b
 		s.Watch.Played = episodes > 0 && unplayed == 0
 	}
 	return nil
+}
+
+// episodeCountSQL counts a show's or season's episodes the caller may see,
+// and how many they have not played. It takes the user id, the show or season
+// id, then the policy's arguments. The query starts from the show or season:
+// left to choose, SQLite scanned every episode in a restricted user's libraries
+// through the (library_id, kind) index, about 50 ms a show on 10,000 episodes,
+// which made a page of 100 shows take five seconds for a friend.
+func episodeCountSQL(kind, cond string) string {
+	from := "items e INDEXED BY items_parent"
+	scope := "e.parent_id = ?"
+	if kind == "show" {
+		from = "items se CROSS JOIN items e ON e.parent_id = se.id"
+		scope = "se.parent_id = ?"
+	}
+	return `SELECT COUNT(*), COALESCE(SUM(CASE WHEN w.played = 1 THEN 0 ELSE 1 END), 0)
+		FROM ` + from + ` LEFT JOIN watch_state w ON w.item_id = e.id AND w.user_id = ?
+		WHERE e.kind = 'episode' AND ` + scope + ` AND ` + cond
 }
 
 // Search matches titles of movies, shows and episodes. Prefix matches rank first.
@@ -403,50 +426,6 @@ func (c *Catalog) Search(ctx context.Context, pol policy.Policy, userID int64, q
 		return nil, err
 	}
 	return c.Summaries(ctx, pol, userID, ids)
-}
-
-// Home builds the TV home rows: Continue Watching, then recently added per library.
-func (c *Catalog) Home(ctx context.Context, pol policy.Policy, userID int64) ([]HomeRow, error) {
-	rows := []HomeRow{}
-	cond, args := pol.ItemCond("i")
-	ids, err := c.continueWatching(ctx, pol, userID, time.Now())
-	if err != nil {
-		return nil, err
-	}
-	if len(ids) > 0 {
-		items, err := c.Summaries(ctx, pol, userID, ids)
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, HomeRow{ID: "continue_watching", Title: "Continue Watching", Items: items})
-	}
-	libs, err := c.Libraries(ctx, pol)
-	if err != nil {
-		return nil, err
-	}
-	for _, l := range libs {
-		var q string
-		if l.Kind == "movie" {
-			q = `SELECT i.id FROM items i WHERE i.library_id = ? AND i.kind = 'movie' AND ` + cond + ` ORDER BY i.added_at DESC, i.id DESC LIMIT 20`
-		} else {
-			q = `SELECT i.id FROM items i WHERE i.library_id = ? AND i.kind = 'show' AND ` + cond + `
-				ORDER BY (SELECT MAX(e.added_at) FROM items s JOIN items e ON e.parent_id = s.id WHERE s.parent_id = i.id) DESC LIMIT 20`
-		}
-		ids, err := c.queryIDs(ctx, q, append([]any{l.ID}, args...)...)
-		if err != nil {
-			return nil, err
-		}
-		if len(ids) == 0 {
-			continue
-		}
-		items, err := c.Summaries(ctx, pol, userID, ids)
-		if err != nil {
-			return nil, err
-		}
-		id := l.ID
-		rows = append(rows, HomeRow{ID: "recently_added:" + strconv.FormatInt(l.ID, 10), Title: "Recently Added in " + l.Name, LibraryID: &id, Items: items})
-	}
-	return rows, nil
 }
 
 // SetWatched marks a movie or episode, or every episode of a show or season.

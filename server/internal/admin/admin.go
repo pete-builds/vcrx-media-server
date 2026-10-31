@@ -285,6 +285,8 @@ type UserPolicy struct {
 	DenyLabels       []string `json:"deny_labels"`
 	AllowTranscode   bool     `json:"allow_transcode"`
 	Allow4KTranscode bool     `json:"allow_4k_transcode"`
+	// AllowSubtitleDownload lets the user download subtitles from OpenSubtitles.
+	AllowSubtitleDownload bool `json:"allow_subtitle_download"`
 }
 
 type User struct {
@@ -356,7 +358,8 @@ func (a *Admin) User(ctx context.Context, id int64) (User, error) {
 }
 
 func toUserPolicy(p policy.Policy) UserPolicy {
-	up := UserPolicy{AllowLabels: nonNil(p.AllowLabels), DenyLabels: nonNil(p.DenyLabels), AllowTranscode: p.AllowTranscode, Allow4KTranscode: p.Allow4KTranscode}
+	up := UserPolicy{AllowLabels: nonNil(p.AllowLabels), DenyLabels: nonNil(p.DenyLabels), AllowTranscode: p.AllowTranscode, Allow4KTranscode: p.Allow4KTranscode,
+		AllowSubtitleDownload: p.AllowSubtitleDownload}
 	if p.MaxResolution != "" {
 		up.MaxResolution = &p.MaxResolution
 	}
@@ -418,11 +421,13 @@ func (a *Admin) SetPolicy(ctx context.Context, userID int64, p UserPolicy) error
 	allow, _ := json.Marshal(nonNil(p.AllowLabels))
 	deny, _ := json.Marshal(nonNil(p.DenyLabels))
 	_, err := a.DB.ExecContext(ctx, `INSERT INTO user_policies (user_id, max_resolution, max_content_rating, allow_labels, deny_labels,
-			allow_transcode, allow_4k_transcode, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			allow_transcode, allow_4k_transcode, allow_subtitle_download, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (user_id) DO UPDATE SET max_resolution = excluded.max_resolution, max_content_rating = excluded.max_content_rating,
 			allow_labels = excluded.allow_labels, deny_labels = excluded.deny_labels, allow_transcode = excluded.allow_transcode,
-			allow_4k_transcode = excluded.allow_4k_transcode, updated_at = excluded.updated_at`,
-		userID, p.MaxResolution, p.MaxContentRating, string(allow), string(deny), p.AllowTranscode, p.Allow4KTranscode, db.NowMs())
+			allow_4k_transcode = excluded.allow_4k_transcode, allow_subtitle_download = excluded.allow_subtitle_download,
+			updated_at = excluded.updated_at`,
+		userID, p.MaxResolution, p.MaxContentRating, string(allow), string(deny), p.AllowTranscode, p.Allow4KTranscode,
+		p.AllowSubtitleDownload, db.NowMs())
 	return err
 }
 

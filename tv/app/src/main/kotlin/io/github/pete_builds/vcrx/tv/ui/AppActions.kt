@@ -4,6 +4,7 @@ import android.app.Activity
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.navigation.NavController
 import io.github.pete_builds.vcrx.tv.player.PlayerActivity
+import io.github.pete_builds.vcrx.tv.player.StartRequest
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -31,6 +32,9 @@ object ProfilesRoute
 /** Pair with a phone, or type an invite: signs in as an invited device. */
 @Serializable
 object PairRoute
+/** One page of Settings; [page] is a [io.github.pete_builds.vcrx.tv.ui.settings.SettingsPage] name. */
+@Serializable
+data class SettingsRoute(val page: String)
 
 /** Navigation any screen may need, without threading callbacks through every layer. */
 class AppActions(private val nav: NavController, private val activity: Activity) {
@@ -49,9 +53,19 @@ class AppActions(private val nav: NavController, private val activity: Activity)
 
     fun openAbout() = nav.navigate(AboutRoute) { launchSingleTop = true }
 
-    /** Starts playback. [fromStart] ignores the saved position; otherwise the server resumes it. */
-    fun play(itemId: Long, title: String, versionId: Long? = null, fromStart: Boolean = false) {
-        activity.startActivity(PlayerActivity.intent(activity, itemId, versionId, fromStart, title))
+    fun openSettings(page: String) = nav.navigate(SettingsRoute(page)) { launchSingleTop = true }
+
+    /**
+     * Starts playback. [fromStart] ignores the saved position and [resume] uses it (the
+     * explicit buttons); a plain Play leaves it to Settings > Playback > Resume.
+     */
+    fun play(itemId: Long, title: String, versionId: Long? = null, fromStart: Boolean = false, resume: Boolean = false) {
+        val start = when {
+            fromStart -> StartRequest.Beginning
+            resume -> StartRequest.Resume
+            else -> StartRequest.Default
+        }
+        activity.startActivity(PlayerActivity.intent(activity, itemId, versionId, start, title))
     }
 
     /** The profile picker on top of the current screen; Back returns to it. */
@@ -70,6 +84,11 @@ class AppActions(private val nav: NavController, private val activity: Activity)
 
     /** Pairing on top of Connect or Login; Back returns to it. */
     fun openPair() = nav.navigate(PairRoute) { launchSingleTop = true }
+
+    /** Plays one of an item's extras, such as its trailer, in the app's player. */
+    fun playExtra(itemId: Long, extraId: Long, title: String) {
+        activity.startActivity(PlayerActivity.extraIntent(activity, itemId, extraId, title))
+    }
 
     fun toLogin() = nav.navigate(LoginRoute) {
         popUpTo(nav.graph.id) { inclusive = true }

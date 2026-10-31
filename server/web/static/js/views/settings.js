@@ -2,17 +2,24 @@ import { signOut } from "../api.js";
 import { h, toast } from "../dom.js";
 import { state, go } from "../app.js";
 import { librariesTab, usersTab } from "./manage.js";
+import { homeLayoutTab } from "./homelayout.js";
 import { newsletterTab } from "./newsletter.js";
 import { householdPanel } from "./household.js";
 import { devicesTab } from "./devices.js";
 import { friendsTab } from "./servers.js";
+import { markersTab, skipSetting } from "./markers.js";
 
 export async function settingsView({ match }) {
   const tab = (match && match[1]) || "account";
   const admin = !!(state.me && state.me.is_admin);
+  if (tab === "home") {
+    const body = h("div", {});
+    await homeLayoutTab(body);
+    return { el: h("div", { class: "settings" }, h("h1", {}, "Settings"), tabs(tab, admin), body), title: "Customize Home" };
+  }
   if (admin && tab !== "account") {
     const body = h("div", {});
-    const cleanup = await ({ libraries: librariesTab, devices: devicesTab, friends: friendsTab, newsletter: newsletterTab }[tab] || usersTab)(body);
+    const cleanup = await ({ libraries: librariesTab, devices: devicesTab, friends: friendsTab, newsletter: newsletterTab, markers: markersTab }[tab] || usersTab)(body);
     const household = tab === "users" ? householdPanel(() => usersTab(body)) : null;
     return { el: h("div", { class: "settings wide-settings" }, h("h1", {}, "Settings"), tabs(tab, admin), body, household), title: "Settings", cleanup };
   }
@@ -44,6 +51,7 @@ export async function settingsView({ match }) {
           h("dt", {}, "Server"), h("dd", {}, server.name || "VCRX"),
           h("dt", {}, "Version"), h("dd", {}, server.version || ""),
           h("dt", {}, "API"), h("dd", {}, h("a", { href: "/api/v1/openapi.yaml" }, "OpenAPI description")))),
+      skipSetting(),
       h("section", { class: "section" }, out, note ? h("p", { class: "muted" }, note) : null),
       h("section", { class: "section faint" },
         h("p", {}, "VCRX Media Server is free software under the AGPL. Fonts: Inter and Rajdhani, SIL Open Font License 1.1 (",
@@ -52,9 +60,11 @@ export async function settingsView({ match }) {
   };
 }
 
+// Everyone has Account and Home; admins also manage libraries, users, invited
+// devices and the newsletter.
 function tabs(active, admin) {
-  if (!admin) return null;
+  const all = [["account", "Account"], ["home", "Home"]];
+  if (admin) all.push(["libraries", "Libraries"], ["users", "Users"], ["devices", "Devices"], ["friends", "Friends"], ["newsletter", "Newsletter"], ["markers", "Intros"]);
   return h("nav", { class: "tabs", "aria-label": "Settings" },
-    [["account", "Account"], ["libraries", "Libraries"], ["users", "Users"], ["devices", "Devices"], ["friends", "Friends"], ["newsletter", "Newsletter"]]
-      .map(([k, label]) => h("a", { href: `#/settings/${k}`, class: k === active ? "active" : "" }, label)));
+    all.map(([k, label]) => h("a", { href: `#/settings/${k}`, class: k === active ? "active" : "", "aria-current": k === active ? "page" : null }, label)));
 }

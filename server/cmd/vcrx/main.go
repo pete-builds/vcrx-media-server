@@ -39,16 +39,20 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
 	"github.com/pete-builds/vcrx-media-server/server/internal/federation"
+	"github.com/pete-builds/vcrx-media-server/server/internal/homelists"
 	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
+	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
+	"github.com/pete-builds/vcrx-media-server/server/internal/opensubtitles"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/probe"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
+	"github.com/pete-builds/vcrx-media-server/server/internal/subsearch"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 	"github.com/pete-builds/vcrx-media-server/server/internal/tmdb"
 	"github.com/pete-builds/vcrx-media-server/server/web"
@@ -82,6 +86,8 @@ Usage:
                                        who watched it when, one JSON object per line;
                                        -unplayed-days keeps titles nobody played in
                                        N days, never-played ones included
+  vcrx markers detect -dry-run DIR     detect intros and credits in every season
+                                       folder under DIR and print them; stores nothing
 
 Settings come from VCRX_* environment variables and /config/vcrx.yaml; see
 deploy/.env.example.
@@ -109,13 +115,18 @@ func main() {
 		err = libraryCmd(args)
 	case "metadata":
 		err = metadataCmd(args)
+	case "markers":
+		err = markersCmd(args)
 	case "watch":
 		err = watchCmd(args)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		var ok bool
+		if ok, err = devCommand(cmd, args); !ok {
+			fmt.Fprint(os.Stderr, usage)
+			os.Exit(2)
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "vcrx:", err)
@@ -259,7 +270,11 @@ func serve() error {
 	}
 	scanner := &library.Scanner{DB: a.db, Prober: prober, Log: log.With("component", "scanner"), ProbeConcurrency: cfg.ProbeConcurrency}
 	scans := library.NewManager(scanner, log.With("component", "scans"))
-	cat := &catalog.Catalog{DB: a.db}
+	seasons, err := catalog.LoadSeasons(cfg.ConfigDir)
+	if err != nil {
+		return err
+	}
+	cat := &catalog.Catalog{DB: a.db, Seasons: seasons, Today: devHomeDate(log), TrailersYouTube: cfg.YouTubeTrailers()}
 	authStore := &auth.Store{DB: a.db, TTL: cfg.SessionTTL}
 	// Converted streams that copy the video convert at most the audio, a small
 	// fraction of a core each; four at once is well within nix1's budget.
@@ -288,6 +303,17 @@ func serve() error {
 			hooks.Send(notify.Notice{Event: notify.Added, Library: lib.Name, Titles: titles, Message: notify.AddedSummary(titles)})
 		}
 		log.Info("webhooks on", "count", len(cfg.WebhookURLs), "events", cfg.WebhookEvents)
+	}
+
+	subs := subtitleSearch(ctx, a, version)
+	if cfg.SubtitleAutoFetch && subs.CanDownload() {
+		prev := scanner.OnAdded
+		scanner.OnAdded = func(ctx context.Context, lib library.Library, run library.Run, idsAbove int64) {
+			if prev != nil {
+				prev(ctx, lib, run, idsAbove)
+			}
+			subs.Kick()
+		}
 	}
 
 	proxies, err := prefixes(cfg.TrustedProxies)
@@ -322,25 +348,52 @@ func serve() error {
 	smart := smartBuilder(a)
 	scanner.OnFinished = func(library.Library, library.Run) { smart.Trigger() }
 	go smart.Run(ctx, 15*time.Minute)
+	markerHours, _ := markers.ParseHours(cfg.MarkerHours) // validated by config.Load
+	var markerJob *markers.Job
+	if cfg.DetectMarkers {
+		markerJob = &markers.Job{DB: a.db, Decoder: markers.Decoder{FFmpeg: cfg.FFmpegPath, FFprobe: cfg.FFprobePath},
+			CacheDir: cfg.CacheDir, Log: log.With("component", "markers"), Hours: markerHours,
+			IntroWindow: time.Duration(cfg.MarkerIntroMinutes) * time.Minute, CreditsWindow: time.Duration(cfg.MarkerCreditsMinutes) * time.Minute,
+			Busy: scans.Running, InitialDelay: time.Minute}
+		// A scan that adds episodes starts a pass at once (still only inside the hours).
+		added := scanner.OnAdded
+		scanner.OnAdded = func(ctx context.Context, lib library.Library, run library.Run, idsAbove int64) {
+			if added != nil {
+				added(ctx, lib, run, idsAbove)
+			}
+			if lib.Kind == "show" {
+				markerJob.Wake()
+			}
+		}
+		go markerJob.Run(ctx)
+		log.Info("intro and credits detection on", "hours", markerHours.String())
+	} else {
+		log.Info("intro and credits detection is off (detect_markers: false)")
+	}
 	srv := &api.Server{
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
 		Artwork: art, Admin: adm, Scans: scanAdapter{scans},
 		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, Remux: rmx, HLS: hls, WebDir: os.Getenv("VCRX_WEB_DIR"),
 		Subtitles:        subtitles.New(cfg.SubtitleCacheDir(), cfg.FFmpegPath, log.With("component", "subtitles")),
+		SubSearch:        subs,
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
 		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets, AllowedHosts: cfg.AllowedHosts,
+		TrailersYouTube: cfg.YouTubeTrailers(),
 	}
 	srv.SmartCollections = smart
 	// The weekly newsletter checks once a minute whether its time has come; it
 	// does nothing until switched on in Settings.
 	srv.Newsletter = &newsletter.Service{DB: a.db, Hooks: hooks, Log: log.With("component", "newsletter")}
 	go srv.Newsletter.Run(ctx)
-	// Profiles: five wrong PINs per window, half the sign-in limit, because a
-	// PIN is four to eight digits rather than a password.
+	srv.MarkerHours = markerHours
+	if markerJob != nil {
+		srv.Markers = markerJob
+	}
+	// Profiles: PIN attempts have their own, stricter limiter (household.PIN*).
 	srv.Household = &household.Store{DB: a.db, AvatarDir: cfg.AvatarDir()}
-	srv.PINLimiter, srv.ProfilePicker = auth.NewLimiter(5, 15*time.Minute), cfg.AutoSignInPicker
+	srv.PINs, srv.ProfilePicker = household.NewLimiter(household.PINWindow), cfg.AutoSignInPicker
 	// Invited devices, and TVs pairing by QR code: ten pairing codes, ten
 	// polls with an unknown code, and ten wrong codes typed by an admin, per
 	// address per window.
@@ -392,6 +445,19 @@ func serve() error {
 	} else {
 		log.Info("TMDb enrichment is off: set VCRX_TMDB_API_KEY for posters and plots")
 	}
+	switch {
+	case cfg.TMDbHomeLists && cfg.TMDbAPIKey == "":
+		log.Warn("tmdb_home_lists is on but there is no TMDb key, so Home has no TMDb rows")
+	case cfg.TMDbHomeLists:
+		lists := &homelists.Refresher{DB: a.db, TMDb: tmdb.New(cfg.TMDbAPIKey, cfg.TMDbLanguage), Log: log.With("component", "homelists")}
+		go lists.Run(ctx, 6*time.Hour)
+	}
+	switch {
+	case cfg.YouTubeTrailers():
+		log.Info("YouTube trailers on: titles without a local trailer offer TMDb's official one")
+	case cfg.TrailersYouTube:
+		log.Warn("trailers_youtube is on but there is no TMDb key to look trailers up with; set VCRX_TMDB_API_KEY")
+	}
 
 	if cfg.ArrWebhookToken != "" {
 		srv.ArrToken = cfg.ArrWebhookToken
@@ -435,6 +501,38 @@ func serve() error {
 		log.Warn("scans did not stop cleanly", "err", err)
 	}
 	return herr
+}
+
+// subtitleSearch sets up OpenSubtitles search, off without an API key, and
+// starts the automatic fetch when it is turned on and downloads can work.
+func subtitleSearch(ctx context.Context, a *app, version string) *subsearch.Service {
+	cfg, log := a.cfg, a.log
+	var provider subsearch.Provider
+	switch {
+	case cfg.OpenSubtitlesStub:
+		provider = opensubtitles.NewStub()
+		log.Warn("subtitle search uses the offline stub (VCRX_OPENSUBTITLES_STUB): results are invented, for development only")
+	case cfg.OpenSubtitlesAPIKey != "":
+		provider = opensubtitles.New(cfg.OpenSubtitlesAPIKey, cfg.OpenSubtitlesUsername, cfg.OpenSubtitlesPassword, "VCRX v"+version)
+	}
+	subs := subsearch.New(a.db, provider, cfg.SubtitleDownloadDir(), cfg.SubtitleLanguages, log.With("component", "subsearch"))
+	switch {
+	case provider == nil:
+		log.Info("subtitle search is off: set VCRX_OPENSUBTITLES_API_KEY to search OpenSubtitles")
+		return subs
+	case !subs.CanDownload():
+		log.Warn("subtitle search is on but downloads are off: set VCRX_OPENSUBTITLES_USERNAME and VCRX_OPENSUBTITLES_PASSWORD")
+	default:
+		log.Info("subtitle search on", "languages", subs.Languages, "auto_fetch", cfg.SubtitleAutoFetch)
+	}
+	if cfg.SubtitleAutoFetch && subs.CanDownload() {
+		if err := subs.InitAuto(ctx); err != nil {
+			log.Error("automatic subtitle fetch off", "err", err)
+			return subs
+		}
+		go subs.RunAuto(ctx, 30*time.Minute)
+	}
+	return subs
 }
 
 // rootStates answers the readiness check: each library root must list, quickly.
@@ -768,7 +866,7 @@ func watchExport(ctx context.Context, conn *sql.DB, out io.Writer, library strin
 
 func newEnricher(a *app) *enrich.Enricher {
 	return &enrich.Enricher{DB: a.db, TMDb: tmdb.New(a.cfg.TMDbAPIKey, a.cfg.TMDbLanguage), Dir: a.cfg.MetadataDir(),
-		Country: a.cfg.TMDbCountry, Log: a.log.With("component", "tmdb")}
+		Country: a.cfg.TMDbCountry, Log: a.log.With("component", "tmdb"), Trailers: a.cfg.YouTubeTrailers()}
 }
 
 func metadataCmd(args []string) error {
@@ -815,6 +913,11 @@ func metadataCmd(args []string) error {
 		}
 		st, err := enr.Drain(ctx)
 		fmt.Printf("tmdb: %d matched, %d unmatched, %d errors, %d episodes filled\n", st.Matched, st.Unmatched, st.Errors, st.Episodes)
+		if err == nil && enr.Trailers {
+			var ts enrich.TrailerStats
+			ts, err = enr.RefreshTrailers(ctx)
+			fmt.Printf("trailers: %d found on YouTube, %d without one, %d lookups failed\n", ts.Found, ts.None, ts.Errors)
+		}
 		if st.Unmatched > 0 {
 			fmt.Println("run `vcrx metadata status` to see what was skipped and why")
 		}
@@ -951,4 +1054,29 @@ func printSmart(ctx context.Context, b *collections.SmartBuilder) error {
 	fmt.Printf("smart collections: %d from %d files, %d failed, labels +%d -%d, %d removed\n",
 		len(rep.Collections), len(rep.Files), failed, rep.LabelsAdded, rep.LabelsRemoved, rep.Removed)
 	return nil
+}
+
+// markersCmd checks detection against a real library without touching the
+// database: `vcrx markers detect -dry-run /media/TV/Some Show`.
+func markersCmd(args []string) error {
+	if len(args) == 0 || args[0] != "detect" {
+		return errors.New("usage: vcrx markers detect -dry-run DIR")
+	}
+	fs := flag.NewFlagSet("markers detect", flag.ContinueOnError)
+	dry := fs.Bool("dry-run", false, "print what detection finds; store nothing (required)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if !*dry || fs.NArg() != 1 {
+		return errors.New("usage: vcrx markers detect -dry-run DIR (the server stores markers itself; this only prints)")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	j := &markers.Job{Decoder: markers.Decoder{FFmpeg: cfg.FFmpegPath, FFprobe: cfg.FFprobePath}, Log: cfg.Logger(),
+		IntroWindow: time.Duration(cfg.MarkerIntroMinutes) * time.Minute, CreditsWindow: time.Duration(cfg.MarkerCreditsMinutes) * time.Minute}
+	return j.DryRun(ctx, fs.Arg(0), os.Stdout)
 }
