@@ -97,6 +97,9 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 	if d.Collections, err = c.ItemCollections(ctx, id); err != nil {
 		return d, err
 	}
+	if err := c.extras(ctx, pol, &d); err != nil {
+		return d, err
+	}
 	if d.Kind == "movie" || d.Kind == "episode" {
 		if d.Versions, err = c.Versions(ctx, pol, id); err != nil {
 			return d, err
@@ -136,11 +139,7 @@ func (c *Catalog) FollowingEpisode(ctx context.Context, pol policy.Policy, userI
 	if season.Int64 == 0 {
 		sameSeasonOnly = " AND s.season_number = 0"
 	}
-	ids, err := c.queryIDs(ctx, `SELECT e.id FROM items e JOIN items s ON s.id = e.parent_id
-		WHERE e.kind = 'episode' AND s.parent_id = ?`+sameSeasonOnly+`
-		  AND (s.season_number > ? OR (s.season_number = ? AND COALESCE(e.episode_number, 0) > ?))
-		  AND `+cond+`
-		ORDER BY s.season_number, e.episode_number, e.id LIMIT 1`,
+	ids, err := c.queryIDs(ctx, followingSQL(sameSeasonOnly, cond),
 		append([]any{show, season.Int64, season.Int64, ep.Int64}, args...)...)
 	if err != nil || len(ids) == 0 {
 		return nil, err
@@ -150,6 +149,20 @@ func (c *Catalog) FollowingEpisode(ctx context.Context, pol policy.Policy, userI
 		return nil, err
 	}
 	return &sums[0], nil
+}
+
+// followingSQL finds the episode after one: it takes the show id, the season
+// number twice and the episode number, then the policy's arguments. CROSS JOIN
+// keeps SQLite starting from the show's seasons. Left to choose, it scanned
+// every episode in a restricted user's libraries through the (library_id,
+// kind) index, about 0.3 s a call on 10,000 episodes, and Continue Watching
+// makes one call per show.
+func followingSQL(sameSeasonOnly, cond string) string {
+	return `SELECT e.id FROM items s CROSS JOIN items e ON e.parent_id = s.id
+		WHERE e.kind = 'episode' AND s.parent_id = ?` + sameSeasonOnly + `
+		  AND (s.season_number > ? OR (s.season_number = ? AND COALESCE(e.episode_number, 0) > ?))
+		  AND ` + cond + `
+		ORDER BY s.season_number, e.episode_number, e.id LIMIT 1`
 }
 
 // Children lists a show's seasons or a season's episodes in order.

@@ -1,10 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"database/sql"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/fsafe"
@@ -21,9 +25,10 @@ func (s *Server) subtitle(w http.ResponseWriter, r *http.Request) {
 	var versionID int64
 	var index sql.NullInt64
 	var codec, ext *string
-	var external, imageBased bool
-	if err := s.DB.QueryRowContext(r.Context(), `SELECT version_id, stream_index, codec, external_path, is_external, is_image_based
-		FROM media_streams WHERE id = ? AND kind = 'subtitle'`, id).Scan(&versionID, &index, &codec, &ext, &external, &imageBased); err != nil {
+	var external, imageBased, downloaded bool
+	if err := s.DB.QueryRowContext(r.Context(), `SELECT version_id, stream_index, codec, external_path, is_external, is_image_based,
+			downloaded_id IS NOT NULL FROM media_streams WHERE id = ? AND kind = 'subtitle'`, id).Scan(&versionID, &index, &codec, &ext,
+		&external, &imageBased, &downloaded); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "Not found.")
 		return
 	}
@@ -37,12 +42,24 @@ func (s *Server) subtitle(w http.ResponseWriter, r *http.Request) {
 		s.notFoundOr(w, r, err)
 		return
 	}
+	if downloaded {
+		// A downloaded subtitle lives in the server's own data dir, not the library.
+		if s.SubSearch == nil {
+			writeError(w, http.StatusNotFound, "file_unavailable", "The subtitle file cannot be read right now.")
+			return
+		}
+		root = s.SubSearch.Dir
+	}
+	offset := int64(0)
+	if vtt {
+		offset = s.subtitleOffset(r.Context(), info(r).Session.User.ID, versionID)
+	}
 	if vtt && (imageBased || codec == nil || !subtitles.TextCodec(*codec) || s.Subtitles == nil) {
 		writeError(w, http.StatusUnprocessableEntity, "not_text", "This subtitle is a picture format and cannot be shown as text.")
 		return
 	}
 	if !external {
-		s.embeddedSubtitle(w, r, v, root, index.Int64, id)
+		s.embeddedSubtitle(w, r, v, root, index.Int64, id, offset)
 		return
 	}
 	if vtt {
@@ -57,7 +74,7 @@ func (s *Server) subtitle(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, "conversion_failed", "This subtitle file could not be converted.")
 			return
 		}
-		serveVTT(w, r, out)
+		serveVTT(w, r, out, offset)
 		return
 	}
 	_, mime, ok := playback.SubtitleMime(*ext)
@@ -81,7 +98,7 @@ func (s *Server) subtitle(w http.ResponseWriter, r *http.Request) {
 
 // embeddedSubtitle serves a track from inside the media file as WebVTT. The first
 // request starts one pass over the file for every text track and answers 202.
-func (s *Server) embeddedSubtitle(w http.ResponseWriter, r *http.Request, v catalog.Version, root string, index, streamID int64) {
+func (s *Server) embeddedSubtitle(w http.ResponseWriter, r *http.Request, v catalog.Version, root string, index, streamID, offsetMs int64) {
 	src, err := fsafe.ResolveUnder(root, v.Path)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "file_unavailable", "The media file cannot be read right now.")
@@ -104,10 +121,13 @@ func (s *Server) embeddedSubtitle(w http.ResponseWriter, r *http.Request, v cata
 			"message": "Reading the subtitles out of the file. Large files take a few minutes the first time."})
 		return
 	}
-	serveVTT(w, r, out)
+	serveVTT(w, r, out, offsetMs)
 }
 
-func serveVTT(w http.ResponseWriter, r *http.Request, path string) {
+// serveVTT serves a WebVTT file shifted by the caller's subtitle delay. The
+// delay can change at any moment, so caches must revalidate, and the ETag
+// names the file and the delay together: a stale shift is never served.
+func serveVTT(w http.ResponseWriter, r *http.Request, path string, offsetMs int64) {
 	f, err := os.Open(path)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "file_unavailable", "The subtitle file cannot be read right now.")
@@ -120,6 +140,16 @@ func serveVTT(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
-	w.Header().Set("Cache-Control", "private, max-age=3600")
-	http.ServeContent(w, r, "subtitles.vtt", fi.ModTime(), f)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("ETag", fmt.Sprintf(`"%x-%x-%d"`, fi.Size(), fi.ModTime().UnixNano(), offsetMs))
+	if offsetMs == 0 {
+		http.ServeContent(w, r, "subtitles.vtt", time.Time{}, f)
+		return
+	}
+	b, err := io.ReadAll(io.LimitReader(f, 64<<20))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "file_unavailable", "The subtitle file cannot be read right now.")
+		return
+	}
+	http.ServeContent(w, r, "subtitles.vtt", time.Time{}, bytes.NewReader(subtitles.ShiftVTT(b, offsetMs)))
 }

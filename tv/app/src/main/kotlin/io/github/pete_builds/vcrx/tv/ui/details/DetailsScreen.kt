@@ -36,6 +36,7 @@ import io.github.pete_builds.vcrx.tv.AppGraph
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.Item
 import io.github.pete_builds.vcrx.tv.net.Version
+import io.github.pete_builds.vcrx.tv.settings.ResumeMode
 import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
 import io.github.pete_builds.vcrx.tv.ui.components.Artwork
 import io.github.pete_builds.vcrx.tv.ui.components.CardShape
@@ -55,6 +56,9 @@ import io.github.pete_builds.vcrx.tv.ui.theme.Orange
 import kotlinx.coroutines.launch
 
 class DetailsViewModel(private val graph: AppGraph, private val itemId: Long) : ViewModel() {
+    /** Settings > Playback > Resume, which orders the play buttons. */
+    val resumeMode: ResumeMode get() = graph.preferences.current.playback.resume
+
     var state by mutableStateOf<LoadState<Item>>(LoadState.Loading)
         private set
     var seasons by mutableStateOf<List<Item>>(emptyList())
@@ -143,6 +147,7 @@ private fun Details(item: Item, vm: DetailsViewModel) {
     val primaryFocus = remember { FocusRequester() }
     var pickVersion by remember { mutableStateOf(false) }
     val isContainer = item.kind == "show" || item.kind == "season"
+    ThemeMusic(item)
 
     LazyColumn(contentPadding = PaddingValues(48.dp), verticalArrangement = Arrangement.spacedBy(32.dp)) {
         item(key = "header") {
@@ -174,6 +179,7 @@ private fun Details(item: Item, vm: DetailsViewModel) {
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         if (isContainer) ShowButtons(item, vm, primaryFocus) else PlayButtons(item, vm, primaryFocus)
+                        TrailerButton(item)
                     }
                     // On its own row: four buttons do not fit beside the poster.
                     if (!isContainer && item.versions.size > 1) {
@@ -192,6 +198,9 @@ private fun Details(item: Item, vm: DetailsViewModel) {
                     vm.actionError?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
                 }
             }
+        }
+        if (item.extras.isNotEmpty()) {
+            item(key = "extras") { ExtrasRow(item) }
         }
         if (isContainer && item.kind == "show" && vm.seasons.isNotEmpty()) {
             item(key = "seasons") { SeasonRow(vm) }
@@ -216,10 +225,19 @@ private fun PlayButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusReq
     val actions = LocalAppActions.current
     val watch = item.watch
     val resumeMs = watch?.positionMs?.takeIf { it > 0 && !watch.played }
-    if (resumeMs != null) {
+    if (resumeMs != null && vm.resumeMode == ResumeMode.StartOver) {
+        // Settings say start over: that is the first button, and resuming is one step right.
+        BrandButton(
+            "Play from start",
+            onClick = { actions.play(item.id, playTitle(item), vm.versionId, fromStart = true) },
+            primary = true,
+            modifier = Modifier.focusRequester(primaryFocus),
+        )
+        BrandButton("Resume ${formatTime(resumeMs)}", onClick = { actions.play(item.id, playTitle(item), vm.versionId, resume = true) })
+    } else if (resumeMs != null) {
         BrandButton(
             "Resume ${formatTime(resumeMs)}",
-            onClick = { actions.play(item.id, playTitle(item), vm.versionId, fromStart = false) },
+            onClick = { actions.play(item.id, playTitle(item), vm.versionId, resume = true) },
             primary = true,
             modifier = Modifier.focusRequester(primaryFocus),
         )
@@ -240,10 +258,11 @@ private fun ShowButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusReq
     val actions = LocalAppActions.current
     val next = item.nextEpisode
     if (next != null) {
-        val resuming = (next.watch?.positionMs ?: 0) > 0
+        // A plain Play: Settings > Playback > Resume decides, and the player asks when set to Ask.
+        val resuming = (next.watch?.positionMs ?: 0) > 0 && vm.resumeMode == ResumeMode.Resume
         BrandButton(
             "${if (resuming) "Resume" else "Play"} ${episodeCode(next) ?: next.title}",
-            onClick = { actions.play(next.id, playTitle(next), null, fromStart = false) },
+            onClick = { actions.play(next.id, playTitle(next), null) },
             primary = true,
             modifier = Modifier.focusRequester(primaryFocus),
         )

@@ -75,12 +75,15 @@ class PlaybackReporter(private val emit: (PlaybackEvent) -> Unit) {
     }
 }
 
-/** How far one D-pad press moves. Holding the key accelerates through longer steps. */
+/**
+ * How far one D-pad press moves: [firstMs], the skip size from Settings. Holding
+ * the key accelerates through longer steps, never shorter than the first.
+ */
 object SeekSteps {
-    fun stepMs(repeatCount: Int): Long = when {
-        repeatCount < 20 -> 10_000
-        repeatCount < 60 -> 30_000
-        else -> 60_000
+    fun stepMs(repeatCount: Int, firstMs: Long = 10_000): Long = when {
+        repeatCount < 20 -> firstMs
+        repeatCount < 60 -> maxOf(30_000, firstMs)
+        else -> maxOf(60_000, firstMs)
     }
 
     /** Clamps a seek target inside the media, keeping clear of the very end. */

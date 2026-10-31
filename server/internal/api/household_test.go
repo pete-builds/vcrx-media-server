@@ -9,10 +9,10 @@ import (
 	"net/netip"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 )
 
@@ -29,7 +29,7 @@ func newHouseholdFixture(t *testing.T) *householdFixture {
 	t.Helper()
 	f := newFixture(t)
 	f.srv.Household = &household.Store{DB: f.db, AvatarDir: filepath.Join(t.TempDir(), "avatars")}
-	f.srv.PINLimiter = auth.NewLimiter(5, 15*time.Minute)
+	f.srv.PINs = household.NewLimiter(household.PINWindow)
 	f.h = f.srv.Handler()
 	hf := &householdFixture{fixture: f}
 	if _, err := f.db.Exec(`UPDATE items SET content_rating = 'PG' WHERE id = ?`, f.movieID); err != nil {
@@ -152,33 +152,110 @@ func mustUserID(t *testing.T, f *fixture, username string) int64 {
 	return id
 }
 
-// Five wrong PINs lock the profile in the client's scope and the address, even
-// against the right PIN. The other scope is untouched, and a new PIN from an
-// admin clears the lock.
+// Wrong PINs are limited per device (5) and per profile in the client's scope
+// (25 shared by every device at home, 5 away), and the right PIN gives its
+// own slot back. One device guessing locks only itself; the right PIN still
+// works on every other device until the whole home's allowance is spent.
 func TestPINRateLimit(t *testing.T) {
 	f := newHouseholdFixture(t)
-	lan := []string{"RemoteAddr", "192.168.1.20:4000"}
 	tok := f.adminTok
-	for i := range 5 {
-		wantError(t, fmt.Sprintf("wrong PIN %d", i+1), f.switchTo(tok, f.sam, map[string]any{"pin": "0000"}, lan...), 401, "wrong_pin")
+	wrong := func(addr string) resp {
+		return f.switchTo(tok, f.sam, map[string]any{"pin": "0000"}, "RemoteAddr", addr+":4000")
 	}
-	r := f.switchTo(tok, f.sam, map[string]any{"pin": "2468"}, lan...)
+	right := func(addr string) resp {
+		return f.switchTo(tok, f.sam, map[string]any{"pin": "2468"}, "RemoteAddr", addr+":4000")
+	}
+	// The right PIN refunds its slot: four wrong, the right one, then a fifth
+	// wrong one is still checked rather than refused.
+	for range 4 {
+		wantError(t, "wrong PIN", wrong("192.168.1.10"), 401, "wrong_pin")
+	}
+	tok = tokenOf(t, right("192.168.1.10"))
+	tok = tokenOf(t, f.switchTo(tok, mustUserID(t, f.fixture, "pete"), map[string]any{"password": "adminpass1"}))
+	wantError(t, "fifth wrong PIN after a right one", wrong("192.168.1.10"), 401, "wrong_pin")
+	r := right("192.168.1.10")
 	if r.code != 429 || r.hdr.Get("Retry-After") == "" {
-		t.Fatalf("right PIN after five wrong: %d %s", r.code, r.body)
+		t.Fatalf("right PIN on a device with five wrong: %d %s", r.code, r.body)
 	}
-	// Another LAN device: the address is fresh but the profile's LAN bucket is full.
-	wantError(t, "another LAN address", f.switchTo(tok, f.sam, map[string]any{"pin": "2468"}, "RemoteAddr", "192.168.1.21:4000"), 429, "rate_limited")
-	// A switch that needs no PIN is never limited.
-	robinTok := tokenOf(t, f.switchTo(tok, f.robin, nil, lan...))
-	// From away (an internet address), the profile's away bucket is untouched.
-	away := []string{"RemoteAddr", "203.0.113.9:4000"}
-	samTok := tokenOf(t, f.switchTo(robinTok, f.sam, map[string]any{"pin": "2468"}, away...))
-	// An admin setting a new PIN clears the LAN lock.
-	peteTok := tokenOf(t, f.switchTo(samTok, mustUserID(t, f.fixture, "pete"), map[string]any{"password": "adminpass1"}, away...))
-	if r := f.do("PUT", fmt.Sprintf("/api/v1/admin/profiles/%d/pin", f.sam), peteTok, map[string]any{"pin": "97531"}); r.code != 204 {
+	// Another device at home is not locked by the first one.
+	tok = tokenOf(t, right("192.168.1.11"))
+	tok = tokenOf(t, f.switchTo(tok, mustUserID(t, f.fixture, "pete"), map[string]any{"password": "adminpass1"}))
+	// Four more devices use up the home's 25 for the profile.
+	for d := 12; d < 16; d++ {
+		for range 5 {
+			wantError(t, "filling the LAN bucket", wrong(fmt.Sprintf("192.168.1.%d", d)), 401, "wrong_pin")
+		}
+	}
+	wantError(t, "fresh LAN device, home allowance spent", right("192.168.1.30"), 429, "rate_limited")
+	// From away the profile's away bucket is untouched.
+	tok = tokenOf(t, right("203.0.113.9"))
+	// An admin setting a new PIN clears the profile's lock.
+	tok = tokenOf(t, f.switchTo(tok, mustUserID(t, f.fixture, "pete"), map[string]any{"password": "adminpass1"}))
+	if r := f.do("PUT", fmt.Sprintf("/api/v1/admin/profiles/%d/pin", f.sam), tok, map[string]any{"pin": "97531"}); r.code != 204 {
 		t.Fatalf("set PIN: %d %s", r.code, r.body)
 	}
-	tokenOf(t, f.switchTo(peteTok, f.sam, map[string]any{"pin": "97531"}, "RemoteAddr", "192.168.1.22:4000"))
+	tokenOf(t, f.switchTo(tok, f.sam, map[string]any{"pin": "97531"}, "RemoteAddr", "192.168.1.31:4000"))
+}
+
+// A kid failing an admin's PIN on the shared TV cannot keep the admin out: the
+// admin's password counts against the sign-in limiter, not the PIN buckets.
+func TestAdminPasswordGetsPastAFullPINBucket(t *testing.T) {
+	f := newHouseholdFixture(t)
+	pete := mustUserID(t, f.fixture, "pete")
+	if r := f.do("PUT", fmt.Sprintf("/api/v1/admin/profiles/%d/pin", pete), f.adminTok, map[string]any{"pin": "8080"}); r.code != 204 {
+		t.Fatal(r.code)
+	}
+	tv := []string{"RemoteAddr", "192.168.1.50:4000"}
+	kid := tokenOf(t, f.switchTo(f.adminTok, f.robin, nil, tv...))
+	for range 5 {
+		wantError(t, "kid guesses", f.switchTo(kid, pete, map[string]any{"pin": "1111"}, tv...), 401, "wrong_pin")
+	}
+	wantError(t, "the right PIN on the TV", f.switchTo(kid, pete, map[string]any{"pin": "8080"}, tv...), 429, "rate_limited")
+	tokenOf(t, f.switchTo(kid, pete, map[string]any{"password": "adminpass1"}, tv...))
+}
+
+// Concurrent wrong PINs: the limit holds before the hash, so no more PINs are
+// hashed than the buckets allow, however many arrive at once.
+func TestPINLimitHoldsUnderConcurrency(t *testing.T) {
+	f := newHouseholdFixture(t)
+	burst := func(addr func(i int) string, n int) int64 {
+		before := household.HashChecks()
+		var wg sync.WaitGroup
+		for i := range n {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				f.switchTo(f.adminTok, f.sam, map[string]any{"pin": "0000"}, "RemoteAddr", addr(i))
+			}()
+		}
+		wg.Wait()
+		return household.HashChecks() - before
+	}
+	if n := burst(func(int) string { return "192.168.1.60:4000" }, 24); n != household.PINAddressLimit {
+		t.Fatalf("24 concurrent wrong PINs from one device hashed %d, want %d", n, household.PINAddressLimit)
+	}
+	// Wrong passwords for an admin, from a kid's session on one device: the
+	// sign-in limiter's address bucket (10 in this fixture) holds too.
+	pete := mustUserID(t, f.fixture, "pete")
+	kid := tokenOf(t, f.switchTo(f.adminTok, f.robin, nil, "RemoteAddr", "192.168.1.61:4000"))
+	before := household.HashChecks()
+	var wg sync.WaitGroup
+	for range 24 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f.switchTo(kid, pete, map[string]any{"password": "guess-guess"}, "RemoteAddr", "192.168.1.62:4000")
+		}()
+	}
+	wg.Wait()
+	if n := household.HashChecks() - before; n != 10 {
+		t.Fatalf("24 concurrent wrong passwords from one device hashed %d, want 10", n)
+	}
+	f.adminTok = tokenOf(t, f.switchTo(kid, pete, map[string]any{"password": "adminpass1"}, "RemoteAddr", "192.168.1.63:4000"))
+	// From many devices the profile's LAN bucket caps the total (5 used above).
+	if n := burst(func(i int) string { return fmt.Sprintf("192.168.1.%d:4000", 100+i/2) }, 48); n != household.PINLANProfileLimit-household.PINAddressLimit {
+		t.Fatalf("48 concurrent wrong PINs from 24 devices hashed %d, want %d", n, household.PINLANProfileLimit-household.PINAddressLimit)
+	}
 }
 
 // Each profile has its own watched state and Continue Watching.
@@ -424,5 +501,32 @@ func TestAdminProfilesAndAvatar(t *testing.T) {
 	// Outside the household, no pictures.
 	if r := f.do("GET", url, f.strangerTok, nil); r.code != 403 {
 		t.Fatalf("stranger reads an avatar: %d", r.code)
+	}
+}
+
+// The skip-markers choice (#42) is per user, so it follows the active profile
+// across switches.
+func TestPlaybackSettingsFollowTheProfile(t *testing.T) {
+	f := newHouseholdFixture(t)
+	mode := func(tok string) string {
+		var s struct {
+			SkipMarkers string `json:"skip_markers"`
+		}
+		f.do("GET", "/api/v1/me/playback-settings", tok, nil).json(t, &s)
+		return s.SkipMarkers
+	}
+	if r := f.do("PUT", "/api/v1/me/playback-settings", f.adminTok, map[string]any{"skip_markers": "auto"}); r.code != 200 {
+		t.Fatalf("pete sets auto: %d %s", r.code, r.body)
+	}
+	robin := tokenOf(t, f.switchTo(f.adminTok, f.robin, nil))
+	if got := mode(robin); got == "auto" {
+		t.Fatal("Robin inherited pete's skip setting")
+	}
+	if r := f.do("PUT", "/api/v1/me/playback-settings", robin, map[string]any{"skip_markers": "off"}); r.code != 200 {
+		t.Fatalf("Robin sets off: %d", r.code)
+	}
+	pete := tokenOf(t, f.switchTo(robin, mustUserID(t, f.fixture, "pete"), map[string]any{"password": "adminpass1"}))
+	if got := mode(pete); got != "auto" {
+		t.Fatalf("pete's setting after switching back: %q, want auto", got)
 	}
 }

@@ -526,3 +526,66 @@ func TestLoansInActivity(t *testing.T) {
 		t.Errorf("Devices does not say what a borrower borrows: %+v", devs.Devices)
 	}
 }
+
+// A lent movie's trailer goes with the tape: its borrower lists and plays it,
+// everyone else (the owner included) neither lists nor plays it until it comes
+// back, and a trailer playing when the tape went out stops.
+func TestLoanCoversExtras(t *testing.T) {
+	f := newFixture(t)
+	trailer := filepath.Join(f.root, "Film 2001 1080p", "Trailers", "Teaser.mkv")
+	if err := os.MkdirAll(filepath.Dir(trailer), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(trailer, content(4000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.db.Exec(`INSERT INTO item_extras (item_id, library_id, kind, title, path, rel_path, size, mtime, container, duration_ms,
+			video_codec, resolution, audio_streams, probe_status, added_at, updated_at)
+		VALUES (?, (SELECT library_id FROM items WHERE id = ?), 'trailer', 'Teaser', ?, 'Film 2001 1080p/Trailers/Teaser.mkv', 4000, 0, 'mkv',
+			90000, 'hevc', '1080p', '[{"index":1,"codec":"eac3","channels":2,"default":true}]', 'ok', 0, 0)`, f.movieID, f.movieID, trailer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extraID, _ := res.LastInsertId()
+	playExtra := func(tok string) resp {
+		return f.do("POST", "/api/v1/playback/sessions", tok, map[string]any{"extra_id": extraID, "capabilities": tclCaps()})
+	}
+	lists := func(tok string) bool {
+		r := f.do("GET", fmt.Sprintf("/api/v1/items/%d", f.movieID), tok, nil)
+		return strings.Contains(string(r.body), `"title":"Teaser"`)
+	}
+	// Control: before the loan everyone lists and plays it.
+	if !lists(f.friendTok) || !lists(f.adminTok) {
+		t.Fatal("control: the trailer is not listed before the loan")
+	}
+	friendSession, _ := sessionID(t, playExtra(f.friendTok))
+	b := f.borrow(f.movieID, nil)
+	var stopped string
+	_ = f.db.QueryRow(`SELECT terminated_message FROM playback_sessions WHERE id = ?`, friendSession).Scan(&stopped)
+	if !strings.HasPrefix(stopped, "Out on loan") {
+		t.Errorf("a trailer playing when the tape went out ended with %q", stopped)
+	}
+	for name, tok := range map[string]string{"the owner (admin)": f.adminTok, "a friend": f.friendTok} {
+		if lists(tok) {
+			t.Errorf("%s still lists the lent movie's trailer", name)
+		}
+		wantError(t, name+" playing the trailer", playExtra(tok), 409, "on_loan")
+		if r := f.do("GET", fmt.Sprintf("/api/v1/extras/%d/file", extraID), tok, nil); r.code != 404 {
+			t.Errorf("%s fetching the trailer file: %d", name, r.code)
+		}
+	}
+	if !lists(b.token) {
+		t.Error("the borrower does not list the trailer")
+	}
+	_, url := sessionID(t, playExtra(b.token))
+	if r := f.do("GET", url, b.token, nil, "Range", "bytes=0-99"); r.code != 206 {
+		t.Errorf("the borrower streaming the trailer: %d %s", r.code, r.body)
+	}
+	f.do("POST", fmt.Sprintf("/api/v1/admin/loans/%d/return", b.loanID), f.adminTok, nil)
+	if !lists(f.friendTok) {
+		t.Error("the trailer is not back after the return")
+	}
+	if r := playExtra(f.friendTok); r.code != 201 {
+		t.Errorf("a friend playing the trailer after the return: %d %s", r.code, r.body)
+	}
+}

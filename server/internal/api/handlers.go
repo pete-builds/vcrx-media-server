@@ -93,7 +93,7 @@ func (s *Server) openapi(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serverInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": s.ServerName, "product": "vcrx-media-server", "version": s.Version, "api_version": 1,
-		"auto_sign_in": s.autoSignIn(info(r).IP),
+		"auto_sign_in": s.autoSignIn(info(r).IP), "trailers_youtube": s.TrailersYouTube,
 		// On a trusted network, show "Who's watching?" instead of auto sign-in.
 		"profile_picker": s.pickerOpen(info(r).IP),
 	})
@@ -305,16 +305,6 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) home(w http.ResponseWriter, r *http.Request) {
-	ri := info(r)
-	rows, err := s.Catalog.Home(r.Context(), ri.Policy, ri.Session.User.ID)
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"rows": rows})
-}
-
 func (s *Server) libraries(w http.ResponseWriter, r *http.Request) {
 	libs, err := s.Catalog.Libraries(r.Context(), info(r).Policy)
 	if err != nil {
@@ -369,7 +359,12 @@ func (s *Server) item(w http.ResponseWriter, r *http.Request) {
 		s.notFoundOr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, d)
+	withMarkers, err := s.withMarkers(r.Context(), d)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, withMarkers)
 }
 
 func (s *Server) itemChildren(w http.ResponseWriter, r *http.Request) {
@@ -463,7 +458,7 @@ func (s *Server) startPlayback(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if req.ItemID <= 0 {
+	if req.ItemID <= 0 && req.ExtraID == nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "item_id is required.")
 		return
 	}
@@ -483,9 +478,15 @@ func (s *Server) startPlayback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, refusal.Status, refusal.Code, refusal.Message)
 		return
 	}
+	s.decorateSession(r, out)
 	s.Log.Info("playback start", "user", sess.User.Username, "item", req.ItemID, "version", out.Version.ID, "decision", out.Decision,
 		"reason", out.Reason, "session", out.SessionID, "device", sess.Device.Name)
-	writeJSON(w, http.StatusCreated, out)
+	withMarkers, err := s.sessionMarkers(r.Context(), ri.Policy, sess.User.ID, out)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, withMarkers)
 }
 
 func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
@@ -497,7 +498,7 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 	// Progress lands in the item's watch state, so the caller must still be
 	// allowed the session's version, as for its streams.
 	if ss, err := s.Playback.ForStream(r.Context(), ri.Session.User.ID, r.PathValue("session_id")); err == nil {
-		if ok, err := s.Catalog.CanPlay(r.Context(), ri.Policy, ss.VersionID); err != nil || !ok {
+		if ok, err := s.canPlaySession(r.Context(), ri.Policy, ss); err != nil || !ok {
 			if err != nil {
 				s.internal(w, r, err)
 				return
@@ -549,7 +550,7 @@ func (s *Server) streamVersion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !s.streamOnly(w, r, id, session) {
+	if !s.streamOnly(w, r, session, func(ss playback.StreamSession) bool { return ss.ExtraID == 0 && ss.VersionID == id }) {
 		return
 	}
 	v, root, err := s.Catalog.VersionForPlayback(r.Context(), info(r).Policy, id)

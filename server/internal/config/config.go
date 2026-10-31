@@ -17,6 +17,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/arr"
+	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 )
 
@@ -101,6 +102,43 @@ type Config struct {
 	TMDbLanguage string `yaml:"tmdb_language"`
 	// TMDbCountry picks the content rating shown, e.g. US for PG-13.
 	TMDbCountry string `yaml:"tmdb_country"`
+	// TMDbHomeLists adds Home rows from TMDb's trending and popular lists,
+	// limited to titles in the library. Off by default; needs TMDbAPIKey. The
+	// lists refresh every six hours and the last good copy is kept offline.
+	TMDbHomeLists bool `yaml:"tmdb_home_lists"`
+	// TrailersYouTube looks up each title's official YouTube trailer on TMDb and
+	// offers it when there is no local trailer file. Off by default: it needs the
+	// internet to play, and VCRX works without it. Needs a TMDb key.
+	TrailersYouTube bool `yaml:"trailers_youtube"`
+
+	// DetectMarkers finds intros and end credits in TV episodes from their
+	// audio, for Skip Intro and Skip Credits. On by default. It runs at low
+	// priority, one season at a time, only during MarkerHours.
+	DetectMarkers bool `yaml:"detect_markers"`
+	// MarkerHours is when detection may run, local time (set TZ): "01:00-06:00"
+	// by default, or "always".
+	MarkerHours string `yaml:"marker_hours"`
+	// MarkerIntroMinutes and MarkerCreditsMinutes are how much of the start
+	// and of the end of each episode are compared (10 and 8).
+	MarkerIntroMinutes   int `yaml:"marker_intro_minutes"`
+	MarkerCreditsMinutes int `yaml:"marker_credits_minutes"`
+	// OpenSubtitlesAPIKey turns on subtitle search (opensubtitles.com, REST API
+	// v1). Downloads also need OpenSubtitlesUsername and OpenSubtitlesPassword,
+	// because the daily quota belongs to an account. The key and password are
+	// secrets: VCRX_OPENSUBTITLES_API_KEY and VCRX_OPENSUBTITLES_PASSWORD, or
+	// their *_FILE forms, never the YAML file.
+	OpenSubtitlesAPIKey   string `yaml:"-"`
+	OpenSubtitlesUsername string `yaml:"opensubtitles_username"`
+	OpenSubtitlesPassword string `yaml:"-"`
+	// OpenSubtitlesStub answers searches with invented results and never
+	// touches the network. For the dev server and its browser test only.
+	OpenSubtitlesStub bool `yaml:"-"`
+	// SubtitleLanguages are the languages searched when a client names none,
+	// and the ones the automatic fetch looks for. Default: English.
+	SubtitleLanguages []string `yaml:"subtitle_languages"`
+	// SubtitleAutoFetch downloads the preferred languages for files added from
+	// now on that have no subtitle in them, once per file. Off by default.
+	SubtitleAutoFetch bool `yaml:"subtitle_auto_fetch"`
 
 	Libraries []LibrarySpec `yaml:"libraries"`
 
@@ -111,22 +149,28 @@ type Config struct {
 
 func defaults() Config {
 	return Config{
-		ServerName:       "VCRX",
-		Bind:             "0.0.0.0",
-		Port:             3750,
-		ConfigDir:        "/config",
-		CacheDir:         "/cache",
-		MediaRoots:       []string{"/media"},
-		FFprobePath:      "ffprobe",
-		FFmpegPath:       "ffmpeg",
-		ProbeConcurrency: 4,
-		MaxTranscodes:    2,
-		ScanOnStartup:    true,
-		LogLevel:         "info",
-		LogFormat:        "json",
-		SessionTTL:       90 * 24 * time.Hour,
-		TMDbLanguage:     "en-US",
-		TMDbCountry:      "US",
+		ServerName:        "VCRX",
+		Bind:              "0.0.0.0",
+		Port:              3750,
+		ConfigDir:         "/config",
+		CacheDir:          "/cache",
+		MediaRoots:        []string{"/media"},
+		FFprobePath:       "ffprobe",
+		FFmpegPath:        "ffmpeg",
+		ProbeConcurrency:  4,
+		MaxTranscodes:     2,
+		ScanOnStartup:     true,
+		LogLevel:          "info",
+		LogFormat:         "json",
+		SessionTTL:        90 * 24 * time.Hour,
+		TMDbLanguage:      "en-US",
+		TMDbCountry:       "US",
+		SubtitleLanguages: []string{"en"},
+
+		DetectMarkers:        true,
+		MarkerHours:          "01:00-06:00",
+		MarkerIntroMinutes:   10,
+		MarkerCreditsMinutes: 8,
 	}
 }
 
@@ -195,12 +239,16 @@ func Load() (Config, error) {
 	str("VCRX_LOG_FORMAT", &c.LogFormat)
 	boolean("VCRX_ADMIN_ALLOW_REMOTE", &c.AdminAllowRemote)
 	boolean("VCRX_IMDB_RATINGS", &c.IMDbRatings)
+	boolean("VCRX_TMDB_HOME_LISTS", &c.TMDbHomeLists)
+	boolean("VCRX_TRAILERS_YOUTUBE", &c.TrailersYouTube)
 	list("VCRX_TRUSTED_PROXIES", &c.TrustedProxies)
 	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
 	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)
 	boolean("VCRX_AUTO_SIGN_IN_PICKER", &c.AutoSignInPicker)
 	list("VCRX_ALLOWED_HOSTS", &c.AllowedHosts)
 	str("VCRX_COLLECTIONS_DIR", &c.CollectionsDir)
+	boolean("VCRX_DETECT_MARKERS", &c.DetectMarkers)
+	str("VCRX_MARKER_HOURS", &c.MarkerHours)
 	str("VCRX_TMDB_LANGUAGE", &c.TMDbLanguage)
 	str("VCRX_TMDB_COUNTRY", &c.TMDbCountry)
 	str("VCRX_TMDB_API_KEY", &c.TMDbAPIKey)
@@ -235,6 +283,25 @@ func Load() (Config, error) {
 	if t := c.ArrWebhookToken; t != "" && len(t) < 16 {
 		errs = append(errs, errors.New("VCRX_ARR_WEBHOOK_TOKEN must be at least 16 characters"))
 	}
+	secret := func(key string, dst *string) {
+		str(key, dst)
+		if v := os.Getenv(key + "_FILE"); v != "" && *dst == "" {
+			b, err := os.ReadFile(v) //nolint:gosec // the operator chooses this path
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s_FILE: %w", key, err))
+			} else {
+				*dst = strings.TrimSpace(string(b))
+			}
+		}
+		*dst = strings.TrimSpace(*dst)
+	}
+	secret("VCRX_OPENSUBTITLES_API_KEY", &c.OpenSubtitlesAPIKey)
+	secret("VCRX_OPENSUBTITLES_PASSWORD", &c.OpenSubtitlesPassword)
+	str("VCRX_OPENSUBTITLES_USERNAME", &c.OpenSubtitlesUsername)
+	boolean("VCRX_OPENSUBTITLES_STUB", &c.OpenSubtitlesStub)
+	list("VCRX_SUBTITLE_LANGUAGES", &c.SubtitleLanguages)
+	boolean("VCRX_SUBTITLE_AUTO_FETCH", &c.SubtitleAutoFetch)
+
 	ttlDays := int(c.SessionTTL / (24 * time.Hour))
 	integer("VCRX_SESSION_TTL_DAYS", &ttlDays)
 	c.SessionTTL = time.Duration(ttlDays) * 24 * time.Hour
@@ -269,6 +336,12 @@ func (c *Config) validate() error {
 	if c.SessionTTL < time.Hour {
 		errs = append(errs, errors.New("session TTL must be at least one day"))
 	}
+	if _, err := markers.ParseHours(c.MarkerHours); err != nil {
+		errs = append(errs, fmt.Errorf("marker_hours: %w", err))
+	}
+	if c.MarkerIntroMinutes < 1 || c.MarkerIntroMinutes > 30 || c.MarkerCreditsMinutes < 1 || c.MarkerCreditsMinutes > 30 {
+		errs = append(errs, errors.New("marker_intro_minutes and marker_credits_minutes must be 1 to 30"))
+	}
 	for i, r := range c.MediaRoots {
 		if !filepath.IsAbs(r) {
 			errs = append(errs, fmt.Errorf("media root %q must be absolute", r))
@@ -293,6 +366,10 @@ func (c *Config) validate() error {
 	}
 	return errors.Join(errs...)
 }
+
+// YouTubeTrailers reports whether YouTube trailers are on: asked for, and a
+// TMDb key to look them up with.
+func (c Config) YouTubeTrailers() bool { return c.TrailersYouTube && c.TMDbAPIKey != "" }
 
 func (c Config) Addr() string { return fmt.Sprintf("%s:%d", c.Bind, c.Port) }
 
@@ -321,6 +398,11 @@ func (c Config) SubtitleCacheDir() string { return filepath.Join(c.CacheDir, "su
 // files are deleted when it ends, and the whole directory's leftovers at
 // startup.
 func (c Config) HLSDir() string { return filepath.Join(c.CacheDir, "hls") }
+
+// SubtitleDownloadDir holds subtitles downloaded from OpenSubtitles. It is
+// under the config dir, beside the database that lists them, and never under
+// a library: the media mounts are read-only.
+func (c Config) SubtitleDownloadDir() string { return filepath.Join(c.ConfigDir, "subtitles") }
 
 // MetadataDir holds images downloaded from TMDb. It sits under the config dir,
 // not the cache, because downloading them again for a whole library is slow.

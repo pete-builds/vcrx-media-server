@@ -122,7 +122,9 @@ paths:
         Switch this device to another household profile and get a fresh session for it. The caller's own
         session, if any, ends. A profile with a PIN needs it (or its password); an admin profile reached from a
         restricted profile or the picker always needs its PIN or password, on any network. Wrong PINs are
-        limited per address and per profile: 5 per 15 minutes, counted separately on and off the LAN. Requests
+        limited per 15 minutes, counted before the PIN is checked: 5 per address, and per profile 25 shared by
+        the LAN or 5 from away. A password counts against the sign-in limits instead, so an admin whose PIN is
+        locked can still use it. Requests
         without a bearer token must send X-VCRX-Client.
       security: [{ bearer: [] }, { cookie: [] }, {}]
       requestBody:
@@ -286,6 +288,20 @@ paths:
             in message and the title, so it can say so instead of asking to sign in. Every signed-in route answers
             a borrower this way once the loan has ended.
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /api/v1/me/playback-settings:
+    get:
+      operationId: getPlaybackSettings
+      summary: The signed-in user's own playback choices, kept on the server so every client (web, TV) shares them.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackSettings" } } } }
+    put:
+      operationId: setPlaybackSettings
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackSettings" } } }
+      responses:
+        "200": { description: Saved, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackSettings" } } } }
+        "400": { $ref: "#/components/responses/Error" }
 
   /api/v1/home:
     get:
@@ -301,6 +317,39 @@ paths:
                 required: [rows]
                 properties:
                   rows: { type: array, items: { $ref: "#/components/schemas/HomeRow" } }
+  /api/v1/rows/{row_id}:
+    get:
+      operationId: getHomeRow
+      summary: >-
+        A Home row's See all view: the row with up to 100 titles, under the caller's access. row_id is a HomeRow id
+        from /api/v1/home, such as top_rated_movies, genre:Comedy or seasonal:halloween. Continue Watching has none.
+      parameters:
+        - { name: row_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/HomeRow" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/layout/home:
+    get:
+      operationId: getHomeLayout
+      summary: >-
+        The caller's Home layout: every row slot in order with whether it shows. The caller's own choice, else the
+        server default, else the built-in order. The web and TV Customize Home editors both read and write this.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+    put:
+      operationId: setHomeLayout
+      summary: Save the caller's own Home layout. Slots left out keep their default and go last.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayoutInput" } } }
+      responses:
+        "200": { description: The layout as saved, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: resetHomeLayout
+      summary: Forget the caller's own layout, so the server default applies again.
+      responses:
+        "200": { description: The layout now in effect, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
 
   /api/v1/libraries:
     get:
@@ -643,6 +692,29 @@ paths:
         - { name: version_id, in: path, required: true, schema: { type: integer } }
       responses:
         "200": { description: Headers only }
+  /api/v1/extras/{extra_id}/file:
+    get:
+      operationId: streamExtra
+      summary: |
+        An extra's file: a trailer or featurette for direct play (the stream URL of a
+        session started with extra_id), or a show's theme music (theme_music.url, no
+        session). Supports Range, If-Range and HEAD. Access is the item's: 404 for a
+        caller who cannot see the movie or show it belongs to.
+      parameters:
+        - { name: extra_id, in: path, required: true, schema: { type: integer } }
+        - { name: session, in: query, schema: { type: string }, description: Playback session id, for activity accounting. }
+      responses:
+        "200": { description: Whole file }
+        "206": { description: Partial content }
+        "404": { $ref: "#/components/responses/Error" }
+        "416": { description: Range not satisfiable }
+    head:
+      operationId: headExtra
+      parameters:
+        - { name: extra_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: Headers only }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/subtitles/{stream_id}:
     get:
       operationId: getSubtitle
@@ -667,6 +739,105 @@ paths:
                   message: { type: string }
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /api/v1/versions/{version_id}/subtitles/search:
+    get:
+      operationId: searchSubtitles
+      summary: >-
+        Search OpenSubtitles for subtitles for this file: by the file's OpenSubtitles hash first, then by the IMDb or
+        TMDb id (the show's, with season and episode, for an episode), then by title and year only when the ids found
+        nothing. Ranked: hash matches, then trusted uploaders, then the hearing-impaired preference, then download count.
+        Any signed-in user who may play the version. 404 search_off when no API key is configured; 503 when
+        OpenSubtitles cannot be reached; 429 rate_limited (with Retry-After). Admins also get the download quota.
+      parameters:
+        - { name: version_id, in: path, required: true, schema: { type: integer } }
+        - name: languages
+          in: query
+          schema: { type: string }
+          description: Comma separated, as ISO 639-1 or 639-2 codes or English names (en,eng,English). Default the server's subtitle_languages.
+        - { name: hearing_impaired, in: query, schema: { type: boolean }, description: Rank hearing-impaired files first. Default false. }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, can_download]
+                properties:
+                  results: { type: array, items: { $ref: "#/components/schemas/SubtitleHit" } }
+                  can_download: { type: boolean, description: Whether the caller may download one of them. }
+                  quota: { $ref: "#/components/schemas/SubtitleQuota" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/v1/versions/{version_id}/subtitles/download:
+    post:
+      operationId: downloadSubtitle
+      summary: >-
+        Download one file a search just offered for this version and add it as an external subtitle track every client
+        sees. Stored in the server's data directory, never beside the media. Admins, and users whose policy has
+        allow_subtitle_download. Downloading a file the version already has is free and answers 200. 409 search_again
+        when the file was not in a search for this version in the last hour; 429 quota_exhausted when today's
+        OpenSubtitles downloads are used up.
+      parameters:
+        - { name: version_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_id]
+              properties:
+                file_id: { type: integer }
+      responses:
+        "201": { description: Downloaded, content: { application/json: { schema: { $ref: "#/components/schemas/SubtitleDownloadResult" } } } }
+        "200": { description: Already downloaded, content: { application/json: { schema: { $ref: "#/components/schemas/SubtitleDownloadResult" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/v1/versions/{version_id}/subtitle-offset:
+    put:
+      operationId: setSubtitleOffset
+      summary: >-
+        The caller's subtitle delay for this file, kept on the server. Positive shows subtitles later. WebVTT answers
+        (format=vtt) are shifted by it from then on; playback sessions report it as subtitle_offset_ms. 0 clears it.
+      parameters:
+        - { name: version_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [offset_ms]
+              properties:
+                offset_ms: { type: integer, minimum: -600000, maximum: 600000 }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { type: object, required: [offset_ms], properties: { offset_ms: { type: integer } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/speedtest:
+    get:
+      operationId: speedTest
+      summary: >-
+        Filler bytes for a client to time its connection to the server (the TV app's Settings > About speed test).
+        Random, so a compressing proxy cannot flatter the result. Reads nothing from the library.
+      parameters:
+        - { name: bytes, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 64000000, default: 8000000 } }
+      responses:
+        "200": { description: The bytes asked for, application/octet-stream }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
 
   /api/v1/admin/profiles:
     get:
@@ -1097,6 +1268,26 @@ paths:
       responses:
         "204": { description: Saved }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/layout/home:
+    get:
+      operationId: adminGetHomeLayout
+      summary: The server default Home layout, for everyone without their own.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+    put:
+      operationId: adminSetHomeLayout
+      summary: Set the server default Home layout.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayoutInput" } } }
+      responses:
+        "200": { description: The default as saved, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: adminResetHomeLayout
+      summary: Forget the server default, so the built-in order applies.
+      responses:
+        "200": { description: The default now in effect, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
   /api/v1/admin/labels:
     get:
       operationId: adminListLabels
@@ -1342,6 +1533,119 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
 
+  /api/v1/admin/markers:
+    get:
+      operationId: adminMarkerStatus
+      summary: >-
+        Intro and credits detection over the whole TV library: whether it is on, its hours, seasons and episodes
+        done, markers found, per-show progress and the latest files that could not be read.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, hours, in_window, seasons_total, seasons_done, episodes_total, episodes_done, intros, credits, errors, shows, recent_errors]
+                properties:
+                  enabled: { type: boolean }
+                  hours: { type: string, description: "Local time window, e.g. 01:00-06:00, or always." }
+                  in_window: { type: boolean }
+                  seasons_total: { type: integer }
+                  seasons_done: { type: integer, description: Seasons whose every episode has been looked at in its current file. }
+                  episodes_total: { type: integer }
+                  episodes_done: { type: integer }
+                  intros: { type: integer }
+                  credits: { type: integer }
+                  errors: { type: integer }
+                  shows:
+                    type: array
+                    items:
+                      type: object
+                      required: [show_id, title, seasons_total, seasons_done, episodes_total, episodes_done, intros, credits, errors]
+                      properties:
+                        show_id: { type: integer }
+                        title: { type: string }
+                        seasons_total: { type: integer }
+                        seasons_done: { type: integer }
+                        episodes_total: { type: integer }
+                        episodes_done: { type: integer }
+                        intros: { type: integer }
+                        credits: { type: integer }
+                        errors: { type: integer }
+                  recent_errors:
+                    type: array
+                    items:
+                      type: object
+                      required: [item_id, show_title, season_number, episode_number, error, checked_at]
+                      properties:
+                        item_id: { type: integer }
+                        show_title: { type: string }
+                        season_number: { type: [integer, "null"] }
+                        episode_number: { type: [integer, "null"] }
+                        error: { type: string }
+                        checked_at: { type: integer }
+  /api/v1/admin/items/{item_id}/markers/detect:
+    post:
+      operationId: adminDetectMarkers
+      summary: >-
+        Detect intros and credits again for a show, a season or an episode's season, now, whatever the hour (still
+        one season at a time at low priority). Markers an admin set or cleared are kept.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+      responses:
+        "202":
+          description: Queued
+          content: { application/json: { schema: { type: object, required: [seasons], properties: { seasons: { type: integer } } } } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/items/{item_id}/markers/{kind}:
+    put:
+      operationId: adminSetMarker
+      summary: Set an episode's (or movie's) intro or credits by hand. Detection never replaces it.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [intro, credits] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [start_ms, end_ms]
+              properties:
+                start_ms: { type: integer, minimum: 0 }
+                end_ms: { type: integer, description: After start_ms and not past the end of the file. }
+      responses:
+        "200": { description: The item's markers now, content: { application/json: { schema: { $ref: "#/components/schemas/MarkerList" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: adminClearMarker
+      summary: Remove an intro or credits marker and keep it removed (detection will not add it back).
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [intro, credits] } }
+      responses:
+        "200": { description: The item's markers now, content: { application/json: { schema: { $ref: "#/components/schemas/MarkerList" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/items/{item_id}/markers/{kind}/apply-to-season:
+    post:
+      operationId: adminApplyMarkerToSeason
+      summary: >-
+        Copy this episode's marker to the rest of its season by finding the same audio in each episode. Episodes
+        where it is not found, and markers an admin set by hand, are left alone. Runs in the background now.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [intro, credits] } }
+      responses:
+        "202": { description: Queued }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
   /api/v1/admin/activity/now:
     get:
       operationId: adminActivityNow
@@ -1455,6 +1759,44 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ActivityEntry" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/items/{item_id}/subtitles:
+    get:
+      operationId: adminItemSubtitles
+      summary: Subtitles downloaded from OpenSubtitles for a movie's or episode's versions, and the account's download quota. Admin and LAN only.
+      parameters:
+        - $ref: "#/components/parameters/ItemID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, can_download, subtitles, quota]
+                properties:
+                  enabled: { type: boolean }
+                  can_download: { type: boolean }
+                  subtitles:
+                    type: array
+                    items:
+                      allOf:
+                        - { $ref: "#/components/schemas/DownloadedSubtitle" }
+                        - type: object
+                          properties:
+                            created_at: { type: integer }
+                            downloaded_by: { type: [string, "null"], description: Null for the automatic fetch or a deleted user. }
+                  quota: { oneOf: [{ $ref: "#/components/schemas/SubtitleQuota" }, { type: "null" }] }
+        "403": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/subtitles/{stream_id}:
+    delete:
+      operationId: adminDeleteSubtitle
+      summary: Delete a downloaded subtitle (its track and its file). Sidecar files and embedded tracks are never deleted. Admin and LAN only.
+      parameters:
+        - { name: stream_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
@@ -1586,6 +1928,7 @@ components:
         api_version: { type: integer, const: 1 }
         auto_sign_in: { type: boolean, description: "True when this client may sign in without a password (POST /api/v1/auth/auto)." }
         profile_picker: { type: boolean, description: "True when this client should show the profile picker (GET /api/v1/profiles, POST /api/v1/auth/switch) instead of signing in automatically; POST /api/v1/auth/auto then answers 409 choose_profile." }
+        trailers_youtube: { type: boolean, description: "True when the admin turned on YouTube trailers (trailers_youtube, with a TMDb key): details may carry a trailer with source youtube." }
     AutoLoginRequest:
       type: object
       required: [device]
@@ -1749,6 +2092,7 @@ components:
         has_thumb: { type: boolean }
         added_at: { type: integer }
         watch: { $ref: "#/components/schemas/WatchState" }
+        note: { type: string, description: 'A short line some Home rows add to a card, such as "3 new episodes" or "Season 2 added". Absent elsewhere.' }
     Track:
       type: object
       required: [id, kind, is_default, is_forced, is_external, is_image_based]
@@ -1764,6 +2108,7 @@ components:
         is_forced: { type: boolean }
         is_external: { type: boolean }
         is_image_based: { type: boolean }
+        is_downloaded: { type: boolean, description: A subtitle the server downloaded from OpenSubtitles. }
     Version:
       type: object
       required: [id, size]
@@ -1825,7 +2170,49 @@ components:
                   id: { type: integer }
                   name: { type: string }
               description: Collections this item is in.
+            markers: { type: array, items: { $ref: "#/components/schemas/Marker" }, description: "Intro and credits of a movie or episode (empty for others), intro first." }
+            extras:
+              type: array
+              items: { $ref: "#/components/schemas/Extra" }
+              description: >-
+                A movie's or show's local extras (trailers first, then featurettes, behind the scenes, deleted scenes,
+                interviews, scenes, shorts, other), from files beside it on disk. Empty for seasons and episodes.
+                Play one with POST /api/v1/playback/sessions and extra_id.
+            trailer: { oneOf: [{ $ref: "#/components/schemas/Trailer" }, { type: "null" }], description: "The trailer a Trailer button plays: a local one first, else YouTube when trailers_youtube is on. Null when there is none." }
+            theme_music:
+              oneOf:
+                - type: object
+                  required: [id, url]
+                  properties:
+                    id: { type: integer }
+                    url: { type: string, description: Path of the MP3 relative to the server base URL. }
+                - type: "null"
+              description: A show's theme.mp3, for clients to play quietly on its page.
             next_episode: { oneOf: [{ $ref: "#/components/schemas/ItemSummary" }, { type: "null" }], description: "For a show or season: the episode Play should start (first unwatched, or in progress). For an episode: the one after it, for Up Next (the rest of the season, then the next; specials only after a special); null at the end of the show." }
+    Extra:
+      type: object
+      required: [id, kind, title]
+      properties:
+        id: { type: integer }
+        kind: { type: string, enum: [trailer, featurette, behind_the_scenes, deleted_scene, interview, scene, short, other] }
+        title: { type: string }
+        duration_ms: { type: [integer, "null"] }
+        container: { type: [string, "null"] }
+        resolution: { oneOf: [{ $ref: "#/components/schemas/Resolution" }, { type: "null" }] }
+    Trailer:
+      type: object
+      required: [source, title]
+      properties:
+        source: { type: string, enum: [local, youtube] }
+        title: { type: string }
+        extra_id: { type: [integer, "null"], description: "For a local trailer: play it with POST /api/v1/playback/sessions and this extra_id." }
+        duration_ms: { type: [integer, "null"] }
+        youtube_key:
+          type: [string, "null"]
+          pattern: "^[A-Za-z0-9_-]{11}$"
+          description: >-
+            For a YouTube trailer: the video id. The web app embeds https://www.youtube-nocookie.com/embed/<key>;
+            the TV app opens vnd.youtube:<key>, else https://www.youtube.com/watch?v=<key>.
     Collection:
       type: object
       required: [id, library_id, name, item_count, poster_item_ids]
@@ -1851,10 +2238,45 @@ components:
       type: object
       required: [id, title, items]
       properties:
-        id: { type: string, description: "continue_watching, recently_added_movies, recently_added_episodes, or library:<id>" }
+        id:
+          type: string
+          description: >-
+            Stable for the row, and the key for its See all view: continue_watching, recently_added_movies:<library id>,
+            recently_added_tv:<library id>, seasonal:<season id> (seasonal:<season id>:family for the kids' row),
+            new_seasons, because_you_watched:<item id>, trending, recently_released, top_rated_movies, top_rated_shows,
+            unwatched_gems, genre:<genre>, collection:<collection id>, most_watched, most_watched_by_you, rediscover,
+            best_of_decade:<1990>, tmdb_trending or tmdb_popular. Clients render whatever rows come, in order.
+        kind: { type: string, description: "The row's slot in the Home layout (a HomeLayoutRow key), or genre, collection or best_of_decade." }
         title: { type: string }
-        library_id: { type: [integer, "null"] }
+        library_id: { type: [integer, "null"], description: "Set on a library's Recently Added row." }
+        see_all: { type: boolean, description: "Whether GET /api/v1/rows/{row_id} offers more." }
         items: { type: array, items: { $ref: "#/components/schemas/ItemSummary" } }
+    HomeLayoutRow:
+      type: object
+      required: [key, title, description, enabled]
+      properties:
+        key: { type: string, description: "A row slot: continue_watching, recently_added_movies, seasonal, genres, collections and so on." }
+        title: { type: string }
+        description: { type: string }
+        enabled: { type: boolean }
+    HomeLayout:
+      type: object
+      required: [rows, source]
+      properties:
+        rows: { type: array, items: { $ref: "#/components/schemas/HomeLayoutRow" }, description: "Every slot once, in Home's order." }
+        source: { type: string, enum: [user, server, default], description: "Whose layout this is." }
+    HomeLayoutInput:
+      type: object
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+            required: [key, enabled]
+            properties:
+              key: { type: string }
+              enabled: { type: boolean }
     VideoCodecCapability:
       type: object
       required: [codec]
@@ -1889,12 +2311,18 @@ components:
         default_audio_only: { type: boolean, description: "The client plays only the default audio track (a browser), so that track is the one that has to decode." }
     PlaybackRequest:
       type: object
-      required: [item_id, capabilities]
+      required: [capabilities]
       properties:
-        item_id: { type: integer, description: A movie or episode. }
+        item_id: { type: integer, description: A movie or episode. Required unless extra_id is given. }
         version_id: { type: [integer, "null"], description: Omit to let the server pick the best version the device can play. }
         start_position_ms: { type: [integer, "null"], description: Omit to resume from the saved position. }
         capabilities: { $ref: "#/components/schemas/Capabilities" }
+        extra_id:
+          type: [integer, "null"]
+          description: >-
+            Play one of the item's extras (a trailer) instead of a version. item_id may then be omitted or 0; when
+            given it must be the extra's item. Same decision ladder and policy as a version; no watch state is
+            written, and theme music is refused (422).
     SubtitleSource:
       type: object
       required: [track_id, url, codec, mime_type]
@@ -1907,6 +2335,7 @@ components:
         title: { type: [string, "null"] }
         is_forced: { type: boolean }
         embedded: { type: boolean, description: "True for a track inside the media file. Players that read the container already have it; browsers use the WebVTT URL." }
+        downloaded: { type: boolean, description: A subtitle the server downloaded from OpenSubtitles. Side-load it like a sidecar file. }
     PlaybackSession:
       type: object
       required: [session_id, decision, reason, item_id, version, stream, resume_position_ms, heartbeat_interval_ms]
@@ -1915,7 +2344,8 @@ components:
         decision: { type: string, enum: [direct_play, remux, audio_transcode, transcode] }
         reason: { type: string, description: Why this decision, in plain words. Recorded in activity. }
         item_id: { type: integer }
-        version: { $ref: "#/components/schemas/Version" }
+        extra_id: { type: integer, description: Present when the session plays an extra. }
+        version: { $ref: "#/components/schemas/Version", description: "The file being played; for an extra, its id is the extra's." }
         stream:
           type: object
           required: [url, protocol]
@@ -1934,6 +2364,52 @@ components:
             it out of the file; retry after the Retry-After seconds.
         resume_position_ms: { type: integer }
         heartbeat_interval_ms: { type: integer }
+        subtitle_offset_ms:
+          type: integer
+          description: >-
+            The user's subtitle delay for this version, set with PUT /versions/{version_id}/subtitle-offset. Positive
+            shows subtitles later. URLs in webvtt_subtitles are already shifted by it. A player that side-loads the
+            files in subtitles, or shows tracks from inside the container, applies it itself (Media3: shift the cue
+            times, or offset the text renderer's position by this many ms). Do not apply it to a WebVTT URL again.
+        subtitle_search:
+          type: object
+          required: [enabled, can_download]
+          properties:
+            enabled: { type: boolean, description: Offer "Search for subtitles". }
+            can_download: { type: boolean, description: The user may download a result. }
+        markers:
+          type: array
+          description: The item's intro and credits, each saying whether this user's settings skip it without asking.
+          items:
+            allOf:
+              - $ref: "#/components/schemas/Marker"
+              - type: object
+                required: [auto_skip]
+                properties:
+                  auto_skip: { type: boolean, description: "True only for an intro, when skip_markers is auto and confidence is at least 0.75. Credits are never skipped without a press." }
+        skip_markers: { type: string, enum: [button, auto, off], description: The user's choice; off means show no Skip button. }
+    Marker:
+      type: object
+      required: [kind, start_ms, end_ms, confidence, source]
+      properties:
+        kind: { type: string, enum: [intro, credits] }
+        start_ms: { type: integer }
+        end_ms: { type: integer, description: "Where Skip lands. Credits that run to the end of the file end at its duration, so a player can go to the next episode; credits followed by a scene end before it." }
+        confidence: { type: number, description: "1 for markers from the file or an admin; 0 to 1 for detected ones." }
+        source: { type: string, enum: [detected, chapter, nfo, manual] }
+    MarkerList:
+      type: object
+      required: [markers]
+      properties:
+        markers: { type: array, items: { $ref: "#/components/schemas/Marker" } }
+    PlaybackSettings:
+      type: object
+      required: [skip_markers]
+      properties:
+        skip_markers:
+          type: string
+          enum: [button, auto, off]
+          description: "Intros: show a Skip button (the default), skip automatically (only confident markers; otherwise the button), or neither. Credits always get a button when not off."
     PlaybackEvent:
       type: object
       required: [type, position_ms]
@@ -2018,6 +2494,53 @@ components:
           description: Titles carrying any of these labels (on the title or its show) are invisible.
         allow_transcode: { type: boolean }
         allow_4k_transcode: { type: boolean }
+        allow_subtitle_download: { type: boolean, description: May download subtitles from OpenSubtitles (spends the server's daily quota). Default false; admins always may. }
+    SubtitleHit:
+      type: object
+      required: [file_id, language_code, release, file_name, hearing_impaired, hash_match, trusted, download_count, matched_by]
+      properties:
+        file_id: { type: integer, description: Pass to the download route. }
+        language: { type: [string, "null"], description: ISO 639-2/B, like every other track. }
+        language_code: { type: string, description: OpenSubtitles' own code (ISO 639-1). }
+        release: { type: string }
+        file_name: { type: string }
+        hearing_impaired: { type: boolean }
+        hash_match: { type: boolean, description: Made for this exact file. }
+        trusted: { type: boolean, description: From a trusted uploader. }
+        download_count: { type: integer }
+        uploader: { type: string }
+        matched_by: { type: string, enum: [hash, id, title] }
+        stream_id: { type: [integer, "null"], description: Set when this version already has the file. }
+    DownloadedSubtitle:
+      type: object
+      required: [stream_id, version_id, release, hearing_impaired, hash_match, codec, existing]
+      properties:
+        stream_id: { type: integer, description: "The subtitle track id, as in /subtitles/{stream_id}." }
+        version_id: { type: integer }
+        language: { type: [string, "null"] }
+        release: { type: string }
+        hearing_impaired: { type: boolean }
+        hash_match: { type: boolean }
+        codec: { type: string }
+        existing: { type: boolean, description: Already downloaded; no quota spent. }
+    SubtitleDownloadResult:
+      type: object
+      required: [subtitle, webvtt]
+      properties:
+        subtitle: { $ref: "#/components/schemas/DownloadedSubtitle" }
+        webvtt: { $ref: "#/components/schemas/SubtitleSource" }
+        quota: { $ref: "#/components/schemas/SubtitleQuota" }
+    SubtitleQuota:
+      type: object
+      description: OpenSubtitles downloads left today, as last reported. Admins only.
+      required: [known, remaining, allowed, reset_at, checked_at]
+      properties:
+        known: { type: boolean }
+        remaining: { type: integer }
+        allowed: { type: integer }
+        reset_at: { type: string, format: date-time, description: Zero time when not reported. }
+        level: { type: string }
+        checked_at: { type: string, format: date-time }
     ActivityEntry:
       type: object
       required: [id, state, decision, decision_reason, start_position_ms, position_ms, played_ms, watched, started_at, last_event_at]

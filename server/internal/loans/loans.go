@@ -177,7 +177,8 @@ func (s *Store) Lend(ctx context.Context, by string, req Request) (Loan, string,
 		return Loan{}, "", nil, err
 	}
 	id, _ := res.LastInsertId()
-	cut, err := endOpen(ctx, tx, `item_id = ?`, []any{req.ItemID}, now, OnLoanMessage(time.UnixMilli(sc.ExpiresAt)), "loan")
+	cut, err := endOpen(ctx, tx, `(item_id = ? OR extra_id IN (SELECT id FROM item_extras WHERE item_id = ?))`, []any{req.ItemID, req.ItemID},
+		now, OnLoanMessage(time.UnixMilli(sc.ExpiresAt)), "loan")
 	if err != nil {
 		return Loan{}, "", nil, err
 	}

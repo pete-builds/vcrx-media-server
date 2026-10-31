@@ -31,8 +31,8 @@ type Definition struct {
 type Visible struct {
 	// Library lists it in the library's collections and on the titles in it.
 	Library bool `json:"library"`
-	// Home and Shared are kept for Home rows (the admin's and other users'),
-	// which do not show collections yet.
+	// Home gives the collection its own row on Home; Shared also lets that row
+	// reach users other than admins (both must be on for them).
 	Home   bool `json:"home"`
 	Shared bool `json:"shared"`
 }

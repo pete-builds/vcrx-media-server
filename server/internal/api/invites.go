@@ -333,16 +333,17 @@ func (s *Server) CutExpiredDevices(ctx context.Context) int {
 
 // streamOnly keeps invited devices to streaming (milestone 9's no-copy line):
 // they reach a file only inside one of their own open playback sessions for
-// that version, never as a whole file to keep. Accounts and profiles are the
-// household's own devices, which may download.
-func (s *Server) streamOnly(w http.ResponseWriter, r *http.Request, versionID int64, session string) bool {
+// it, never as a whole file to keep. plays says whether a session plays the
+// file asked for (a version, or an extra such as a trailer). Accounts and
+// profiles are the household's own devices, which may download.
+func (s *Server) streamOnly(w http.ResponseWriter, r *http.Request, session string, plays func(playback.StreamSession) bool) bool {
 	sess := info(r).Session
 	if sess.TokenID == 0 {
 		return true
 	}
 	if session != "" {
 		ss, err := s.Playback.ForStream(r.Context(), sess.User.ID, session)
-		if err == nil && ss.VersionID == versionID && !ss.Ended {
+		if err == nil && plays(ss) && !ss.Ended {
 			return true
 		}
 		if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {

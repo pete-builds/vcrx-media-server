@@ -88,6 +88,10 @@ func (f *fakeProber) Probe(ctx context.Context, p string) (*probe.Result, error)
 	if f.fail != "" && strings.Contains(p, f.fail) {
 		return nil, fmt.Errorf("ffprobe: %s: Invalid data found when processing input", filepath.Base(p))
 	}
+	if strings.HasSuffix(p, ".mp3") {
+		// ffprobe finds no video in an MP3; the real prober says so.
+		return nil, fmt.Errorf("%s: %w", filepath.Base(p), probe.ErrNoVideo)
+	}
 	r := &probe.Result{Container: probe.Container("matroska,webm", p), DurationMs: 5_400_000, Bitrate: 8_000_000,
 		VideoCodec: "h264", VideoProfile: "high", VideoLevel: 41, BitDepth: 8, Width: 1920, Height: 1080, FrameRate: 23.976}
 	if strings.Contains(p, "2160p") || strings.Contains(p, "4K") {
@@ -260,6 +264,7 @@ func (e *env) digest() string {
 		`SELECT item_id, kind, value FROM item_tags ORDER BY item_id, kind, value`,
 		`SELECT item_id, source, value FROM item_ratings ORDER BY item_id, source`,
 		`SELECT item_id, label_id, source FROM item_labels ORDER BY item_id, label_id`,
+		`SELECT id, item_id, kind, title, path, size, mtime, probe_status, IFNULL(missing_since,0), updated_at FROM item_extras ORDER BY id`,
 	} {
 		e.dump(&b, q)
 		b.WriteString("--\n")

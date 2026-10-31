@@ -46,7 +46,16 @@ func (s *Server) convertedSource(w http.ResponseWriter, r *http.Request) (playba
 	if !ok {
 		return ss, catalog.Version{}, "", false
 	}
-	v, root, err := s.Catalog.VersionForPlayback(r.Context(), info(r).Policy, ss.VersionID)
+	var v catalog.Version
+	var root string
+	var err error
+	if ss.ExtraID != 0 {
+		var x catalog.ExtraFile
+		x, err = s.Catalog.ExtraForPlayback(r.Context(), info(r).Policy, ss.ExtraID)
+		v, root = x.Version, x.Root
+	} else {
+		v, root, err = s.Catalog.VersionForPlayback(r.Context(), info(r).Policy, ss.VersionID)
+	}
 	if err != nil {
 		s.notFoundOr(w, r, err)
 		return ss, v, "", false
