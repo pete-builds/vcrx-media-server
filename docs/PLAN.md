@@ -16,7 +16,7 @@ Written 2026-10-30. `docs/REFERENCE.md` holds the verified facts and governs whe
 | APK build | A pinned Android build image (`tv/Dockerfile`), run on any Docker host. From this NixOS box: `DOCKER_HOST=ssh://nix1`. Avoids the NixOS `aapt2` and SDK patching problems entirely. |
 | FFmpeg audio extension | Google publishes no binary of `media3-decoder-ffmpeg`, so the build image compiles it from the androidx/media source at the same tag as the Media3 libraries, with vanilla FFmpeg. No third party builds. |
 | Token storage on the TV | Android Keystore AES-GCM key encrypting the token in private preferences. `androidx.security:security-crypto` is deprecated, so it is not used. |
-| Sign-in at home | Pete, 2026-10-30: "on lan there should be no auth". `auto_sign_in_user` signs clients on `trusted_networks` (loopback, RFC 1918, Tailscale by default) in as that user, judged by the TCP peer, never a forwarded header from an untrusted proxy. Off by default. |
+| Sign-in at home | Pete, 2026-10-30: "on lan there should be no auth". `auto_sign_in_user` signs clients on `trusted_networks` in as that user, judged by the TCP peer, never a forwarded header from an untrusted proxy. Off by default, and no default networks (#12): on nix1 the Docker bridges use 172.16.0.0/12 and 192.168.16.0/20 to 192.168.224.0/20, and Incus 10.142.0.0/24. The server answers only to IP addresses, localhost and `allowed_hosts` (DNS rebinding). |
 | Web client | Served by the server itself on 3750; vanilla ES modules, no framework, no build step, nothing from the internet. Browser sessions are an HttpOnly SameSite=Strict cookie because media elements cannot send a bearer header; changes need the `X-VCRX-Client` header. |
 | Browser playback | Browsers decode H.264, HEVC (Chrome on a Mac) and AV1 but not AC-3, E-AC-3, DTS or TrueHD, which are most first audio tracks on nix1. So the server copies video and converts only audio (#8) rather than transcoding video. |
 | Overlays | Baked into the served poster (like Kometa into Plex), so every client gets them unchanged. VCRX lettering, not third-party logos. Kometa's ribbon lists (IMDb Top 250, RT) have no source here; the ribbon is an IMDb rating and votes rule. |
@@ -69,7 +69,7 @@ The reference says to group files into one item only when they share a folder an
 
 ### Merge order for the 2026-10-30 overnight stack
 
-Server: #3, #4, #5, #6, #7, #8, #10, #11, each based on the one before. TV: #9, based on #3 only. After the stack is merged and deployed, add to nix1's `deploy/data/config/vcrx.yaml`: `auto_sign_in_user: pete`, `imdb_ratings: true`, and the overlays from #7's description. The APK has to be signed on the NixOS box, which holds `tv/signing/`.
+Server: #3, #4, #5, #6, #7, #8, #10, #11, #12, each based on the one before; do not deploy #3 without #12. TV: #9, based on #3 only. After the stack is merged and deployed, add to nix1's `deploy/data/config/vcrx.yaml`: `auto_sign_in_user: pete`, `trusted_networks: [192.168.86.0/24, 10.0.20.0/24]` plus the Tailscale IPs of Pete's own devices, `imdb_ratings: true`, and the overlays from #7's description. The APK has to be signed on the NixOS box, which holds `tv/signing/`.
 
 ## Acceptance test
 

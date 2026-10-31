@@ -103,7 +103,10 @@ export VCRX_BIND=127.0.0.1 VCRX_PORT="$port" VCRX_LOG_FORMAT="${VCRX_LOG_FORMAT:
 export VCRX_WEB_DIR="$repo/server/web/static"
 cd "$repo/server"
 go build -o "$dir/vcrx" ./cmd/vcrx
-if ! "$dir/vcrx" user list 2> /dev/null | grep -qw dev; then
+# Capture first: under pipefail, grep -q exiting at its first match would
+# SIGPIPE the lister and fail the check once there is more than one user.
+users="$("$dir/vcrx" user list 2> /dev/null || true)"
+if ! grep -qw dev <<< "$users"; then
   echo devpassword | "$dir/vcrx" user add -username dev -admin
 fi
 echo "dev-server: http://127.0.0.1:$port/ (admin dev / devpassword; this machine signs in automatically)"

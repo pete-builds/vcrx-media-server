@@ -156,6 +156,8 @@ func newFixture(t *testing.T) *fixture {
 		Catalog: cat, Playback: &playback.Service{DB: conn, Catalog: cat}, Artwork: artwork.New(conn, filepath.Join(dir, "cache"), "ffmpeg"),
 		Admin: adm, Scans: &fakeScans{}, Subtitles: subtitles.New(filepath.Join(dir, "subs"), "ffmpeg", log),
 		Activity: &activity.Service{DB: conn}}
+	// httptest requests carry Host example.com; a real name must be allowed.
+	f.srv.AllowedHosts = []string{"example.com"}
 	f.h = f.srv.Handler()
 	f.adminTok = f.login("pete", "adminpass1")
 	f.friendTok = f.login("friend", "friendpass1")
@@ -942,5 +944,64 @@ func TestEpisodeNextIsTheFollowingEpisode(t *testing.T) {
 	}
 	if n := next(sp1); n != nil {
 		t.Fatalf("after the only special: %v, want none", *n)
+	}
+}
+
+func TestHostCheckStopsDNSRebinding(t *testing.T) {
+	f := newFixture(t)
+	p, _ := netip.ParsePrefix("192.168.86.0/24")
+	f.srv.AutoSignInUser, f.srv.TrustedNetworks = "pete", []netip.Prefix{p}
+	f.h = f.srv.Handler()
+	call := func(host, path string) int {
+		t.Helper()
+		req := httptest.NewRequest("POST", path, strings.NewReader(`{"device":{"id":"x","name":"x"}}`))
+		req.Host = host
+		req.RemoteAddr = "192.168.86.50:1"
+		w := httptest.NewRecorder()
+		f.h.ServeHTTP(w, req)
+		return w.Code
+	}
+	// A page on another site that points its name at the server is refused,
+	// though the request comes from a trusted LAN address.
+	for _, host := range []string{"evil.example", "evil.example:3750", "rebind.attacker.test"} {
+		if code := call(host, "/api/v1/auth/auto"); code != http.StatusMisdirectedRequest {
+			t.Errorf("Host %s: %d, want 421", host, code)
+		}
+	}
+	// IP addresses, localhost and configured names pass.
+	for _, host := range []string{"192.168.86.20:3750", "192.168.86.20", "[fd7a:115c:a1e0::1]:3750", "localhost:3750", "example.com", "EXAMPLE.COM."} {
+		if code := call(host, "/api/v1/auth/auto"); code != 200 {
+			t.Errorf("Host %s: %d, want 200", host, code)
+		}
+	}
+}
+
+func TestClientIPBehindProxyFailsClosed(t *testing.T) {
+	f := newFixture(t)
+	proxy, _ := netip.ParsePrefix("127.0.0.1/32")
+	lan, _ := netip.ParsePrefix("127.0.0.0/8")
+	f.srv.TrustedProxies = []netip.Prefix{proxy}
+	f.srv.AutoSignInUser, f.srv.TrustedNetworks = "pete", []netip.Prefix{lan}
+	ip := func(xff ...string) string {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "127.0.0.1:9"
+		for _, v := range xff {
+			req.Header.Add("X-Forwarded-For", v)
+		}
+		return f.srv.clientIP(req)
+	}
+	// A proxy that sends no usable header must not make its clients look like
+	// the proxy (loopback here, which the auto sign-in networks trust).
+	for _, xff := range [][]string{nil, {"garbage"}, {"1.2.3.4:5678"}} {
+		if got := ip(xff...); got != unknownClient || f.srv.autoSignIn(got) {
+			t.Errorf("XFF %v: client %q", xff, got)
+		}
+	}
+	if got := ip("8.8.8.8"); got != "8.8.8.8" {
+		t.Errorf("one hop: %q", got)
+	}
+	// Several header lines are read as one list; the right-most untrusted hop wins.
+	if got := ip("10.9.9.9", "8.8.4.4"); got != "8.8.4.4" {
+		t.Errorf("two headers: %q", got)
 	}
 }

@@ -73,18 +73,66 @@ func (s *Server) clientIP(r *http.Request) string {
 	if !s.trusted(peer) {
 		return peer.String()
 	}
-	hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	// Every X-Forwarded-For header, in order; the right-most untrusted hop is
+	// the client. When no hop parses, the client is unknown, never the proxy
+	// itself: answering with the proxy's own (often loopback or private)
+	// address would make every client behind it look local.
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	last := ""
 	for i := len(hops) - 1; i >= 0; i-- {
 		a, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
 		if err != nil {
-			break
+			return unknownClient
 		}
 		a = a.Unmap()
 		if !s.trusted(a) {
 			return a.String()
 		}
+		last = a.String()
 	}
-	return peer.String()
+	if last == "" {
+		return unknownClient
+	}
+	return last
+}
+
+// unknownClient stands in for a client address that cannot be known. It
+// parses as no address, so it is never LAN and never trusted.
+const unknownClient = "unknown"
+
+// checkHost refuses requests for a host name the server does not answer to.
+// IP addresses and localhost always pass; other names must be in AllowedHosts.
+// This stops DNS rebinding, where a page from another site points its own
+// name at this server and then calls it as if same-origin.
+func (s *Server) checkHost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.hostAllowed(r.Host) {
+			writeError(w, http.StatusMisdirectedRequest, "host_not_allowed",
+				"This server does not answer to that name. Open it by its IP address, or add the name to allowed_hosts.")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) hostAllowed(host string) bool {
+	h := host
+	if hh, _, err := net.SplitHostPort(host); err == nil {
+		h = hh
+	}
+	h = strings.TrimSuffix(strings.ToLower(strings.Trim(h, "[]")), ".")
+	if h == "" || h == "localhost" {
+		return h == "localhost"
+	}
+	if _, err := netip.ParseAddr(h); err == nil {
+		return true
+	}
+	for _, a := range s.AllowedHosts {
+		if strings.EqualFold(strings.TrimSuffix(a, "."), h) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) trusted(a netip.Addr) bool {

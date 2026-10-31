@@ -96,15 +96,17 @@ func TestTMDbKey(t *testing.T) {
 	}
 }
 
-func TestTrustedNetworksDefault(t *testing.T) {
+func TestTrustedNetworksHaveNoDefault(t *testing.T) {
 	t.Setenv("VCRX_CONFIG_DIR", t.TempDir())
 	c, err := Load()
-	if err != nil || c.AutoSignInUser != "" || len(c.TrustedNetworks) != len(DefaultTrustedNetworks) {
+	// No default: private ranges include the server's own Docker bridges.
+	if err != nil || c.AutoSignInUser != "" || len(c.TrustedNetworks) != 0 {
 		t.Fatalf("defaults: %q %v %v", c.AutoSignInUser, c.TrustedNetworks, err)
 	}
 	t.Setenv("VCRX_AUTO_SIGN_IN_USER", "pete")
 	t.Setenv("VCRX_TRUSTED_NETWORKS", "192.168.86.0/24, 100.64.0.0/10")
-	if c, err = Load(); err != nil || c.AutoSignInUser != "pete" || len(c.TrustedNetworks) != 2 {
-		t.Fatalf("env: %q %v %v", c.AutoSignInUser, c.TrustedNetworks, err)
+	t.Setenv("VCRX_ALLOWED_HOSTS", "nix1.tail1234.ts.net")
+	if c, err = Load(); err != nil || c.AutoSignInUser != "pete" || len(c.TrustedNetworks) != 2 || len(c.AllowedHosts) != 1 {
+		t.Fatalf("env: %q %v %v %v", c.AutoSignInUser, c.TrustedNetworks, c.AllowedHosts, err)
 	}
 }
