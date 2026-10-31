@@ -171,6 +171,35 @@ func TestMusicFollowsLibraryGrants(t *testing.T) {
 	if len(sr.Tracks) != 1 || sr.Tracks[0].Title != "Low Tide" {
 		t.Errorf("search with the grant: %+v", sr)
 	}
+
+	// The library list counts a music library's albums, not 0, and drops one
+	// whose folder went missing.
+	musicCount := func() int {
+		t.Helper()
+		var out struct {
+			Libraries []struct {
+				ID        int64 `json:"id"`
+				ItemCount int   `json:"item_count"`
+			} `json:"libraries"`
+		}
+		f.do("GET", "/api/v1/libraries", f.friendTok, nil).json(t, &out)
+		for _, l := range out.Libraries {
+			if l.ID == ids.library {
+				return l.ItemCount
+			}
+		}
+		t.Fatal("music library not listed with the grant")
+		return -1
+	}
+	if n := musicCount(); n != 2 {
+		t.Errorf("music item_count = %d, want its 2 albums", n)
+	}
+	if _, err := f.db.Exec(`UPDATE music_albums SET missing_since = 1 WHERE title = 'Low Orbit'`); err != nil {
+		t.Fatal(err)
+	}
+	if n := musicCount(); n != 1 {
+		t.Errorf("music item_count with an album missing = %d, want 1", n)
+	}
 }
 
 // Direct play with Range, a listen recorded in Activity with its events, and

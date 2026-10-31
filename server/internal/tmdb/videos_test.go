@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -53,6 +54,19 @@ func TestBestTrailer(t *testing.T) {
 		if ok != (c.want != "") || got.Key != c.want {
 			t.Errorf("%s: got %q (ok %v), want %q", c.name, got.Key, ok, c.want)
 		}
+	}
+}
+
+// Trailers ranks every candidate, so the pass can fall back past one YouTube
+// no longer plays.
+func TestTrailersRanked(t *testing.T) {
+	var got []string
+	for _, v := range Trailers(fixture(t, "movie_videos.json"), "en-US") {
+		got = append(got, v.Key)
+	}
+	want := []string{"OffTrlrEn01", "OldTrlrEn01", "OffTrlrDe01", "FanTrlrEn01", "tEaSer0001a"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("ranked %v, want %v", got, want)
 	}
 }
 

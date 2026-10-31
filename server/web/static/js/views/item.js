@@ -97,8 +97,10 @@ function chips(item) {
     out.push(h("span", { class: "chip" }, [AUDIO[a.codec] || a.codec.toUpperCase(), ch].filter(Boolean).join(" ")));
   }
   const ratings = item.ratings || {};
-  if (ratings.imdb) out.push(h("span", { class: "score", title: "IMDb rating" }, icon("star"), ratings.imdb.toFixed(1), h("small", {}, "IMDb")));
-  if (ratings.tmdb) out.push(h("span", { class: "score", title: "TMDb rating" }, icon("star"), ratings.tmdb.toFixed(1), h("small", {}, "TMDb")));
+  const counts = item.rating_votes || {};
+  const tip = (name, k) => [`${name} rating`, votes(counts[k])].filter(Boolean).join(", ");
+  if (ratings.imdb) out.push(h("span", { class: "score", title: tip("IMDb", "imdb") }, icon("star"), ratings.imdb.toFixed(1), h("small", {}, "IMDb")));
+  if (ratings.tmdb) out.push(h("span", { class: "score", title: tip("TMDb", "tmdb") }, icon("star"), ratings.tmdb.toFixed(1), h("small", {}, "TMDb")));
   return out.length ? h("div", { class: "chips" }, out) : null;
 }
 
@@ -221,12 +223,41 @@ function castSection(item) {
       c.role ? h("span", { class: "cast-role" }, c.role) : null))));
 }
 
+// releaseDate is "April 10, 1957" for "1957-04-10", read as a calendar date so
+// no time zone moves it a day.
+function releaseDate(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd || "");
+  if (!m) return "";
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]))
+    .toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+}
+
+const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+
+// votes is "1M votes" for 1010165, or "" with no count.
+function votes(n) {
+  return n ? `${compact.format(n)} vote${n === 1 ? "" : "s"}` : "";
+}
+
+// ratingLines is one line per rating, with the votes behind it when known.
+function ratingLines(item) {
+  const r = item.ratings || {}, v = item.rating_votes || {};
+  return [["imdb", "IMDb"], ["tmdb", "TMDb"]].filter(([k]) => r[k])
+    .map(([k, name]) => [`${name} ${r[k].toFixed(1)}`, votes(v[k])].filter(Boolean).join(" · ")).join("\n");
+}
+
 function techFacts(item) {
   const versions = item.versions || [];
   if (!versions.length) return null;
   const rows = [];
   if ((item.directors || []).length) rows.push(["Directed by", item.directors.join(", ")]);
+  if ((item.writers || []).length) rows.push(["Written by", item.writers.join(", ")]);
   if ((item.studios || []).length) rows.push([item.kind === "episode" ? "Network" : "Studio", item.studios.join(", ")]);
+  if ((item.countries || []).length) rows.push(["Country", item.countries.join(", ")]);
+  const released = releaseDate(item.premiere_date);
+  if (released) rows.push([item.kind === "episode" ? "Aired" : "Released", released]);
+  const scores = ratingLines(item);
+  if (scores) rows.push(["Ratings", scores]);
   versions.forEach((v, i) => {
     const prefix = versions.length > 1 ? `Version ${i + 1} ` : "";
     rows.push([prefix + "File", v.file_name]);

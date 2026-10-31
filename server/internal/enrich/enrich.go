@@ -58,6 +58,10 @@ type Enricher struct {
 	Changed func()
 	// Trailers also looks up each title's YouTube trailer (trailers_youtube).
 	Trailers bool
+	// Embeddable, when set, asks YouTube whether a trailer still plays in
+	// another site's player (youtube.Client.Embeddable). The pass then skips
+	// TMDb trailers that are gone or have embedding off, for the next best.
+	Embeddable func(ctx context.Context, videoID string) (bool, error)
 }
 
 type Stats struct {

@@ -213,7 +213,7 @@ nfo() { # dir file rating votes [extra-xml]
     "${2%.nfo}" "$3" "$4" "${5:-}" "${2%.nfo}" > "$1/$2"
 }
 nfo "$media/Movies/Harbor Lights (2001)" movie.nfo 8.4 310000 \
-  '<actor><name>Mara Quill</name><role>Lighthouse Keeper</role><order>0</order></actor><actor><name>Tomas Brandt</name><role>Harbor Master</role><order>1</order></actor><actor><name>June Okafor</name><order>2</order></actor><genre>Drama</genre><genre>Mystery</genre><director>Ines Calloway</director><premiered>2001-03-09</premiered>'
+  '<actor><name>Mara Quill</name><role>Lighthouse Keeper</role><order>0</order></actor><actor><name>Tomas Brandt</name><role>Harbor Master</role><order>1</order></actor><actor><name>June Okafor</name><order>2</order></actor><genre>Drama</genre><genre>Mystery</genre><director>Ines Calloway</director><credits>Ines Calloway</credits><credits>Rafe Lindqvist</credits><country>Canada</country><premiered>2001-03-09</premiered>'
 nfo "$media/Movies/Copper Valley (2015)" movie.nfo 6.9 41000 '<genre>Western</genre><genre>Drama</genre><director>Ines Calloway</director><premiered>2015-08-21</premiered>'
 nfo "$media/Movies/Paper Trail (1998)" movie.nfo 7.7 88000 '<genre>Drama</genre><genre>Thriller</genre><genre>Mystery</genre><premiered>1998-05-01</premiered>'
 nfo "$media/Movies/River Line (2011)" movie.nfo 7.3 64000 '<genre>Drama</genre><genre>Crime</genre><director>Ines Calloway</director><premiered>2011-09-30</premiered>'

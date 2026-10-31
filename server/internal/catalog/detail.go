@@ -17,18 +17,20 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 	if len(sums) == 0 {
 		return ItemDetail{}, ErrNotFound
 	}
-	d := ItemDetail{ItemSummary: sums[0], Genres: []string{}, Directors: []string{}, Studios: []string{}, Cast: []CastMember{}, Ratings: map[string]float64{}, Versions: []Version{}}
-	var overview, tagline, rating sql.NullString
-	if err := c.DB.QueryRowContext(ctx, `SELECT overview, tagline, content_rating FROM items WHERE id = ?`, id).Scan(&overview, &tagline, &rating); err != nil {
+	d := ItemDetail{ItemSummary: sums[0], Genres: []string{}, Directors: []string{}, Writers: []string{}, Studios: []string{}, Countries: []string{},
+		Cast: []CastMember{}, Ratings: map[string]float64{}, RatingVotes: map[string]int64{}, Versions: []Version{}}
+	var overview, tagline, rating, premiere sql.NullString
+	if err := c.DB.QueryRowContext(ctx, `SELECT overview, tagline, content_rating, premiere_date FROM items WHERE id = ?`, id).
+		Scan(&overview, &tagline, &rating, &premiere); err != nil {
 		return d, err
 	}
-	d.Overview, d.Tagline, d.ContentRating = strPtr(overview), strPtr(tagline), strPtr(rating)
+	d.Overview, d.Tagline, d.ContentRating, d.PremiereDate = strPtr(overview), strPtr(tagline), strPtr(rating), strPtr(premiere)
 	// Episodes and seasons show their show's genres and studios too.
 	tagOwner := id
 	if d.ShowID != nil && d.Kind != "show" {
 		tagOwner = *d.ShowID
 	}
-	rows, err := c.DB.QueryContext(ctx, `SELECT kind, value FROM item_tags WHERE item_id IN (?, ?) AND kind IN ('genre', 'director', 'studio', 'network')
+	rows, err := c.DB.QueryContext(ctx, `SELECT kind, value FROM item_tags WHERE item_id IN (?, ?) AND kind IN ('genre', 'director', 'writer', 'studio', 'network', 'country')
 		ORDER BY item_id = ? DESC, position, value`, id, tagOwner, id)
 	if err != nil {
 		return d, err
@@ -48,6 +50,10 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 			d.Genres = append(d.Genres, value)
 		case "director":
 			d.Directors = append(d.Directors, value)
+		case "writer":
+			d.Writers = append(d.Writers, value)
+		case "country":
+			d.Countries = append(d.Countries, value)
 		default:
 			d.Studios = append(d.Studios, value)
 		}
@@ -78,17 +84,21 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 	if err != nil {
 		return d, err
 	}
-	rows, err = c.DB.QueryContext(ctx, `SELECT source, value FROM item_ratings WHERE item_id = ?`, id)
+	rows, err = c.DB.QueryContext(ctx, `SELECT source, value, votes FROM item_ratings WHERE item_id = ?`, id)
 	if err != nil {
 		return d, err
 	}
 	err = each(rows, func() error {
 		var src string
 		var v float64
-		if err := rows.Scan(&src, &v); err != nil {
+		var votes sql.NullInt64
+		if err := rows.Scan(&src, &v, &votes); err != nil {
 			return err
 		}
 		d.Ratings[src] = v
+		if votes.Valid && votes.Int64 > 0 {
+			d.RatingVotes[src] = votes.Int64
+		}
 		return nil
 	})
 	if err != nil {

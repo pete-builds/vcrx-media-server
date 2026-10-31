@@ -52,7 +52,9 @@ func int64Args(ids []int64) []any {
 	return out
 }
 
-// Libraries lists the libraries the caller may see, with visible top-level counts.
+// Libraries lists the libraries the caller may see, with visible top-level
+// counts: titles, or for a music library its albums, which live in their own
+// tables (as the admin list counts them).
 func (c *Catalog) Libraries(ctx context.Context, pol policy.Policy) ([]Library, error) {
 	rows, err := c.DB.QueryContext(ctx, `SELECT id, name, kind FROM libraries ORDER BY name COLLATE NOCASE`)
 	if err != nil {
@@ -74,8 +76,12 @@ func (c *Catalog) Libraries(ctx context.Context, pol policy.Policy) ([]Library, 
 	}
 	cond, args := pol.ItemCond("i")
 	for idx := range libs {
-		q := `SELECT COUNT(*) FROM items i WHERE i.library_id = ? AND i.parent_id IS NULL AND ` + cond
-		if err := c.DB.QueryRowContext(ctx, q, append([]any{libs[idx].ID}, args...)...).Scan(&libs[idx].ItemCount); err != nil {
+		q, qargs := `SELECT COUNT(*) FROM items i WHERE i.library_id = ? AND i.parent_id IS NULL AND `+cond, args
+		if libs[idx].Kind == "music" {
+			// A music library's access is the library grant checked above.
+			q, qargs = `SELECT COUNT(*) FROM music_albums a WHERE a.library_id = ? AND a.missing_since IS NULL`, nil
+		}
+		if err := c.DB.QueryRowContext(ctx, q, append([]any{libs[idx].ID}, qargs...)...).Scan(&libs[idx].ItemCount); err != nil {
 			return nil, err
 		}
 	}
