@@ -199,7 +199,10 @@ async function main() {
     if (!res.found) fail(`#${path}`, `no ${selector}`);
     if (res.error) fail(`#${path}`, `shows an error box: ${res.text.slice(0, 160).replace(/\n/g, " ")}`);
     const junk = res.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
-    if (junk) fail(`#${path}`, `shows "${junk[0]}"`);
+    if (junk) {
+      const at = res.text.slice(Math.max(0, junk.index - 60), junk.index + 20).replace(/\s+/g, " ");
+      fail(`#${path}`, `shows "${junk[0]}" in "...${at}..."`);
+    }
     if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
   }
 
@@ -414,9 +417,15 @@ async function main() {
       v.play().catch(() => {});
       for (let i = 0; i < 80 && !(v.currentTime > 1.5); i++) await new Promise((r) => setTimeout(r, 150));
       const pill = document.querySelector(".player .pill");
+      // All the player's text, hidden controls included: they show on the next
+      // mouse move, so a "null" there is one the viewer will see.
+      const shell = v.closest(".player");
       return { ok: v.currentTime > 1.5, t: v.currentTime, err: v.error && v.error.code, converted: !v.controls, pill: pill ? pill.textContent : null,
+        text: shell ? shell.textContent : "",
         why: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
     if (!res.ok) fail(`play ${label}`, `video did not advance (t=${res.t}, media error ${res.err}) ${res.why || ""}`);
+    const playerJunk = (res.text || "").match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+    if (playerJunk) fail(`play ${label}`, `the player shows "${playerJunk[0]}": ${res.text.slice(0, 160).replace(/\s+/g, " ")}`);
     if (res.converted !== (wantDecision === "converted")) fail(`play ${label}`, `expected a ${wantDecision} stream`);
     if (wantPill && res.pill !== wantPill) fail(`play ${label}`, `labelled "${res.pill}", expected "${wantPill}"`);
     if (exceptions.length) fail(`play ${label}`, `threw: ${exceptions[0]}`);
@@ -455,7 +464,10 @@ async function main() {
     if (!res.rows) fail(`#${path}`, "no History rows after playing the clip");
     if (res.error) fail(`#${path}`, "shows an error box");
     const junk = res.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
-    if (junk) fail(`#${path}`, `shows "${junk[0]}"`);
+    if (junk) {
+      const at = res.text.slice(Math.max(0, junk.index - 60), junk.index + 20).replace(/\s+/g, " ");
+      fail(`#${path}`, `shows "${junk[0]}" in "...${at}..."`);
+    }
     if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
   }
 }
@@ -472,11 +484,16 @@ async function hlsPlayer(s, evaluate, ids) {
         continue;
       }
       console.log(`play ${label} as Safari (#/play/${id})`);
+      // As in the plays above: the previous clip's player can still be on the page
+      // when this one is judged, so mark its video and read only a fresh one.
+      await evaluate(`document.querySelectorAll("video").forEach((v) => { v.dataset.stale = "1"; v.pause(); });`);
       await s("Page.navigate", { url: `${base}/#/play/${id}?start=0` });
       const res = await evaluate(`
-        for (let i = 0; i < 60 && !document.querySelector("video"); i++) await new Promise((r) => setTimeout(r, 150));
-        const v = document.querySelector("video");
+        const fresh = () => document.querySelector("video:not([data-stale])");
+        for (let i = 0; i < 60 && !fresh(); i++) await new Promise((r) => setTimeout(r, 150));
+        const v = fresh();
         if (!v) return { ok: false, why: document.getElementById("view").innerText.slice(0, 200) };
+        const player = v.closest(".player") || document;
         v.muted = true;
         v.play().catch(() => {});
         const advanced = async () => {
@@ -485,15 +502,15 @@ async function hlsPlayer(s, evaluate, ids) {
         };
         const ok = await advanced();
         const src = v.currentSrc;
-        const pill = document.querySelector(".player .pill");
+        const pill = player.querySelector(".pill");
         // Seek 30 s on: a new stream, and the clock shows the new position.
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
         for (let i = 0; i < 60 && v.currentSrc === src; i++) await new Promise((r) => setTimeout(r, 100));
         const seeked = v.currentSrc !== src && await advanced();
-        const clock = document.querySelector(".pc-time") ? document.querySelector(".pc-time").textContent : "";
+        const clock = player.querySelector(".pc-time") ? player.querySelector(".pc-time").textContent : "";
         return { ok, seeked, t: v.currentTime, src, err: v.error && v.error.code, clock, converted: !v.controls,
           pill: pill ? pill.textContent : null, ua: navigator.userAgent.includes("Version/18.0 Safari"),
-          why: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
+          why: player.querySelector(".overlay:not([hidden])") ? player.querySelector(".overlay").innerText : "" };`);
       if (!res.ua) fail(`play ${label}`, "the user agent override did not take");
       if (!res.ok) fail(`play ${label}`, `video did not advance (t=${res.t}, media error ${res.err}) ${res.why || ""}`);
       if (!/\/hls\/[0-9a-f]{16}\/index\.m3u8$/.test(res.src || "")) fail(`play ${label}`, `played ${res.src}, not an HLS playlist`);

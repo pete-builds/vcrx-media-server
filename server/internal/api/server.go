@@ -167,6 +167,7 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/admin/pairings/{code}", adminOnly, s.adminPairing},
 		{"POST", "/api/v1/admin/pairings/{code}/approve", adminOnly, s.adminApprovePairing},
 		{"DELETE", "/api/v1/admin/pairings/{code}", adminOnly, s.adminDenyPairing},
+		{"GET", "/api/v1/speedtest", signedIn, s.speedTest},
 		{"GET", "/api/v1/admin/libraries", adminOnly, s.adminLibraries},
 		{"POST", "/api/v1/admin/libraries", adminOnly, s.adminCreateLibrary},
 		{"POST", "/api/v1/admin/libraries/{library_id}/scan", adminOnly, s.adminScan},
