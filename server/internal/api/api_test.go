@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,6 +24,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
+	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 )
 
 type fixture struct {
@@ -149,7 +151,7 @@ func newFixture(t *testing.T) *fixture {
 	cat := &catalog.Catalog{DB: conn}
 	f.srv = &Server{DB: conn, Log: log, Version: "test", ServerName: "Test", Auth: store, Limiter: auth.NewLimiter(10, time.Minute),
 		Catalog: cat, Playback: &playback.Service{DB: conn, Catalog: cat}, Artwork: artwork.New(conn, filepath.Join(dir, "cache"), "ffmpeg"),
-		Admin: adm, Scans: &fakeScans{}}
+		Admin: adm, Scans: &fakeScans{}, Subtitles: subtitles.New(filepath.Join(dir, "subs"), "ffmpeg", log)}
 	f.h = f.srv.Handler()
 	f.adminTok = f.login("pete", "adminpass1")
 	f.friendTok = f.login("friend", "friendpass1")
@@ -632,5 +634,101 @@ func TestTrustedNetworkSignIn(t *testing.T) {
 	f.h = f.srv.Handler()
 	if r := f.do("POST", "/api/v1/auth/auto", "", dev); r.code != 403 {
 		t.Fatalf("missing user: %d", r.code)
+	}
+}
+
+func TestWebVTTSubtitles(t *testing.T) {
+	ffmpeg, err := osexec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg not on PATH")
+	}
+	f := newFixture(t)
+	f.srv.Subtitles.FFmpeg = ffmpeg
+	// Make the episode a real MKV with an embedded SubRip track at index 1, and
+	// give the 4K movie an embedded PGS track, which cannot become text.
+	srt := filepath.Join(t.TempDir(), "in.srt")
+	if err := os.WriteFile(srt, []byte("1\n00:00:00,500 --> 00:00:01,500\nInside the file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var epPath string
+	if err := f.db.QueryRow(`SELECT path FROM media_versions WHERE id = ?`, f.episodeVerID).Scan(&epPath); err != nil {
+		t.Fatal(err)
+	}
+	if msg, err := osexec.Command(ffmpeg, "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=2",
+		"-i", srt, "-map", "0:v", "-map", "1", "-c:v", "mpeg4", "-c:s", "srt", "-y", epPath+".tmp.mkv").CombinedOutput(); err != nil {
+		t.Fatalf("fixture: %v %s", err, msg)
+	}
+	if err := os.Rename(epPath+".tmp.mkv", epPath); err != nil {
+		t.Fatal(err)
+	}
+	insert := func(q string, args ...any) int64 {
+		t.Helper()
+		res, err := f.db.Exec(q, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := res.LastInsertId()
+		return id
+	}
+	embedded := insert(`INSERT INTO media_streams (version_id, stream_index, kind, codec, language) VALUES (?, 1, 'subtitle', 'subrip', 'eng')`, f.episodeVerID)
+	pgs := insert(`INSERT INTO media_streams (version_id, stream_index, kind, codec, is_image_based) VALUES (?, 2, 'subtitle', 'hdmv_pgs_subtitle', 1)`, f.v4k)
+
+	// The play response lists both text tracks as WebVTT and marks the embedded one.
+	var sess struct {
+		Subtitles []struct{ URL string }
+		WebVTT    []struct {
+			URL      string
+			Embedded bool
+			MimeType string `json:"mime_type"`
+		} `json:"webvtt_subtitles"`
+	}
+	r := f.do("POST", "/api/v1/playback/sessions", f.adminTok, map[string]any{"item_id": f.episodeID, "capabilities": tclCaps()})
+	if r.code != 201 {
+		t.Fatalf("start: %d %s", r.code, r.body)
+	}
+	r.json(t, &sess)
+	if len(sess.Subtitles) != 0 {
+		t.Fatalf("embedded tracks must stay out of the side-loaded list the TV reads: %+v", sess.Subtitles)
+	}
+	if len(sess.WebVTT) != 1 || !sess.WebVTT[0].Embedded || sess.WebVTT[0].MimeType != "text/vtt" {
+		t.Fatalf("webvtt_subtitles: %+v", sess.WebVTT)
+	}
+
+	// First fetch starts the pass and answers 202; it then serves WebVTT.
+	url := sess.WebVTT[0].URL
+	r = f.do("GET", url, f.adminTok, nil)
+	if r.code != 202 || r.hdr.Get("Retry-After") == "" {
+		t.Fatalf("first embedded fetch: %d %s", r.code, r.body)
+	}
+	f.srv.Subtitles.Wait(epPath)
+	r = f.do("GET", url, f.adminTok, nil)
+	if r.code != 200 || !strings.HasPrefix(r.hdr.Get("Content-Type"), "text/vtt") || !strings.Contains(string(r.body), "Inside the file") {
+		t.Fatalf("embedded fetch after the pass: %d %s %s", r.code, r.hdr.Get("Content-Type"), r.body)
+	}
+	// Without format=vtt an embedded track is not served: it is already in the stream.
+	if r := f.do("GET", fmt.Sprintf("/api/v1/subtitles/%d", embedded), f.adminTok, nil); r.code != 404 {
+		t.Fatalf("raw embedded fetch: %d, want 404", r.code)
+	}
+
+	// A sidecar SubRip converts on request.
+	var sidecar int64
+	if err := f.db.QueryRow(`SELECT id FROM media_streams WHERE version_id = ? AND is_external = 1`, f.v1080).Scan(&sidecar); err != nil {
+		t.Fatal(err)
+	}
+	r = f.do("GET", fmt.Sprintf("/api/v1/subtitles/%d?format=vtt", sidecar), f.adminTok, nil)
+	if r.code != 200 || !strings.HasPrefix(string(r.body), "WEBVTT") || !strings.Contains(string(r.body), "Hello") {
+		t.Fatalf("sidecar as vtt: %d %s", r.code, r.body)
+	}
+
+	// Picture subtitles are refused with a reason, and policy still applies:
+	// the friend's ceiling is 1080p, so the 4K version's track does not exist for them.
+	if r := f.do("GET", fmt.Sprintf("/api/v1/subtitles/%d?format=vtt", pgs), f.adminTok, nil); r.code != 422 {
+		t.Fatalf("pgs as vtt: %d %s, want 422", r.code, r.body)
+	}
+	if r := f.do("GET", fmt.Sprintf("/api/v1/subtitles/%d?format=vtt", pgs), f.friendTok, nil); r.code != 404 {
+		t.Fatalf("friend fetching a 4K track: %d, want 404", r.code)
+	}
+	if r := f.do("GET", url, f.strangerTok, nil); r.code != 404 {
+		t.Fatalf("ungranted user fetching a subtitle: %d, want 404", r.code)
 	}
 }

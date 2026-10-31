@@ -18,7 +18,7 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 |---|---|
 | Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key) | Collections, overlays, manual match fixes |
 | Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
-| Direct play over HTTP with Range, sidecar subtitles | Remux and HLS transcoding, VA-API hardware acceleration |
+| Direct play over HTTP with Range, sidecar and embedded text subtitles (also as WebVTT for browsers) | Remux and HLS transcoding, picture subtitle burn-in, VA-API hardware acceleration |
 | Every playback logged with its decision and reason, resume positions, Continue Watching | Activity screens, stats, webhooks |
 | REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Web client, other TV platforms |
 

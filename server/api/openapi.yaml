@@ -268,12 +268,27 @@ paths:
   /api/v1/subtitles/{stream_id}:
     get:
       operationId: getSubtitle
-      summary: A sidecar subtitle file, served as-is with its text MIME type.
+      summary: >-
+        A subtitle track. Without format, a sidecar file served as-is with its text MIME type. With format=vtt, any
+        text track (sidecar or embedded) as WebVTT. An embedded track is read out of the media file in one background
+        pass for all its text tracks; until that finishes the answer is 202 with Retry-After.
       parameters:
         - { name: stream_id, in: path, required: true, schema: { type: integer } }
+        - { name: format, in: query, required: false, schema: { type: string, enum: [vtt] } }
       responses:
         "200": { description: Subtitle text }
+        "202":
+          description: Still extracting; retry after the Retry-After seconds.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, message]
+                properties:
+                  status: { type: string, enum: [preparing] }
+                  message: { type: string }
         "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
 
   /api/v1/admin/libraries:
     get:
@@ -628,6 +643,7 @@ components:
         language: { type: [string, "null"] }
         title: { type: [string, "null"] }
         is_forced: { type: boolean }
+        embedded: { type: boolean, description: "True for a track inside the media file. Players that read the container already have it; browsers use the WebVTT URL." }
     PlaybackSession:
       type: object
       required: [session_id, decision, reason, item_id, version, stream, resume_position_ms, heartbeat_interval_ms]
@@ -645,6 +661,13 @@ components:
             protocol: { type: string, enum: [progressive, hls] }
             mime_type: { type: [string, "null"], description: "video/x-matroska, video/mp4, ..." }
         subtitles: { type: array, items: { $ref: "#/components/schemas/SubtitleSource" }, description: Sidecar files to add as side-loaded tracks. Embedded tracks come from the container. }
+        webvtt_subtitles:
+          type: array
+          items: { $ref: "#/components/schemas/SubtitleSource" }
+          description: >-
+            Every text subtitle, sidecar or embedded, as a WebVTT URL, for clients that read only WebVTT (browsers).
+            Picture subtitles (PGS, VobSub) are left out. An embedded track's URL answers 202 while the server reads
+            it out of the file; retry after the Retry-After seconds.
         resume_position_ms: { type: integer }
         heartbeat_interval_ms: { type: integer }
     PlaybackEvent:

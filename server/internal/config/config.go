@@ -231,6 +231,9 @@ func (c Config) BackupDir() string { return filepath.Join(c.ConfigDir, "backups"
 
 func (c Config) ArtworkCacheDir() string { return filepath.Join(c.CacheDir, "artwork") }
 
+// SubtitleCacheDir holds WebVTT copies of text subtitles for browsers.
+func (c Config) SubtitleCacheDir() string { return filepath.Join(c.CacheDir, "subtitles") }
+
 // MetadataDir holds images downloaded from TMDb. It sits under the config dir,
 // not the cache, because downloading them again for a whole library is slow.
 func (c Config) MetadataDir() string { return filepath.Join(c.ConfigDir, "metadata", "tmdb") }
