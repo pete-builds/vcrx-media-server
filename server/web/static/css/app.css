@@ -355,6 +355,8 @@ a.card:focus-visible .title { color: var(--orange); }
 .player.idle { cursor: none; }
 .player .top .btn { background: rgba(255,255,255,.14); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .player .top .btn:hover { background: rgba(255,255,255,.24); }
+/* Before a movie: Skip sits bottom right, above the clip. */
+.player.preroll .preroll-bar { position: absolute; right: 32px; bottom: 40px; z-index: 2; }
 /* CC lit while a subtitle track shows. */
 .player .top .cc-btn[aria-pressed="true"] { background: var(--orange); color: #000; }
 .player .top .ptitle { font-family: Rajdhani, sans-serif; font-weight: 700; font-size: 22px; margin-right: auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 8px rgba(0,0,0,.6); }

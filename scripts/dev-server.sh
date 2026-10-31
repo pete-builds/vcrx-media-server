@@ -202,6 +202,8 @@ harbor="$media/Movies/Harbor Lights (2001)"
 clip "$harbor/Harbor Lights (2001)-trailer.mp4" 12 libx264 aac -movflags +faststart
 clip "$harbor/Featurettes/Raising the Lighthouse.mp4" 8 libx264 aac -movflags +faststart
 clip "$harbor/Deleted Scenes/The Long Night.mp4" 6 libx264 aac -movflags +faststart
+# Before a movie: one pre-roll clip, in a folder outside every library.
+clip "$media/Pre-Roll/Dev Countdown.mp4" 4 libx264 aac -movflags +faststart
 theme="$media/TV/Quiet Street/theme.mp3"
 [ -f "$theme" ] || ffmpeg -loglevel error -y -f lavfi -i "sine=frequency=262:duration=12" -c:a libmp3lame -q:a 6 "$theme"
 
@@ -241,6 +243,8 @@ auto_sign_in_user: dev
 trusted_networks: [127.0.0.0/8, "::1/128"]
 # Detect intros and credits at any hour (a real server waits for the night).
 marker_hours: always
+# Before a movie's pre-roll clips (a profile turns them on in Settings).
+preroll_dir: $media/Pre-Roll
 libraries:
   - name: Movies
     kind: movie

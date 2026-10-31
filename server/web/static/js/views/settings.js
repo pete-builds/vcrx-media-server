@@ -7,7 +7,7 @@ import { newsletterTab } from "./newsletter.js";
 import { householdPanel } from "./household.js";
 import { devicesTab } from "./devices.js";
 import { friendsTab } from "./servers.js";
-import { markersTab, skipSetting } from "./markers.js";
+import { markersTab, skipSetting, beforeMovieSetting } from "./markers.js";
 
 export async function settingsView({ match }) {
   const tab = (match && match[1]) || "account";
@@ -52,6 +52,7 @@ export async function settingsView({ match }) {
           h("dt", {}, "Version"), h("dd", {}, server.version || ""),
           h("dt", {}, "API"), h("dd", {}, h("a", { href: "/api/v1/openapi.yaml" }, "OpenAPI description")))),
       skipSetting(),
+      beforeMovieSetting(),
       h("section", { class: "section" }, out, note ? h("p", { class: "muted" }, note) : null),
       h("section", { class: "section faint" },
         h("p", {}, "VCRX Media Server is free software under the AGPL. Fonts: Inter and Rajdhani, SIL Open Font License 1.1 (",

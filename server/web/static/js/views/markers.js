@@ -92,6 +92,33 @@ export function skipSetting() {
     h("p", { class: "muted" }, "Automatic skipping acts only when VCRX is sure where the intro is; otherwise the button shows. Credits always wait for you, so a scene after them is never missed. The TV app uses the same choice."));
 }
 
+// beforeMovieSetting is this person's own Before a movie choice: local
+// trailers for other titles, and a pre-roll from the server's folder.
+export function beforeMovieSetting() {
+  const trailers = h("select", { "aria-label": "Trailers before a movie" },
+    [0, 1, 2, 3].map((n) => h("option", { value: String(n) }, n === 0 ? "No trailers" : `${n} trailer${n === 1 ? "" : "s"}`)));
+  const preroll = h("input", { type: "checkbox", "aria-label": "Pre-roll before a movie" });
+  trailers.disabled = preroll.disabled = true;
+  api("/me/playback-settings").then((s) => {
+    trailers.value = String(s.before_movie_trailers || 0);
+    preroll.checked = !!s.before_movie_preroll;
+    trailers.disabled = preroll.disabled = false;
+  }).catch((e) => toast(e.message));
+  const save = async (body) => {
+    try {
+      await api("/me/playback-settings", { method: "PUT", body });
+      toast("Saved");
+    } catch (e) {
+      toast(e.message);
+    }
+  };
+  trailers.addEventListener("change", () => save({ before_movie_trailers: Number(trailers.value) }));
+  preroll.addEventListener("change", () => save({ before_movie_preroll: preroll.checked }));
+  return h("section", { class: "section before-movie" }, h("h2", {}, "Before a movie"), trailers,
+    h("label", { class: "check" }, preroll, " Play a pre-roll clip"),
+    h("p", { class: "muted" }, "When a movie starts from the beginning: trailers for other movies you have not watched (from local trailer files), then a pre-roll from the server's folder. Skip any of them with one press. The TV app uses the same choice."));
+}
+
 // markersTab is detection's progress for admins: seasons done, show by show,
 // and files it could not read.
 export async function markersTab(body) {
