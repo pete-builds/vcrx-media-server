@@ -1,0 +1,23 @@
+{
+  "total_pages": 1,
+  "total_count": 1,
+  "per_page": 60,
+  "page": 1,
+  "data": [
+    {
+      "id": "7000009",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "7000009",
+        "language": "en",
+        "download_count": 300,
+        "hearing_impaired": false,
+        "from_trusted": false,
+        "release": "Show.S01E01.HDTV",
+        "uploader": { "uploader_id": 19, "name": "titlematch", "rank": "member" },
+        "files": [ { "file_id": 8000009, "cd_number": 1, "file_name": "Show.S01E01.HDTV.srt" } ],
+        "moviehash_match": false
+      }
+    }
+  ]
+}

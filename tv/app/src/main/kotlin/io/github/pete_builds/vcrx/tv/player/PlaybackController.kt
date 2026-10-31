@@ -1,5 +1,6 @@
 package io.github.pete_builds.vcrx.tv.player
 
+import android.content.Context
 import android.net.Uri
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -16,28 +17,40 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.extractor.DefaultExtractorsFactory
+import io.github.pete_builds.vcrx.tv.caps.CapabilityPolicy
 import io.github.pete_builds.vcrx.tv.caps.CapabilityProbe
 import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.ApiException
+import io.github.pete_builds.vcrx.tv.net.Capabilities
 import io.github.pete_builds.vcrx.tv.net.Item
 import io.github.pete_builds.vcrx.tv.net.PlaybackRequest
 import io.github.pete_builds.vcrx.tv.net.PlaybackSession
+import io.github.pete_builds.vcrx.tv.net.SubtitleSource
+import io.github.pete_builds.vcrx.tv.settings.Languages
+import io.github.pete_builds.vcrx.tv.settings.Preferences
+import io.github.pete_builds.vcrx.tv.settings.SubtitleStyle
 import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 sealed interface Phase {
     data object Starting : Phase
@@ -46,8 +59,10 @@ sealed interface Phase {
     data class Refused(val message: String) : Phase
     /** [busy]: the server is converting as many streams as it allows (503 busy); Retry may work shortly. */
     data class Failed(val message: String, val unreachable: Boolean, val busy: Boolean = false) : Phase
-    /** An episode ended and the next one starts when [secondsLeft] reaches zero. */
-    data class UpNext(val next: Item, val secondsLeft: Int) : Phase
+    /** An episode ended; the next one starts when [secondsLeft] reaches zero, or waits for Play when it is null. */
+    data class UpNext(val next: Item, val secondsLeft: Int?) : Phase
+    /** Settings say ask: resume from [positionMs] or start over. */
+    data class AskResume(val positionMs: Long) : Phase
 }
 
 enum class Overlay { Hidden, Info, Controls }
@@ -70,12 +85,22 @@ class PlaybackController(
     private val activity: ComponentActivity,
     private val itemId: Long,
     private val versionId: Long?,
-    private val fromStart: Boolean,
+    private val request: StartRequest,
     val title: String,
     /** Set when playing one of the item's extras (a trailer) rather than the item. */
     private val extraId: Long? = null,
 ) {
     private val graph = activity.graph
+
+    /** Settings as they were when this playback opened; a change applies from the next title. */
+    private val prefs: Preferences = graph.preferences.current
+    private val deviceLanguage: String = Locale.getDefault().language
+
+    /** Settings > Subtitles > Style, for the views that draw the subtitles. */
+    val captionStyle: SubtitleStyle = prefs.subtitles.style
+
+    val skipBackMs: Long = PlaybackPolicy.skipBackMs(prefs.playback)
+    val skipForwardMs: Long = PlaybackPolicy.skipForwardMs(prefs.playback)
 
     var phase by mutableStateOf<Phase>(Phase.Starting)
         private set
@@ -101,6 +126,22 @@ class PlaybackController(
     var reloading by mutableStateOf(false)
         private set
 
+    /** A subtitle track is showing. */
+    var subtitlesOn by mutableStateOf(false)
+        private set
+
+    /** For a converted stream, the cues to draw now; direct play draws through the player's own view. */
+    var subtitleCues by mutableStateOf<List<Cue>>(emptyList())
+        private set
+
+    /** A short line on screen: what a subtitle press did, or that subtitles are being prepared. */
+    var notice by mutableStateOf<String?>(null)
+        private set
+
+    /** True for a converted stream whose file has picture subtitles, which only direct play can show. */
+    var pictureSubtitlesUnavailable by mutableStateOf(false)
+        private set
+
     val player: ExoPlayer
     private var session: PlaybackSession? = null
     private var reporter: PlaybackReporter? = null
@@ -110,6 +151,26 @@ class PlaybackController(
     private var autoHide: Job? = null
     private var countdown: Job? = null
     private var seekJob: Job? = null
+    private var noticeJob: Job? = null
+    private var subtitleJob: Job? = null
+    private var cueTicker: Job? = null
+
+    /** The item's details, for its show (subtitle choices carry across a show) and Up Next. */
+    private var details: Item? = null
+
+    /** Capabilities waiting while the viewer answers the resume question. */
+    private var pendingCapabilities: Capabilities? = null
+
+    /** Direct play: the opening subtitle choice has been made for the current file. */
+    private var subtitlesDecided = false
+
+    /** Converted: the WebVTT tracks, the one chosen, and its cues once loaded. */
+    private var converted: ConvertedSubtitles? = null
+    private var convertedChoice: SubtitleSource? = null
+    private var convertedCues: CueTimeline<Cue>? = null
+
+    /** Converted: the audio track asked for by stream index, from the audio language setting; null lets the server choose. */
+    private var convertedAudioIndex: Int? = null
 
     /** Direct play until a converted session replaces it in [play]. */
     private var timeline = directTimeline()
@@ -125,7 +186,17 @@ class PlaybackController(
         val http = OkHttpDataSource.Factory(graph.httpClient)
         val extractors = DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true)
         progressive = ProgressiveMediaSource.Factory(DefaultDataSource.Factory(activity, http), extractors)
-        val renderers = DefaultRenderersFactory(activity)
+        val passthrough = prefs.audio.passthrough
+        val renderers = object : DefaultRenderersFactory(activity) {
+            override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink? =
+                if (passthrough) {
+                    super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+                } else {
+                    // Settings > Audio > Passthrough off: an output with no context reports only
+                    // PCM, so every format is decoded here instead of sent on to a receiver.
+                    DefaultAudioSink.Builder(context).setAudioOutputProvider(AudioTrackAudioOutputProvider.Builder(null).build()).build()
+                }
+        }
             // Platform decoders and passthrough win; the bundled FFmpeg decodes what they cannot.
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
@@ -138,6 +209,14 @@ class PlaybackController(
             .setHandleAudioBecomingNoisy(true)
             .build()
         player.addListener(listener())
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().apply {
+            // Subtitles start off and the app turns on the one Settings call for once the
+            // file's tracks are known, so no forced or default track flashes up first.
+            setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            if (!prefs.audio.preferOriginal) {
+                Languages.preferred(listOf(prefs.audio.language), deviceLanguage).firstOrNull()?.let { setPreferredAudioLanguages(it) }
+            }
+        }.build()
     }
 
     /** Opens a session and starts playing. [startAtMs] overrides the saved position, for retries. */
@@ -146,20 +225,50 @@ class PlaybackController(
         phase = Phase.Starting
         activity.lifecycleScope.launch {
             try {
-                // Details are only for Up Next, so a failure here never blocks playback.
-                launch {
-                    nextEpisode = runCatching { graph.api.item(itemId) }.getOrNull()
-                        ?.takeIf { it.kind == "episode" }?.nextEpisode
-                }
-                val capabilities = withContext(Dispatchers.Default) { CapabilityProbe.probe(activity) }
-                val start = startAtMs ?: if (fromStart) 0L else null
-                val created = graph.api.startPlayback(PlaybackRequest(itemId, versionId, start, capabilities, extraId))
+                // Details give the show (for subtitle choices), Up Next and the saved position.
+                // A failure or a slow answer never blocks playback; the server still resumes.
+                val item = async { withTimeoutOrNull(DETAILS_TIMEOUT_MS) { runCatching { graph.api.item(itemId) }.getOrNull() } }
+                val probed = async(Dispatchers.Default) { CapabilityProbe.probe(activity) }
+                details = item.await()
+                nextEpisode = details?.takeIf { it.kind == "episode" }?.nextEpisode
+                val capabilities = CapabilityPolicy.apply(probed.await(), prefs)
                 if (released) return@launch
-                play(created)
+                val saved = details?.watch?.takeIf { !it.played }?.positionMs?.takeIf { it > 0 }
+                val start = startAtMs ?: when (PlaybackPolicy.start(request, prefs.playback.resume, saved)) {
+                    PlaybackPolicy.Start.Resume -> null
+                    PlaybackPolicy.Start.Beginning -> 0L
+                    PlaybackPolicy.Start.Ask -> {
+                        pendingCapabilities = capabilities
+                        phase = Phase.AskResume(saved ?: 0L)
+                        return@launch
+                    }
+                }
+                open(capabilities, start)
             } catch (e: ApiException) {
                 phase = phaseFor(e)
             }
         }
+    }
+
+    /** The viewer answered the resume question. */
+    fun answerResume(resume: Boolean) {
+        val ask = phase as? Phase.AskResume ?: return
+        val capabilities = pendingCapabilities ?: return
+        pendingCapabilities = null
+        phase = Phase.Starting
+        activity.lifecycleScope.launch {
+            try {
+                open(capabilities, if (resume) ask.positionMs else 0L)
+            } catch (e: ApiException) {
+                phase = phaseFor(e)
+            }
+        }
+    }
+
+    private suspend fun open(capabilities: Capabilities, startMs: Long?) {
+        val created = graph.api.startPlayback(PlaybackRequest(itemId, versionId, startMs, capabilities, extraId))
+        if (released) return
+        play(created)
     }
 
     fun retry() {
@@ -175,7 +284,25 @@ class PlaybackController(
         start(at)
     }
 
+    /** Clears subtitle state for a new file; the opening choice is made again from Settings and remembered choices. */
+    private fun resetSubtitles() {
+        subtitlesDecided = false
+        subtitlesOn = false
+        subtitleJob?.cancel()
+        cueTicker?.cancel()
+        converted = null
+        convertedChoice = null
+        convertedCues = null
+        subtitleCues = emptyList()
+        pictureSubtitlesUnavailable = false
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+    }
+
     private fun play(created: PlaybackSession) {
+        resetSubtitles()
         if (StreamKinds.isConverted(created)) {
             playConverted(created)
             return
@@ -187,6 +314,10 @@ class PlaybackController(
             phase = Phase.Failed("The server sent a stream address this app cannot use.", false)
             return
         }
+        // TODO(#41): once #41 lands, the session carries subtitle_offset_ms (the viewer's
+        // subtitle delay). Apply it to these side-loaded tracks and to embedded ones (for
+        // example by shifting the cues the player outputs), but never to the WebVTT URLs
+        // used for converted streams in ConvertedSubtitles: the server already shifts those.
         val subtitles = created.subtitles.mapNotNull { sub ->
             val url = graph.api.absoluteUrl(sub.url) ?: return@mapNotNull null
             MediaItem.SubtitleConfiguration.Builder(Uri.parse(url))
@@ -214,12 +345,17 @@ class PlaybackController(
     }
 
     /**
-     * A converted session: no side-loaded subtitles (their times are the file's, while
-     * each stream restarts at zero after a seek), and the first stream opens at
-     * the resume position the server keyframe-aligned. The phase stays Starting until
-     * the first stream is set on the player.
+     * A converted session: the first stream opens at the resume position the server
+     * keyframe-aligned. The phase stays Starting until the first stream is set on the
+     * player. Subtitles are not side-loaded (their times are the file's, while each
+     * stream restarts at zero after a seek); the app draws them itself in file time
+     * ([ConvertedSubtitles]). Picture subtitles cannot be drawn that way and need
+     * direct play.
      */
     private fun playConverted(created: PlaybackSession) {
+        converted = ConvertedSubtitles(graph.api, created.webVttSubtitles)
+        pictureSubtitlesUnavailable = created.version.subtitleTracks.any { it.isImageBased }
+        convertedAudioIndex = PlaybackPolicy.convertedAudioIndex(created.version.audioTracks, prefs.audio, deviceLanguage)
         timeline = StreamTimeline(
             converted = true,
             fileDurationMs = created.version.durationMs,
@@ -232,6 +368,9 @@ class PlaybackController(
         player.playWhenReady = true
         openConverted(created, created.resumePositionMs, seekFromMs = null)
         startReporting(created)
+        val audioLanguage = PlaybackPolicy.convertedAudioLanguage(created.version.audioTracks, convertedAudioIndex)
+        val chosen = SubtitlePicker.choose(prefs.subtitles, converted?.candidates.orEmpty(), audioLanguage, sticky(), deviceLanguage)
+        selectConverted(chosen?.let { converted?.source(it) })
     }
 
     /**
@@ -250,7 +389,7 @@ class PlaybackController(
             try {
                 val answer = graph.api.convertedStart(StreamKinds.seekPath(created), target)
                 if (released || !timeline.isCurrent(seek)) return@launch
-                val uri = graph.api.absoluteUrl(answer.url)
+                val uri = graph.api.absoluteUrl(StreamKinds.withAudio(answer.url, convertedAudioIndex))
                 if (uri == null) {
                     convertedFailed(Phase.Failed("The server sent a stream address this app cannot use.", false))
                     return@launch
@@ -316,6 +455,9 @@ class PlaybackController(
         ticker?.cancel()
         autoHide?.cancel()
         countdown?.cancel()
+        noticeJob?.cancel()
+        subtitleJob?.cancel()
+        cueTicker?.cancel()
         player.release()
     }
 
@@ -381,6 +523,16 @@ class PlaybackController(
             }
         }
 
+        override fun onTracksChanged(tracks: Tracks) {
+            if (timeline.converted || tracks.groups.isEmpty()) return
+            if (!subtitlesDecided) {
+                subtitlesDecided = true
+                val chosen = SubtitlePicker.choose(prefs.subtitles, directCandidates(tracks), directAudioLanguage(tracks), sticky(), deviceLanguage)
+                selectDirect(chosen)
+            }
+            subtitlesOn = tracks.groups.any { it.type == C.TRACK_TYPE_TEXT && it.isSelected }
+        }
+
         override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
             // A converted stream reports its seeks when the new stream opens, in file time.
             if (reason == Player.DISCONTINUITY_REASON_SEEK && !timeline.converted) reporter?.onSeek(old.positionMs, new.positionMs, duration())
@@ -406,8 +558,14 @@ class PlaybackController(
 
     private fun upNext(next: Item) {
         countdown?.cancel()
+        val seconds = PlaybackPolicy.countdownSeconds(prefs.playback)
+        if (seconds == null) {
+            // Auto-play off: the next episode waits for Play now.
+            phase = Phase.UpNext(next, null)
+            return
+        }
         countdown = activity.lifecycleScope.launch {
-            for (left in UP_NEXT_SECONDS downTo 1) {
+            for (left in seconds downTo 1) {
                 phase = Phase.UpNext(next, left)
                 delay(1_000)
             }
@@ -420,7 +578,7 @@ class PlaybackController(
         val next = (phase as? Phase.UpNext)?.next ?: return
         countdown?.cancel()
         val title = listOfNotNull(next.showTitle, episodeCode(next), next.title).joinToString("  ")
-        activity.startActivity(PlayerActivity.intent(activity, next.id, null, false, title))
+        activity.startActivity(PlayerActivity.intent(activity, next.id, null, StartRequest.Default, title))
         activity.finish()
     }
 
@@ -437,7 +595,8 @@ class PlaybackController(
 
     private fun scrub(direction: Int, repeatCount: Int) {
         val from = scrubTargetMs ?: shownPosition()
-        scrubTargetMs = SeekSteps.clamp(from + direction * SeekSteps.stepMs(repeatCount), duration())
+        val first = if (direction > 0) skipForwardMs else skipBackMs
+        scrubTargetMs = SeekSteps.clamp(from + direction * SeekSteps.stepMs(repeatCount, first), duration())
         positionMs = shownPosition()
         if (overlay == Overlay.Hidden) overlay = Overlay.Info
         autoHide?.cancel()
@@ -495,6 +654,13 @@ class PlaybackController(
         }
         if (phase != Phase.Playing) return false
         when (event.keyCode) {
+            // The remote's captions or menu key: one press turns subtitles on or off.
+            KeyEvent.KEYCODE_CAPTIONS, KeyEvent.KEYCODE_MENU -> {
+                if (down && event.repeatCount == 0 && dialog == null) toggleSubtitles()
+                return true
+            }
+        }
+        when (event.keyCode) {
             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND -> {
                 val direction = if (event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) 1 else -1
                 if (down) scrub(direction, event.repeatCount) else if (up) commitScrub()
@@ -539,38 +705,191 @@ class PlaybackController(
     }
 
     fun trackOptions(kind: TrackKind): List<TrackOption> {
-        val type = if (kind == TrackKind.Audio) C.TRACK_TYPE_AUDIO else C.TRACK_TYPE_TEXT
-        val groups = player.currentTracks.groups.filter { it.type == type }
-        val options = groups.flatMap { group ->
+        if (kind == TrackKind.Subtitles) return subtitleOptions()
+        val groups = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        return groups.flatMap { group ->
             (0 until group.length).map { index ->
                 val format = group.getTrackFormat(index)
                 TrackOption(
                     label = TrackLabels.label(format, index),
                     selected = group.isTrackSelected(index),
                     supported = group.isTrackSupported(index),
-                    apply = { select(group, index, type) },
+                    apply = { selectAudio(group, index) },
                 )
             }
         }
-        if (kind == TrackKind.Audio) return options
-        val off = TrackOption("Off", selected = options.none { it.selected }, supported = true) {
-            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                .build()
+    }
+
+    /** Off, then every subtitle track; picking one is remembered for this title and its show. */
+    private fun subtitleOptions(): List<TrackOption> {
+        val subs = converted
+        val options = if (subs != null) {
+            subs.sources.map { source ->
+                val candidate = subs.candidates.first { it.id == source.trackId.toString() }
+                TrackOption(subs.label(source), selected = convertedChoice?.trackId == source.trackId, supported = true) {
+                    chooseSubtitle(candidate)
+                }
+            }
+        } else {
+            val tracks = player.currentTracks
+            directCandidates(tracks).zip(directTracks(tracks)).map { (candidate, track) ->
+                TrackOption(
+                    label = TrackLabels.label(track.group.getTrackFormat(track.index), track.index),
+                    selected = track.group.isTrackSelected(track.index),
+                    supported = candidate.supported,
+                ) { chooseSubtitle(candidate) }
+            }
         }
+        val off = TrackOption("Off", selected = !subtitlesOn, supported = true) { chooseSubtitle(null) }
         return listOf(off) + options
     }
 
-    private fun select(group: Tracks.Group, index: Int, type: Int) {
+    /**
+     * One press of the subtitle toggle: off when a track shows, otherwise the best
+     * track for the viewer's languages. Remembered like a pick from the list.
+     */
+    fun toggleSubtitles() {
+        if (subtitlesOn || convertedChoice != null) {
+            chooseSubtitle(null)
+            say("Subtitles off")
+            return
+        }
+        val candidates = converted?.candidates ?: directCandidates(player.currentTracks)
+        val chosen = SubtitlePicker.forToggleOn(prefs.subtitles, candidates, deviceLanguage)
+        if (chosen == null) {
+            say(if (pictureSubtitlesUnavailable) PICTURE_SUBTITLES_NOTE else "This title has no subtitles")
+            return
+        }
+        chooseSubtitle(chosen)
+        say("Subtitles on: ${subtitleLabel(chosen)}")
+    }
+
+    /** The viewer chose [candidate] (null: off). Applies it and remembers it for this title and its show. */
+    private fun chooseSubtitle(candidate: SubtitleCandidate?) {
+        graph.preferences.rememberSubtitle(itemId, details?.showId, SubtitlePicker.sticky(candidate))
+        val subs = converted
+        if (subs != null) selectConverted(candidate?.let { subs.source(it) }) else selectDirect(candidate)
+    }
+
+    private fun sticky(): StickyChoice? = graph.preferences.stickySubtitle(itemId, details?.showId)
+
+    private fun subtitleLabel(candidate: SubtitleCandidate): String {
+        converted?.let { subs -> subs.source(candidate)?.let { return subs.label(it) } }
+        val track = directTracks(player.currentTracks).getOrNull(directCandidates(player.currentTracks).indexOf(candidate))
+        return track?.let { TrackLabels.label(it.group.getTrackFormat(it.index), it.index) } ?: "on"
+    }
+
+    private class DirectTrack(val group: Tracks.Group, val index: Int)
+
+    private fun directTracks(tracks: Tracks): List<DirectTrack> =
+        tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.flatMap { group -> (0 until group.length).map { DirectTrack(group, it) } }
+
+    /** The file's text and picture subtitle tracks as the picker sees them, in the same order as [directTracks]. */
+    private fun directCandidates(tracks: Tracks): List<SubtitleCandidate> =
+        directTracks(tracks).mapIndexed { i, track ->
+            val format = track.group.getTrackFormat(track.index)
+            SubtitleCandidate(
+                id = "direct:$i",
+                language = format.language,
+                forced = (format.selectionFlags and C.SELECTION_FLAG_FORCED) != 0,
+                isDefault = (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0,
+                label = format.label,
+                supported = track.group.isTrackSupported(track.index),
+            )
+        }
+
+    /** The language of the audio playing, or of the first audio track while none is selected yet. */
+    private fun directAudioLanguage(tracks: Tracks): String? {
+        val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        audio.forEach { group -> (0 until group.length).firstOrNull { group.isTrackSelected(it) }?.let { return group.getTrackFormat(it).language } }
+        return audio.firstOrNull()?.takeIf { it.length > 0 }?.getTrackFormat(0)?.language
+    }
+
+    private fun selectDirect(candidate: SubtitleCandidate?) {
+        val tracks = player.currentTracks
+        val track = candidate?.let { directTracks(tracks).getOrNull(directCandidates(tracks).indexOfFirst { c -> c.id == it.id }) }
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().apply {
+            if (track == null) {
+                clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            } else {
+                setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                setOverrideForType(TrackSelectionOverride(track.group.mediaTrackGroup, track.index))
+            }
+        }.build()
+        subtitlesOn = track != null
+    }
+
+    /** Converted: loads [source]'s cues (or clears them) and draws them in file time. */
+    private fun selectConverted(source: SubtitleSource?) {
+        val subs = converted ?: return
+        subtitleJob?.cancel()
+        cueTicker?.cancel()
+        convertedChoice = source
+        convertedCues = null
+        subtitleCues = emptyList()
+        subtitlesOn = source != null
+        if (source == null) return
+        subtitleJob = activity.lifecycleScope.launch {
+            try {
+                val cues = subs.load(source) { status -> showNotice(status, NOTICE_MS * 4) }
+                if (convertedChoice != source) return@launch
+                convertedCues = cues
+                if (notice?.startsWith("Preparing subtitles") == true) notice = null
+                startCueTicker(cues)
+            } catch (e: ApiException) {
+                if (convertedChoice != source) return@launch
+                convertedChoice = null
+                subtitlesOn = false
+                say("Subtitles could not be loaded: ${e.message.orEmpty()}")
+            }
+        }
+    }
+
+    /**
+     * Draws the cues showing at the file position: start plus player time, so they
+     * are right after every seek. Wakes at the next cue change, at most every 250 ms
+     * so a seek or pause is picked up promptly.
+     */
+    private fun startCueTicker(cues: CueTimeline<Cue>) {
+        cueTicker?.cancel()
+        cueTicker = activity.lifecycleScope.launch {
+            while (isActive) {
+                if (reloading || phase != Phase.Playing) {
+                    if (subtitleCues.isNotEmpty()) subtitleCues = emptyList()
+                    delay(100)
+                    continue
+                }
+                val at = position()
+                val showing = cues.at(at)
+                if (showing != subtitleCues) subtitleCues = showing
+                delay(CueTimeline.waitMs(at, cues.nextChangeAfter(at)))
+            }
+        }
+    }
+
+    private fun say(message: String) = showNotice(message, NOTICE_MS)
+
+    private fun showNotice(message: String, forMs: Long) {
+        notice = message
+        noticeJob?.cancel()
+        noticeJob = activity.lifecycleScope.launch {
+            delay(forMs)
+            notice = null
+        }
+    }
+
+    private fun selectAudio(group: Tracks.Group, index: Int) {
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setTrackTypeDisabled(type, false)
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
             .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index))
             .build()
     }
 
     private companion object {
-        const val UP_NEXT_SECONDS = 10
+        const val DETAILS_TIMEOUT_MS = 4_000L
+        const val NOTICE_MS = 3_000L
+        const val PICTURE_SUBTITLES_NOTE = "Picture subtitles (PGS, VobSub) show only when the file plays directly"
         const val INFO_MS = 3_000L
         const val CONTROLS_MS = 6_000L
     }

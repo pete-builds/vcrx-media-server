@@ -266,6 +266,8 @@ data class SubtitleSource(
     val language: String? = null,
     val title: String? = null,
     @SerialName("is_forced") val isForced: Boolean = false,
+    /** A track inside the media file; its WebVTT copy may answer 202 while the server reads it out. */
+    val embedded: Boolean = false,
 )
 
 @Serializable
@@ -293,6 +295,11 @@ data class PlaybackSession(
     val version: Version,
     val stream: StreamInfo,
     val subtitles: List<SubtitleSource> = emptyList(),
+    /**
+     * Every text track, sidecar or embedded, as WebVTT. A converted stream carries no
+     * subtitles of its own, so the app shows these itself, timed to the file.
+     */
+    @SerialName("webvtt_subtitles") val webVttSubtitles: List<SubtitleSource> = emptyList(),
     @SerialName("resume_position_ms") val resumePositionMs: Long = 0,
     @SerialName("heartbeat_interval_ms") val heartbeatIntervalMs: Long = 10_000,
 )

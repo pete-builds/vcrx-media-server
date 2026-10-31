@@ -3,6 +3,7 @@ import { h, icon, runtime, clock, size, bitrate, episodeCode, toast, fadeImg, pl
 import { go, state } from "../app.js";
 import { versionTools } from "./versions.js";
 import { extraActions, extrasSection } from "./extras.js";
+import { downloadedSubtitles } from "./subtitle-admin.js";
 
 // The details page for a movie, show, season or episode.
 export async function itemView({ match, params }) {
@@ -16,8 +17,9 @@ export async function itemView({ match, params }) {
   ]);
   const admin = isAdmin && (item.kind === "movie" || item.kind === "show");
   const fix = admin ? fixMatch(item, params && params.get("fix") === "1") : null;
+  const subs = playable && state.me && state.me.is_admin ? downloadedSubtitles(item) : null;
   const tools = admin && item.kind === "movie" ? versionTools(item) : null;
-  const el = h("div", {}, hero(item), fix, tools, extrasSection(item), castSection(item), playable ? techFacts(item) : null, children ? childrenSection(item, children.items || []) : null,
+  const el = h("div", {}, hero(item), fix, tools, extrasSection(item), castSection(item), playable ? techFacts(item) : null, subs, children ? childrenSection(item, children.items || []) : null,
     history ? historySection(item, history) : null);
   return { el, title: item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)}`.trim() : item.title, hero: true };
 }
@@ -180,7 +182,7 @@ function versionLabel(v) {
 }
 
 function trackName(t) {
-  const parts = [t.title, t.language ? t.language.toUpperCase() : "", t.codec, t.channels ? `${t.channels} ch` : "", t.is_forced ? "forced" : "", t.is_external ? "file" : ""];
+  const parts = [t.title, t.language ? t.language.toUpperCase() : "", t.codec, t.channels ? `${t.channels} ch` : "", t.is_forced ? "forced" : "", t.is_downloaded ? "downloaded" : t.is_external ? "file" : ""];
   return parts.filter(Boolean).join(" · ");
 }
 

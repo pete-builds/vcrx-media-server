@@ -133,6 +133,9 @@ YAML
 
 export VCRX_CONFIG_DIR="$dir/config" VCRX_CACHE_DIR="$dir/cache" VCRX_MEDIA_ROOTS="$media"
 export VCRX_BIND=127.0.0.1 VCRX_PORT="$port" VCRX_LOG_FORMAT="${VCRX_LOG_FORMAT:-text}"
+# Subtitle search answers from an offline stub with invented results, so
+# neither this script nor CI ever calls OpenSubtitles. 0 turns search off.
+export VCRX_OPENSUBTITLES_STUB="${VCRX_OPENSUBTITLES_STUB:-1}"
 # Serve the web app from the source tree, so an edit shows on reload.
 export VCRX_WEB_DIR="$repo/server/web/static"
 cd "$repo/server"

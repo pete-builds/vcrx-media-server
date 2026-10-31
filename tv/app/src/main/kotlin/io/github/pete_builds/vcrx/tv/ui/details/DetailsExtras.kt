@@ -66,7 +66,7 @@ fun TrailerButton(item: Item) {
     val context = LocalContext.current
     val actions = LocalAppActions.current
     // The server sends a YouTube trailer only when it offers them.
-    val source = trailerSource(TrailerSettings.chosen(context.graph), serverOffersYouTube = item.trailer?.source == "youtube")
+    val source = trailerSource(TrailerSettings.chosen(context.graph.preferences.current), serverOffersYouTube = item.trailer?.source == "youtube")
     val trailer = offeredTrailer(item.trailer, source) ?: return
     var problem by remember { mutableStateOf<String?>(null) }
     BrandButton("Trailer", onClick = {
@@ -133,7 +133,7 @@ private const val THEME_VOLUME = 0.25f
 
 /**
  * A show's theme.mp3, played once and quietly while its details screen is in
- * front, when the theme music setting is on (the default). It pauses whenever
+ * front, when Settings > Playback > Theme music is on (the default). It pauses whenever
  * the screen does, for the player or the YouTube app, and stops for good when
  * the screen goes.
  */
@@ -143,7 +143,7 @@ fun ThemeMusic(item: Item) {
     val context = LocalContext.current
     val graph = context.graph
     val theme = item.themeMusic ?: return
-    if (!graph.settings.themeMusic) return
+    if (!graph.preferences.current.themeMusic) return
     val url = remember(theme.url) { graph.api.absoluteUrl(theme.url) } ?: return
     val player = remember(url) {
         ExoPlayer.Builder(context)

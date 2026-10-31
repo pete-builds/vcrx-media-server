@@ -587,3 +587,27 @@ kbd {
 .yt-title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .yt-frame { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); overflow: hidden; }
 .yt-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* Subtitles: timing control and search in the player, downloads on item pages. */
+.sub-timing { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sub-timing .pc-btn { padding: 4px 10px; }
+.sub-timing-label { color: var(--muted); font-size: 13px; }
+.sub-timing-value { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; font-size: 14px; }
+.player .sub-search { position: absolute; z-index: 4; top: 64px; right: 20px; width: min(560px, calc(100% - 24px)); max-height: calc(100% - 96px); overflow-y: auto; }
+.sub-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.sub-head h3 { margin: 0; }
+.sub-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+.sub-form input[name="languages"] { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 10px; width: 120px; }
+.sub-result, .sub-admin-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.sub-result-main { min-width: 0; }
+.sub-release { overflow-wrap: anywhere; }
+.sub-badges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; font-size: 13px; }
+.sub-badge-match { color: var(--good); border-color: var(--good); }
+.sub-admin-list { max-width: 900px; }
+@media (max-width: 720px) {
+  /* On a phone the timing control takes its own row rather than run off the screen. */
+  .player .top { flex-wrap: wrap; row-gap: 8px; }
+  .player .top .sub-timing { order: 10; flex: 1 0 100%; justify-content: flex-end; }
+  .sub-timing-label { display: none; }
+  .player .sub-search { right: 12px; top: 56px; }
+}

@@ -244,9 +244,12 @@ func TestHLSBoundsDisk(t *testing.T) {
 		defer h.mu.Unlock()
 		return h.jobs[sessA].paused
 	}
+	// Each wait returns as soon as its condition holds, so the limit only
+	// decides when to give up. 6 s was not enough for ffmpeg to write four
+	// segments on a machine running several builds at once.
 	wait := func(what string, cond func() bool) {
 		t.Helper()
-		for i := 0; i < 300; i++ {
+		for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); {
 			h.tick()
 			if cond() {
 				return
