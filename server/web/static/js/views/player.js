@@ -92,8 +92,10 @@ export async function playerView({ match, params }) {
     }
   });
 
-  // Converted streams: start or restart at a position.
+  // Converted streams: start or restart at a position, on the chosen audio
+  // track (null lets the server pick one the browser decodes).
   let loadSeq = 0;
+  let audioIndex = null;
   async function loadAt(ms) {
     const seq = ++loadSeq;
     showStatus("Loading");
@@ -101,7 +103,7 @@ export async function playerView({ match, params }) {
     const at = await api(`/playback/sessions/${session.session_id}/seek?position_ms=${target}`);
     if (seq !== loadSeq) return;
     offsetMs = at.start_ms;
-    video.src = at.url;
+    video.src = audioIndex === null ? at.url : `${at.url}&audio=${audioIndex}`;
     applyCues();
     video.play().catch(() => {});
   }
@@ -162,7 +164,21 @@ export async function playerView({ match, params }) {
     }
   };
 
-  shell.append(video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title),
+  // A browser plays only a file's default audio track, so other languages are
+  // reachable only through a converted stream, which picks the track itself.
+  const tracks = (session.version.audio_tracks || []).filter((t) => t.index !== null && t.index !== undefined);
+  let audioSel = null;
+  if (converted && tracks.length > 1) {
+    audioSel = h("select", { "aria-label": "Audio" },
+      h("option", { value: "" }, "Audio: automatic"),
+      tracks.map((t) => h("option", { value: String(t.index) }, audioLabel(t))));
+    audioSel.addEventListener("change", () => {
+      audioIndex = audioSel.value === "" ? null : Number(audioSel.value);
+      loadAt(pos()).catch((e) => toast(e.message));
+    });
+  }
+
+  shell.append(video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title), audioSel,
     converted ? h("span", { class: "pill", title: session.reason }, session.decision === "audio_transcode" ? "Audio converted" : "Repackaged") : null,
     subSel), controls, status, overlay);
 
@@ -289,6 +305,11 @@ export async function playerView({ match, params }) {
 function subLabel(t) {
   const lang = t.language ? languageName(t.language) : "Unknown";
   return [t.title || lang, t.is_forced ? "(forced)" : "", t.embedded ? "" : "(file)"].filter(Boolean).join(" ");
+}
+
+function audioLabel(t) {
+  const ch = t.channels ? (t.channels >= 6 ? `${t.channels - 1}.1` : t.channels === 2 ? "stereo" : `${t.channels} ch`) : "";
+  return [t.title || (t.language ? languageName(t.language) : "Unknown"), (t.codec || "").toUpperCase(), ch].filter(Boolean).join(" · ");
 }
 
 function languageName(code) {

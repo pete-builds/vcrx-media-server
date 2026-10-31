@@ -64,6 +64,18 @@ if [ ! -f "$river" ]; then
   rm -f "$dir/r.srt"
 fi
 
+# Two AC-3 audio tracks (English at 550 Hz, German at 880 Hz): a browser plays
+# only the default one, so the player's Audio menu switches through a
+# converted stream.
+twin="$media/Movies/Twin Rivers (2018)/Twin Rivers (2018).mkv"
+if [ ! -f "$twin" ]; then
+  mkdir -p "$(dirname "$twin")"
+  ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=1280x720:rate=24:duration=60" \
+    -f lavfi -i "sine=frequency=550:duration=60" -f lavfi -i "sine=frequency=880:duration=60" \
+    -map 0 -map 1 -map 2 -c:v libx264 -g 48 -sc_threshold 0 -pix_fmt yuv420p -c:a ac3 -ac 2 \
+    -metadata:s:a:0 language=eng -metadata:s:a:1 language=ger "$twin"
+fi
+
 # NFO ratings let the poster overlays show without network access.
 nfo() { # dir file rating votes
   [ -f "$1/$2" ] && return
