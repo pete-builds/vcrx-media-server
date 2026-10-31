@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -72,6 +73,11 @@ Usage:
                                        re-checks items already done
   vcrx metadata status                 matched and unmatched counts, and why each
                                        unmatched title was skipped
+  vcrx watch export [-library NAME] [-unplayed-days N]
+                                       every movie and show with its files, size and
+                                       who watched it when, one JSON object per line;
+                                       -unplayed-days keeps titles nobody played in
+                                       N days, never-played ones included
 
 Settings come from VCRX_* environment variables and /config/vcrx.yaml; see
 deploy/.env.example.
@@ -99,6 +105,8 @@ func main() {
 		err = libraryCmd(args)
 	case "metadata":
 		err = metadataCmd(args)
+	case "watch":
+		err = watchCmd(args)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
@@ -286,7 +294,7 @@ func serve() error {
 	if cfg.ScanOnStartup {
 		go scans.Schedule(ctx)
 	}
-	go housekeeping(ctx, log, pb, authStore)
+	go housekeeping(ctx, log, pb, authStore, a.db, cfg.BackupDir())
 	if cfg.TMDbAPIKey != "" {
 		enr := newEnricher(a)
 		enr.Busy = scans.Running
@@ -379,7 +387,10 @@ func rootStates(ctx context.Context, adm *admin.Admin) (map[string]string, error
 	return out, nil
 }
 
-func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, as *auth.Store) {
+// nightlyBackups is how many daily database snapshots are kept in /config/backups.
+const nightlyBackups = 7
+
+func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, as *auth.Store, conn *sql.DB, backupDir string) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for i := 0; ; i++ {
@@ -393,12 +404,30 @@ func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, a
 				log.Warn("purge expired sessions", "err", err)
 			}
 		}
+		// Ten minutes after start, then daily: a consistent snapshot of the
+		// database (watch history, resume points, matches), keeping a week.
+		if i%1440 == 10 {
+			nightlyBackup(ctx, log, conn, backupDir)
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
 	}
+}
+
+func nightlyBackup(ctx context.Context, log *slog.Logger, conn *sql.DB, dir string) {
+	path, err := db.Backup(ctx, conn, dir, "nightly")
+	if err != nil {
+		log.Warn("nightly database backup failed", "err", err)
+		return
+	}
+	removed, err := db.Prune(dir, "nightly", nightlyBackups)
+	if err != nil {
+		log.Warn("pruning old database backups failed", "err", err)
+	}
+	log.Info("database backed up", "path", path, "pruned", removed)
 }
 
 func readPassword(prompt string) (string, error) {
@@ -605,6 +634,54 @@ func libraryCmd(args []string) error {
 		return fmt.Errorf("library: unknown command %q", sub)
 	}
 	return nil
+}
+
+func watchCmd(args []string) error {
+	if len(args) == 0 || args[0] != "export" {
+		return errors.New("watch: want export")
+	}
+	fs := flag.NewFlagSet("watch export", flag.ContinueOnError)
+	name := fs.String("library", "", "only this library")
+	days := fs.Int("unplayed-days", 0, "only titles nobody played in this many days, never-played ones included")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *days < 0 {
+		return errors.New("watch export: -unplayed-days must be 0 or more")
+	}
+	ctx := context.Background()
+	a, err := open(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.db.Close() }()
+	return watchExport(ctx, a.db, os.Stdout, *name, *days)
+}
+
+// watchExport writes the watch state export as JSON lines, the same rows as
+// GET /api/v1/admin/watch/export.
+func watchExport(ctx context.Context, conn *sql.DB, out io.Writer, library string, unplayedDays int) error {
+	f := activity.ExportFilter{UnplayedDays: unplayedDays}
+	if library != "" {
+		libs, err := (&admin.Admin{DB: conn}).Libraries(ctx)
+		if err != nil {
+			return err
+		}
+		for _, l := range libs {
+			if strings.EqualFold(l.Name, library) {
+				f.LibraryID = l.ID
+			}
+		}
+		if f.LibraryID == 0 {
+			return fmt.Errorf("no library named %q", library)
+		}
+	}
+	bw := bufio.NewWriter(out)
+	enc := json.NewEncoder(bw)
+	if err := (&activity.Service{DB: conn}).WatchExport(ctx, f, func(t activity.TitleWatch) error { return enc.Encode(t) }); err != nil {
+		return err
+	}
+	return bw.Flush()
 }
 
 func newEnricher(a *app) *enrich.Enricher {
