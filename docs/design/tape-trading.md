@@ -278,3 +278,17 @@ What the design does about it: VCRX never touches DRM or any copy protection; do
 5. **Revoked copies:** delete from friends' trade stores after how long? Suggested: 7 days, with a notice to that server's admin.
 6. **Legal read:** will you get a lawyer's opinion before any replication code merges?
 7. **Audio:** basis 1 mostly covers audio, and VCRX has no music library. Is audio in scope, or does basis 1 stay video only and therefore rare?
+
+## 8. Recommended answers (b3 recommendation, Pete to confirm)
+
+The product session's recommendations on the questions above, 2026-10-31. Questions 3 and 6 are Pete's call; the rest stand until he says otherwise.
+
+1. **References only in v1.** Each server downloads from the trusted source itself; no peer-to-peer copying. Peer copying is phase 2 at best, and only after question 6 is settled.
+2. **Trusted sources in v1:** archive.org (the Live Music Archive and etree-linked collections) and Wikimedia Commons, nothing else. Adding a host is a code change plus a review, never a config entry.
+3. **"My own recording": deferred, needs Pete.** It cannot be proven (section 1.3), which is the reason not to build it now.
+4. **No peer cap needed with references only.** Instead, downloads from archive.org are rate limited politely, following its published limits, one download at a time per server, with a queue admins can see.
+5. **Revocation:** stop serving at once, and delete local copies within 24 hours, logged in Activity.
+6. **A lawyer's opinion is required before any peer-to-peer copying,** so not for references only. Pete's call.
+7. **Audio is in scope, and is the main event:** taper-friendly live music is where legal trading lives. It is gated on the music library, so tape trading is sequenced after the music library lands.
+
+The per-file checksum gate that fails closed (section 4) stays exactly as designed.
