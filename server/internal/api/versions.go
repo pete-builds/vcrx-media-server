@@ -17,6 +17,9 @@ func (s *Server) regroupError(w http.ResponseWriter, r *http.Request, err error)
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error()+".")
 	case errors.Is(err, library.ErrOnlyVersion):
 		writeError(w, http.StatusUnprocessableEntity, "only_version", "This is the movie's only version, so there is nothing to split it from.")
+	case errors.Is(err, library.ErrAccessDiffers):
+		// The message names the movie and the difference, and holds no path.
+		writeError(w, http.StatusUnprocessableEntity, "access_differs", err.Error()+".")
 	case errors.Is(err, library.ErrScanRunning):
 		writeError(w, http.StatusConflict, "scan_running", "This library is being scanned. Try again when the scan finishes.")
 	default:

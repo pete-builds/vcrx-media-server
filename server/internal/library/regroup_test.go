@@ -100,15 +100,19 @@ func TestTMDbMergeFoldsCopiesAndSticks(t *testing.T) {
 	e.exec(`INSERT INTO playback_sessions (id, user_id, item_id, version_id, decision, decision_reason, started_at, last_event_at)
 		VALUES ('s1', ?, ?, ?, 'direct_play', 'test', 1, 1)`, pete, b, vb)
 	hidden := e.exec(`INSERT INTO labels (name) VALUES ('Hidden From Kids')`)
-	e.exec(`INSERT INTO item_labels (item_id, label_id) VALUES (?, ?)`, b, hidden)
+	// Both copies carry the label (only copies that agree are merged); a
+	// collection stamp on one copy does not count against the merge.
+	e.exec(`INSERT INTO item_labels (item_id, label_id, source) VALUES (?, ?, 'nfo'), (?, ?, 'manual')`, a, hidden, b, hidden)
+	stamp := e.exec(`INSERT INTO labels (name) VALUES ('Stamped')`)
+	e.exec(`INSERT INTO item_labels (item_id, label_id, source) VALUES (?, ?, 'collection')`, b, stamp)
 	e.exec(`INSERT INTO item_ratings (item_id, source, value) VALUES (?, 'tmdb', 7.1)`, a)
 	e.exec(`INSERT INTO item_ratings (item_id, source, value) VALUES (?, 'tmdb', 6.0), (?, 'user', 9)`, b, b)
 	coll := e.exec(`INSERT INTO collections (library_id, slug, name, sort_title, source, updated_at) VALUES (?, 'vale', 'Vale', 'Vale', 'auto', 0)`, e.lib.ID)
 	e.exec(`INSERT INTO collection_items (collection_id, item_id, position) VALUES (?, ?, 1)`, coll, b)
 
-	n, err := MergeByTMDb(context.Background(), e.db, 0)
-	if err != nil || n != 1 {
-		t.Fatalf("MergeByTMDb = %d, %v; want 1 merged", n, err)
+	rep, err := MergeByTMDb(context.Background(), e.db, 0)
+	if err != nil || rep.Merged != 1 {
+		t.Fatalf("MergeByTMDb = %+v, %v; want 1 merged", rep, err)
 	}
 	if got := e.strs(`SELECT id FROM items WHERE kind = 'movie'`); len(got) != 1 || got[0] != ids[0] {
 		t.Fatalf("movies after merge = %q, want only the oldest, %s", got, ids[0])
@@ -134,8 +138,10 @@ func TestTMDbMergeFoldsCopiesAndSticks(t *testing.T) {
 	if got := e.id(`SELECT item_id FROM playback_sessions WHERE id = 's1'`); got != a {
 		t.Fatalf("history points at %d, want %d", got, a)
 	}
-	if n := e.count(`SELECT COUNT(*) FROM item_labels WHERE item_id = ? AND label_id = ?`, a, hidden); n != 1 {
-		t.Fatal("a label hiding one copy must hide the merged movie")
+	// The shared label is now held by hand, so a rewrite of the survivor's NFO
+	// cannot drop it; the stamp comes along as a stamp, for its rule to judge.
+	if got := e.strs(`SELECT l.name || ':' || il.source FROM item_labels il JOIN labels l ON l.id = il.label_id WHERE il.item_id = ? ORDER BY l.name`, a); !slices.Equal(got, []string{"Hidden From Kids:manual", "Stamped:collection"}) {
+		t.Fatalf("labels on the merged movie = %q", got)
 	}
 	if got := e.strs(`SELECT source || '=' || value FROM item_ratings WHERE item_id = ? ORDER BY source`, a); !slices.Equal(got, []string{"tmdb=7.1", "user=9.0"}) {
 		t.Fatalf("ratings = %q: the survivor keeps its own, gains what it lacked", got)
@@ -233,8 +239,8 @@ func TestSplitSticksThroughRescanAndEnrichment(t *testing.T) {
 	if st, err := enr.Drain(ctx); err != nil || st.Matched != 2 {
 		t.Fatalf("re-enrich: %+v %v", st, err)
 	}
-	if n, err := MergeByTMDb(ctx, e.db, 0); err != nil || n != 0 {
-		t.Fatalf("MergeByTMDb after a split = %d, %v; want 0", n, err)
+	if rep, err := MergeByTMDb(ctx, e.db, 0); err != nil || rep.Merged != 0 {
+		t.Fatalf("MergeByTMDb after a split = %+v, %v; want 0", rep, err)
 	}
 	check("after re-enrichment")
 	e.scan(Options{})
@@ -336,8 +342,8 @@ func TestMergeAndSplitRefuse(t *testing.T) {
 		t.Errorf("merge during a scan: %v", err)
 	}
 	e.exec(`UPDATE items SET tmdb_id = 501 WHERE id IN (?, ?)`, a, b)
-	if n, err := MergeByTMDb(ctx, e.db, 0); n != 0 || err != nil {
-		t.Errorf("automatic merge during a scan = %d, %v; want it skipped", n, err)
+	if rep, err := MergeByTMDb(ctx, e.db, 0); rep.Merged != 0 || err != nil {
+		t.Errorf("automatic merge during a scan = %+v, %v; want it skipped", rep, err)
 	}
 	e.exec(`UPDATE items SET tmdb_id = NULL WHERE id IN (?, ?)`, a, b)
 	if after := e.everything(); after != before {
@@ -389,5 +395,87 @@ func TestScanMergesCopiesWithOneNFOId(t *testing.T) {
 	}
 	if n := e.count(`SELECT COUNT(*) FROM media_versions v JOIN items i ON i.id = v.item_id WHERE i.kind = 'movie'`); n != 2 {
 		t.Fatalf("versions = %d", n)
+	}
+}
+
+const (
+	nfo2160 = "Quorra.Vale.2011.2160p.UHD.BluRay.x265-VCRXTEST/Quorra.Vale.2011.2160p.UHD.BluRay.x265-VCRXTEST.nfo"
+	nfo1080 = "Quorra.Vale.2011.1080p.BluRay.x264-VCRXTEST/Quorra.Vale.2011.1080p.BluRay.x264-VCRXTEST.nfo"
+)
+
+func movieNFODoc(rating string, tags ...string) string {
+	doc := `<movie><title>Quorra Vale</title><year>2011</year><tmdbid>501</tmdbid><mpaa>` + rating + `</mpaa>`
+	for _, t := range tags {
+		doc += `<tag>` + t + `</tag>`
+	}
+	return doc + `</movie>`
+}
+
+// Access rules judge a movie by its content rating and labels, so copies that
+// differ in either are never merged: merged, the stricter copy's files would
+// be judged by the milder copy's rating. Once merged, a label both copies
+// carry survives a rewrite of the survivor's NFO.
+func TestMergeKeepsDifferentAccessApart(t *testing.T) {
+	files := map[string]string{}
+	for k, v := range twoReleases {
+		files[k] = v
+	}
+	files[nfo1080] = movieNFODoc("PG-13")
+	files[nfo2160] = movieNFODoc("NC-17")
+	e := newEnv(t, KindMovie, "folder", files)
+	ctx := context.Background()
+	movies := func() int { return e.count(`SELECT COUNT(*) FROM items WHERE kind = 'movie'`) }
+
+	e.scan(Options{})
+	if n := movies(); n != 2 {
+		t.Fatalf("copies rated PG-13 and NC-17 were merged: %d movies", n)
+	}
+	rep, err := MergeByTMDb(ctx, e.db, 0)
+	if err != nil || rep.Merged != 0 || len(rep.Apart) != 1 || !strings.Contains(rep.Apart[0], "content rating NC-17 against PG-13") && !strings.Contains(rep.Apart[0], "content rating PG-13 against NC-17") {
+		t.Fatalf("automatic merge of differently rated copies: %+v, %v", rep, err)
+	}
+	a := e.id(`SELECT MIN(id) FROM items WHERE kind = 'movie'`)
+	b := e.id(`SELECT MAX(id) FROM items WHERE kind = 'movie'`)
+	if err := Merge(ctx, e.db, a, []int64{b}); !errors.Is(err, ErrAccessDiffers) {
+		t.Fatalf("merge by hand of differently rated copies: %v", err)
+	}
+
+	// Same rating, but only one copy carries a label someone may be denied.
+	e.write(map[string]string{nfo1080: movieNFODoc("PG-13"), nfo2160: movieNFODoc("PG-13", "adult")})
+	e.scan(Options{})
+	if n := movies(); n != 2 {
+		t.Fatalf("copies with different labels were merged: %d movies", n)
+	}
+	if err := Merge(ctx, e.db, a, []int64{b}); !errors.Is(err, ErrAccessDiffers) || !strings.Contains(err.Error(), "labels") {
+		t.Fatalf("merge by hand of differently labelled copies: %v", err)
+	}
+
+	// Once both agree, the scan merges them.
+	e.write(map[string]string{nfo1080: movieNFODoc("PG-13", "adult")})
+	e.scan(Options{})
+	if n := movies(); n != 1 {
+		t.Fatalf("copies that agree stayed apart: %d movies", n)
+	}
+	survivor := e.id(`SELECT id FROM items WHERE kind = 'movie'`)
+	adult := func() string {
+		return e.str(`SELECT IFNULL(MAX(il.source), '') FROM item_labels il JOIN labels l ON l.id = il.label_id WHERE il.item_id = ? AND l.name = 'adult'`, survivor)
+	}
+	if got := adult(); got != "manual" {
+		t.Fatalf("the shared label after the merge: %q", got)
+	}
+	// Radarr rewrites the survivor's NFO without the tag. The other copy's
+	// file still declares it, so the merged movie keeps it.
+	own := nfo1080
+	if strings.HasSuffix(e.str(`SELECT json_extract(extra, '$.nfo_path') FROM items WHERE id = ?`, survivor), filepath.FromSlash(nfo2160)) {
+		own = nfo2160
+	}
+	e.write(map[string]string{own: movieNFODoc("PG-13", "remastered")})
+	e.scan(Options{})
+	if n := e.count(`SELECT COUNT(*) FROM item_labels il JOIN labels l ON l.id = il.label_id
+		WHERE il.item_id = ? AND l.name = 'remastered' AND il.source = 'nfo'`, survivor); n != 1 {
+		t.Fatal("the rewritten NFO was not read, so this proves nothing")
+	}
+	if got := adult(); got != "manual" {
+		t.Fatalf("the label vanished when the survivor's NFO was rewritten: %q", got)
 	}
 }

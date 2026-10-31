@@ -396,11 +396,11 @@ func (s *Scanner) scan(ctx context.Context, lib Library, opt Options, run *Run) 
 	// A new copy of a film TMDb or an NFO already identified joins it now
 	// rather than after the next enrichment pass. A failure here leaves the
 	// copies apart, which the next pass retries, so it does not fail the scan.
-	if n, err := mergeByTMDb(ctx, s.DB, lib.ID, s.now().UnixMilli(), true); err != nil {
+	rep, err := mergeByTMDb(ctx, s.DB, lib.ID, s.now().UnixMilli(), true)
+	if err != nil {
 		log.Warn("merging copies with the same TMDb id", "err", err)
-	} else if n > 0 {
-		log.Info("merged copies with the same TMDb id", "merged", n)
 	}
+	rep.Log(log)
 	if len(w.failed) > 0 {
 		warning = fmt.Sprintf("completed with warnings: %d folders could not be read (first: %s); their files were left as they were", len(w.failed), w.failed[0])
 	}

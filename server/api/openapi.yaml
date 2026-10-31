@@ -648,8 +648,10 @@ paths:
       operationId: adminMergeItems
       summary: >-
         Merge other movies of the same library into this one. Their files become its versions; watch state is combined per
-        user, playback history, labels and collections move over, and this movie keeps its own title and match. Rescans
-        keep the merge. One transaction: on any error nothing changes. 409 scan_running while the library is being scanned.
+        user, playback history and collections move over, and this movie keeps its own title and match. Rescans keep the
+        merge. Movies whose content ratings or labels (set by hand or by an NFO) differ are refused with 422
+        access_differs, since access rules judge a movie by them. One transaction: on any error nothing changes. 409
+        scan_running while the library is being scanned.
       parameters:
         - { $ref: "#/components/parameters/ItemID" }
       requestBody:
@@ -674,6 +676,7 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
 
   /api/v1/admin/versions/{version_id}/split:
     post:

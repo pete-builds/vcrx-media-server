@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -60,6 +61,17 @@ func TestMergeAndSplitAPI(t *testing.T) {
 	}
 	if r := f.do("POST", mergePath, f.adminTok, map[string]any{"item_ids": []int64{f.episodeID}}); r.code != 400 {
 		t.Fatalf("merging an episode: %d %s", r.code, r.body)
+	}
+	// Copies rated differently are refused, so neither one's files are judged
+	// by the other's rating; nothing changes.
+	if _, err := f.db.Exec(`UPDATE items SET content_rating = 'R' WHERE id = ?`, other); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.do("POST", mergePath, f.adminTok, body); r.code != 422 || !strings.Contains(string(r.body), "access_differs") {
+		t.Fatalf("merging differently rated copies: %d %s", r.code, r.body)
+	}
+	if _, err := f.db.Exec(`UPDATE items SET content_rating = NULL WHERE id = ?`, other); err != nil {
+		t.Fatal(err)
 	}
 	if r := f.do("POST", mergePath, f.adminTok, body); r.code != 200 {
 		t.Fatalf("merge: %d %s", r.code, r.body)

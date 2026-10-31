@@ -291,11 +291,11 @@ func serve() error {
 		enr := newEnricher(a)
 		enr.Busy = scans.Running
 		enr.AfterPass = func(ctx context.Context) {
-			if n, err := library.MergeByTMDb(ctx, a.db, 0); err != nil {
+			rep, err := library.MergeByTMDb(ctx, a.db, 0)
+			if err != nil {
 				log.Warn("merging copies with the same TMDb id", "err", err)
-			} else if n > 0 {
-				log.Info("merged copies with the same TMDb id", "merged", n)
 			}
+			rep.Log(log)
 		}
 		srv.Metadata = enr
 		go enr.Run(ctx, 2*time.Minute, 15*time.Minute)
@@ -662,9 +662,12 @@ func metadataCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		n, err := library.MergeByTMDb(ctx, a.db, 0)
-		if n > 0 {
-			fmt.Printf("merged %d copies into movies with the same TMDb id\n", n)
+		rep, err := library.MergeByTMDb(ctx, a.db, 0)
+		if rep.Merged > 0 {
+			fmt.Printf("merged %d copies into movies with the same TMDb id\n", rep.Merged)
+		}
+		for _, why := range rep.Apart {
+			fmt.Println("left apart:", why)
 		}
 		return err
 	case "status":

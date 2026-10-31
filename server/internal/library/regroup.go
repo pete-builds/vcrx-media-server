@@ -17,8 +17,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -41,6 +43,10 @@ var (
 	ErrNothingToMerge = errors.New("name at least one other movie to merge")
 	// ErrOnlyVersion means a split named a movie's only file.
 	ErrOnlyVersion = errors.New("this is the movie's only version, so there is nothing to split it from")
+	// ErrAccessDiffers means a merge named movies whose content ratings or
+	// labels differ. Access rules judge a movie by its rating and labels, so
+	// merging them would let one copy's files out under the other's.
+	ErrAccessDiffers = errors.New("these movies have different content ratings or labels")
 )
 
 func pinKey(rel string) string { return pinPrefix + rel }
@@ -113,6 +119,53 @@ func loadMovie(ctx context.Context, tx *sql.Tx, id int64) (movieRow, error) {
 	return m, nil
 }
 
+// access is what access rules judge a movie by: its content rating, and the
+// labels set by hand or by an NFO. Labels a collection stamps are left out;
+// they are worked out again from the merged movie on the next build.
+type access struct {
+	title, rating string
+	labels        []string
+}
+
+func accessOf(ctx context.Context, tx *sql.Tx, id int64) (access, error) {
+	var a access
+	if err := tx.QueryRowContext(ctx, `SELECT title, UPPER(TRIM(IFNULL(content_rating, ''))) FROM items WHERE id = ?`, id).
+		Scan(&a.title, &a.rating); err != nil {
+		return a, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT LOWER(l.name) FROM item_labels il JOIN labels l ON l.id = il.label_id
+		WHERE il.item_id = ? AND il.source IN ('manual', 'nfo') ORDER BY 1`, id)
+	if err != nil {
+		return a, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return a, err
+		}
+		a.labels = append(a.labels, n)
+	}
+	return a, rows.Err()
+}
+
+// differs says how two movies' access differs, or "" when it does not.
+func (a access) differs(b access) string {
+	show := func(s string) string {
+		if s == "" {
+			return "none"
+		}
+		return s
+	}
+	switch {
+	case a.rating != b.rating:
+		return fmt.Sprintf("content rating %s against %s", show(a.rating), show(b.rating))
+	case !slices.Equal(a.labels, b.labels):
+		return fmt.Sprintf("labels [%s] against [%s]", strings.Join(a.labels, ", "), strings.Join(b.labels, ", "))
+	}
+	return ""
+}
+
 func saveKeys(ctx context.Context, tx *sql.Tx, m movieRow, keys []string, nowMs int64) error {
 	sort.Strings(keys)
 	keys = slices.Compact(keys)
@@ -170,6 +223,19 @@ func Merge(ctx context.Context, db *sql.DB, into int64, from []int64) error {
 		if len(others) == 0 {
 			return ErrNothingToMerge
 		}
+		want, err := accessOf(ctx, tx, target.id)
+		if err != nil {
+			return err
+		}
+		for _, m := range others {
+			got, err := accessOf(ctx, tx, m.id)
+			if err != nil {
+				return err
+			}
+			if why := want.differs(got); why != "" {
+				return fmt.Errorf("%w: %q has %s; give them the same rating and labels first, or keep them apart", ErrAccessDiffers, got.title, why)
+			}
+		}
 		return fold(ctx, tx, target, others, nowMs)
 	})
 }
@@ -180,7 +246,10 @@ func Merge(ctx context.Context, db *sql.DB, into int64, from []int64) error {
 // either was, play counts added, the position from whichever changed last.
 // Playback history moves over. Labels are united, so a label that hides a
 // title from someone still hides the merged one; ratings, tags and artwork
-// fill only what the target lacks; collection membership is united.
+// fill only what the target lacks; collection membership is united. Callers
+// have checked the movies share a content rating and labels. Those labels are
+// then held as set by hand: only the target's NFO is read from now on, and a
+// rewrite of it must not drop a label the other copy's file still declares.
 func fold(ctx context.Context, tx *sql.Tx, target movieRow, others []movieRow, nowMs int64) error {
 	keys := mergedKeys(target.extra)
 	for _, m := range others {
@@ -200,7 +269,10 @@ func fold(ctx context.Context, tx *sql.Tx, target movieRow, others []movieRow, n
 					last_played_at = NULLIF(MAX(IFNULL(watch_state.last_played_at, 0), IFNULL(excluded.last_played_at, 0)), 0),
 					updated_at = MAX(watch_state.updated_at, excluded.updated_at)`,
 			`UPDATE playback_sessions SET item_id = :into WHERE item_id = :from`,
-			`INSERT OR IGNORE INTO item_labels (item_id, label_id, source) SELECT :into, label_id, source FROM item_labels WHERE item_id = :from`,
+			`UPDATE item_labels SET source = 'manual' WHERE item_id = :into AND source = 'nfo'
+				AND label_id IN (SELECT label_id FROM item_labels WHERE item_id = :from AND source IN ('manual', 'nfo'))`,
+			`INSERT OR IGNORE INTO item_labels (item_id, label_id, source)
+				SELECT :into, label_id, CASE source WHEN 'collection' THEN 'collection' ELSE 'manual' END FROM item_labels WHERE item_id = :from`,
 			`INSERT OR IGNORE INTO item_ratings (item_id, source, value, votes) SELECT :into, source, value, votes FROM item_ratings WHERE item_id = :from`,
 			`INSERT OR IGNORE INTO item_tags (item_id, kind, value, position, role) SELECT :into, b.kind, b.value, b.position, b.role
 				FROM item_tags b WHERE b.item_id = :from AND NOT EXISTS (SELECT 1 FROM item_tags a WHERE a.item_id = :into AND a.kind = b.kind)`,
@@ -325,9 +397,9 @@ func Split(ctx context.Context, db *sql.DB, versionID int64) (int64, error) {
 // id: a 4K and a 1080p copy in separate folders become one movie with two
 // versions. Items an admin split off are never merged; shows, seasons and
 // episodes are never touched. libraryID 0 means every library; a library being
-// scanned is skipped, since its scan runs this itself when it finishes. It
-// returns how many movies were merged away.
-func MergeByTMDb(ctx context.Context, db *sql.DB, libraryID int64) (int, error) {
+// scanned is skipped, since its scan runs this itself when it finishes. Copies
+// whose content ratings or labels differ stay apart, and the report says why.
+func MergeByTMDb(ctx context.Context, db *sql.DB, libraryID int64) (MergeReport, error) {
 	return mergeByTMDb(ctx, db, libraryID, time.Now().UnixMilli(), false)
 }
 
@@ -335,7 +407,25 @@ func MergeByTMDb(ctx context.Context, db *sql.DB, libraryID int64) (int, error) 
 // TMDb id, never one an admin split off.
 const autoMergeable = `kind = 'movie' AND tmdb_id > 0 AND group_key NOT LIKE '` + pinPrefix + `%'`
 
-func mergeByTMDb(ctx context.Context, db *sql.DB, libraryID, nowMs int64, inScan bool) (int, error) {
+// MergeReport is what an automatic merge did: how many movies it merged away,
+// and why it left any copies apart.
+type MergeReport struct {
+	Merged int
+	Apart  []string
+}
+
+// Log reports a merge: what it merged, and each pair it kept apart.
+func (r MergeReport) Log(log *slog.Logger) {
+	if r.Merged > 0 {
+		log.Info("merged copies with the same TMDb id", "merged", r.Merged)
+	}
+	for _, why := range r.Apart {
+		log.Info("copies with the same TMDb id left apart", "why", why)
+	}
+}
+
+func mergeByTMDb(ctx context.Context, db *sql.DB, libraryID, nowMs int64, inScan bool) (MergeReport, error) {
+	var rep MergeReport
 	q := `SELECT library_id, tmdb_id FROM items WHERE ` + autoMergeable
 	args := []any{}
 	if libraryID != 0 {
@@ -344,10 +434,11 @@ func mergeByTMDb(ctx context.Context, db *sql.DB, libraryID, nowMs int64, inScan
 	}
 	groups, err := tmdbGroups(ctx, db, q+` GROUP BY library_id, tmdb_id HAVING COUNT(*) > 1 ORDER BY library_id, tmdb_id`, args...)
 	if err != nil {
-		return 0, err
+		return rep, err
 	}
-	merged := 0
 	for _, g := range groups {
+		var apart []string
+		merged := 0
 		err := inTx(ctx, db, func(tx *sql.Tx) error {
 			if !inScan {
 				if err := libraryBusy(ctx, tx, g.library, nowMs); err != nil {
@@ -378,21 +469,46 @@ func mergeByTMDb(ctx context.Context, db *sql.DB, libraryID, nowMs int64, inScan
 				}
 			}
 			target := ms[best]
-			others := append(append([]movieRow{}, ms[:best]...), ms[best+1:]...)
+			want, err := accessOf(ctx, tx, target.id)
+			if err != nil {
+				return err
+			}
+			// A copy rated or labelled differently stays a movie of its own:
+			// merged, its files would be judged by the survivor's rating.
+			var others []movieRow
+			for i, m := range ms {
+				if i == best {
+					continue
+				}
+				got, err := accessOf(ctx, tx, m.id)
+				if err != nil {
+					return err
+				}
+				if why := want.differs(got); why != "" {
+					apart = append(apart, fmt.Sprintf("%q (item %d) kept apart from item %d, TMDb %d: %s", got.title, m.id, target.id, g.tmdb, why))
+					continue
+				}
+				others = append(others, m)
+			}
+			if len(others) == 0 {
+				return nil
+			}
 			if err := fold(ctx, tx, target, others, nowMs); err != nil {
 				return err
 			}
-			merged += len(others)
+			merged = len(others)
 			return nil
 		})
 		if errors.Is(err, ErrScanRunning) {
 			continue
 		}
 		if err != nil {
-			return merged, fmt.Errorf("merge TMDb %d in library %d: %w", g.tmdb, g.library, err)
+			return rep, fmt.Errorf("merge TMDb %d in library %d: %w", g.tmdb, g.library, err)
 		}
+		rep.Merged += merged
+		rep.Apart = append(rep.Apart, apart...)
 	}
-	return merged, nil
+	return rep, nil
 }
 
 type tmdbGroup struct{ library, tmdb int64 }
