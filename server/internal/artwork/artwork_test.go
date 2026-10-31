@@ -138,3 +138,85 @@ func TestTMDbArtwork(t *testing.T) {
 		t.Fatal("rendered TMDb artwork from outside the metadata dir")
 	}
 }
+
+type fakeOverlay struct {
+	sig   string
+	calls int
+}
+
+func (f *fakeOverlay) Poster(ctx context.Context, itemID int64) (string, func(*image.RGBA) error, error) {
+	if f.sig == "" {
+		return "", nil, nil
+	}
+	return f.sig, func(img *image.RGBA) error {
+		f.calls++
+		for y := range 20 {
+			for x := range 20 {
+				img.Set(x, y, color.RGBA{255, 0, 0, 255})
+			}
+		}
+		return nil
+	}, nil
+}
+
+func TestPosterOverlaysAreCachedSeparately(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := db.Open(filepath.Join(dir, "vcrx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := db.Migrate(context.Background(), conn, "", slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(dir, "Movies")
+	_ = os.MkdirAll(root, 0o755)
+	poster := filepath.Join(root, "poster.png")
+	fh, _ := os.Create(poster)
+	_ = png.Encode(fh, image.NewRGBA(image.Rect(0, 0, 200, 300)))
+	_ = fh.Close()
+	for _, q := range []string{
+		`INSERT INTO libraries (id, name, kind, root_path, created_at, updated_at) VALUES (1, 'Movies', 'movie', '` + root + `', 0, 0)`,
+		`INSERT INTO items (id, library_id, kind, group_key, title, sort_title, added_at, updated_at) VALUES (1, 1, 'movie', 'k', 'Film', 'Film', 0, 0)`,
+		`INSERT INTO artwork (item_id, kind, source, source_path, updated_at) VALUES (1, 'poster', 'local', '` + poster + `', 0)`,
+	} {
+		if _, err := conn.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ov := &fakeOverlay{sig: "aaa"}
+	s := New(conn, filepath.Join(dir, "cache"), "ffmpeg")
+	s.Overlays = ov
+	ctx := context.Background()
+	with, err := s.GetWith(ctx, 1, "poster", 200, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clean, _ := s.GetWith(ctx, 1, "poster", 200, false)
+	if with == clean || ov.calls != 1 {
+		t.Fatalf("overlay and clean posters share %s (paint calls %d)", with, ov.calls)
+	}
+	again, _ := s.GetWith(ctx, 1, "poster", 200, true)
+	if again != with || ov.calls != 1 {
+		t.Fatal("an unchanged overlay should come from the cache")
+	}
+	// A new signature (a rating moved) draws a new file.
+	ov.sig = "bbb"
+	moved, _ := s.GetWith(ctx, 1, "poster", 200, true)
+	if moved == with || ov.calls != 2 {
+		t.Fatalf("changed facts reused the old poster: %s", moved)
+	}
+	// Backdrops never get badges.
+	if _, err := s.GetWith(ctx, 1, "backdrop", 200, true); err == nil || ov.calls != 2 {
+		t.Fatalf("backdrop: err=%v calls=%d", err, ov.calls)
+	}
+	fc, _ := os.Open(with)
+	img, err := jpeg.Decode(fc)
+	_ = fc.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, _, _, _ := img.At(8, 8).RGBA(); r < 0x8000 {
+		t.Fatal("the overlay paint did not reach the served poster")
+	}
+}
