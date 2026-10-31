@@ -48,6 +48,7 @@ var publicRoutes = map[string]string{
 var noItemRoutes = map[string]string{
 	"POST /api/v1/auth/logout": "ends the caller's own session",
 	"GET /api/v1/me":           "the caller's own account",
+	"GET /api/v1/speedtest":    "random filler bytes for timing the connection; reads nothing from the library",
 }
 
 type probe struct {
