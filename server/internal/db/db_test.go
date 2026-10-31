@@ -161,3 +161,55 @@ func TestMigration2BackfillsAddedAt(t *testing.T) {
 		t.Fatalf("backups = %v", entries)
 	}
 }
+
+func TestPruneKeepsTheNewestNightlies(t *testing.T) {
+	dir := t.TempDir()
+	names := []string{
+		"vcrx-nightly-20261020T010000Z.db", "vcrx-nightly-20261021T010000Z.db", "vcrx-nightly-20261022T010000Z.db",
+		"vcrx-nightly-20261023T010000Z.db", "vcrx-pre-migrate-v4-20261001T010000Z.db",
+	}
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err := Prune(dir, "nightly", 2)
+	if err != nil || removed != 2 {
+		t.Fatalf("removed %d, %v", removed, err)
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, "*.db"))
+	want := []string{"vcrx-nightly-20261022T010000Z.db", "vcrx-nightly-20261023T010000Z.db", "vcrx-pre-migrate-v4-20261001T010000Z.db"}
+	if len(left) != 3 {
+		t.Fatalf("left %v", left)
+	}
+	for i, w := range want {
+		if filepath.Base(left[i]) != w {
+			t.Fatalf("left %v, want %v (the oldest nightlies go; pre-migrate backups stay)", left, want)
+		}
+	}
+}
+
+func TestBackupIsAReadableCopy(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := Open(filepath.Join(dir, "v.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.Exec(`CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('kept')`); err != nil {
+		t.Fatal(err)
+	}
+	path, err := Backup(context.Background(), conn, filepath.Join(dir, "backups"), "nightly")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cp.Close() }()
+	var v string
+	if err := cp.QueryRow(`SELECT v FROM t`).Scan(&v); err != nil || v != "kept" {
+		t.Fatalf("copy: %q %v", v, err)
+	}
+}
