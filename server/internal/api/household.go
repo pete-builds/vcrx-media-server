@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
@@ -154,22 +155,47 @@ func (s *Server) profileAvatar(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "", time.UnixMilli(p.AvatarVersion), f)
 }
 
-// pinKeys are the PIN limiter buckets a switch counts against, built the way
-// the sign-in limiter builds its own: the client's address, and the profile in
-// the client's scope (on the LAN, or anywhere else including Tailscale), so
-// failures from away can never lock a profile at home. The PIN limiter is
-// stricter than the sign-in one because a PIN is short.
-func pinKeys(ip string, id int64) []string {
+// pinBuckets are what a PIN attempt is charged to: the client's address, and
+// the profile in the client's scope (on the LAN, or away including Tailscale),
+// so failures from away never lock a profile at home. The address bucket is
+// tight; the profile's LAN bucket is shared by every device at home and so
+// wider (household.PIN*).
+func pinBuckets(ip string, id int64) []household.Bucket {
 	if pinScopeLAN(ip) {
-		return []string{auth.IPKey(ip), household.LANProfileKey(id)}
+		return []household.Bucket{household.AddressBucket(auth.IPKey(ip)), household.LANProfileBucket(id)}
 	}
-	return []string{auth.IPKey(ip), household.ProfileKey(id)}
+	return []household.Bucket{household.AddressBucket(auth.IPKey(ip)), household.AwayProfileBucket(id)}
+}
+
+// passwordKeys are the sign-in limiter buckets a password offered at a switch
+// counts against, the same as a sign-in's: the address, and the account in the
+// client's scope. Wrong PINs never touch them, so an admin locked out of their
+// PIN can still switch with their password.
+func passwordKeys(ip, username string) []string {
+	if pinScopeLAN(ip) {
+		return []string{auth.IPKey(ip), auth.LANUserKey(username)}
+	}
+	return []string{auth.IPKey(ip), auth.UserKey(username)}
 }
 
 // pinScopeLAN is IsLAN without Tailscale, the scope rule the sign-in limiter
 // uses: a tailnet peer may be anywhere.
 func pinScopeLAN(ip string) bool {
 	return IsLAN(ip) && !auth.IsTailscale(ip)
+}
+
+// lockSwitch serializes password checks for one profile and returns the unlock.
+func (s *Server) lockSwitch(id int64) func() {
+	m, _ := s.switchLocks.LoadOrStore(id, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+func (s *Server) tooMany(w http.ResponseWriter, wait time.Duration, what string) {
+	w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+	writeError(w, http.StatusTooManyRequests, "rate_limited",
+		fmt.Sprintf("Too many wrong %s for this profile. Try again in %d minutes.", what, int(wait.Minutes())+1))
 }
 
 func (s *Server) switchProfile(w http.ResponseWriter, r *http.Request) {
@@ -198,15 +224,25 @@ func (s *Server) switchProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cred := household.Credential{PIN: clip(req.PIN, 64), Password: clip(req.Password, 1024)}
-	offered := cred.PIN != "" || cred.Password != ""
+	if cred.Password != "" {
+		cred.PIN = "" // one credential per attempt, each with its own limiter
+	}
 	needed := household.Needs(c, target) != nil
-	keys := pinKeys(ri.IP, target.ID)
-	if needed && offered {
-		for _, key := range keys {
-			if ok, wait := s.PINLimiter.Allowed(key); !ok {
-				w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-				writeError(w, http.StatusTooManyRequests, "rate_limited",
-					fmt.Sprintf("Too many wrong PINs for this profile. Try again in %d minutes.", int(wait.Minutes())+1))
+	var charged []household.Bucket
+	switch {
+	case !needed:
+	case cred.PIN != "":
+		// Counted before the hash, in one step with the check (see Limiter.Take).
+		charged = pinBuckets(ri.IP, target.ID)
+		if ok, wait := s.PINs.Take(charged...); !ok {
+			s.tooMany(w, wait, "PINs")
+			return
+		}
+	case cred.Password != "":
+		defer s.lockSwitch(target.ID)()
+		for _, key := range passwordKeys(ri.IP, target.Username) {
+			if ok, wait := s.Limiter.Allowed(key); !ok {
+				s.tooMany(w, wait, "passwords")
 				return
 			}
 		}
@@ -219,9 +255,11 @@ func (s *Server) switchProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "credential_required", "Enter the PIN or password for "+profileName(target)+".")
 		return
 	case errors.Is(err, household.ErrWrongCredential):
-		for _, key := range keys {
-			s.PINLimiter.Fail(key)
-		}
+		if cred.Password != "" {
+			for _, key := range passwordKeys(ri.IP, target.Username) {
+				s.Limiter.Fail(key)
+			}
+		} // a PIN attempt was counted before the hash check
 		s.Log.Warn("profile switch refused", "ip", ri.IP, "profile", target.Username)
 		writeError(w, http.StatusUnauthorized, "wrong_pin", "That PIN is not right.")
 		return
@@ -245,9 +283,16 @@ func (s *Server) switchProfile(w http.ResponseWriter, r *http.Request) {
 			s.Log.Warn("profile switch: old session not ended", "err", err)
 		}
 	}
-	if needed && !pinScopeLAN(ri.IP) {
-		// As for sign-ins: only a success from away clears the away bucket.
-		s.PINLimiter.Reset(household.ProfileKey(target.ID))
+	if charged != nil {
+		// The right PIN gives its own slot back; from away it also clears the
+		// away bucket, as an away sign-in clears the account's internet count.
+		s.PINs.Refund(charged...)
+		if !pinScopeLAN(ri.IP) {
+			s.PINs.Reset(household.AwayProfileBucket(target.ID))
+		}
+	}
+	if needed && cred.Password != "" && !pinScopeLAN(ri.IP) {
+		s.Limiter.Reset(auth.UserKey(target.Username))
 	}
 	from := ""
 	if c != nil {
@@ -366,8 +411,8 @@ func (s *Server) setPIN(w http.ResponseWriter, r *http.Request, id int64, pin st
 		return
 	}
 	// A new PIN starts with a clean slate in both scopes.
-	s.PINLimiter.Reset(household.ProfileKey(id))
-	s.PINLimiter.Reset(household.LANProfileKey(id))
+	s.PINs.Reset(household.LANProfileBucket(id))
+	s.PINs.Reset(household.AwayProfileBucket(id))
 	w.WriteHeader(http.StatusNoContent)
 }
 

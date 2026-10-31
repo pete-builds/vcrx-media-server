@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/activity"
@@ -74,9 +75,13 @@ type Server struct {
 	// ProfilePicker sends trusted-network clients to the "Who's watching?"
 	// picker instead of signing them in as AutoSignInUser.
 	ProfilePicker bool
-	// Household backs profile switching; PINLimiter counts wrong PINs.
-	Household  *household.Store
-	PINLimiter *auth.Limiter
+	// Household backs profile switching; PINs counts PIN attempts. Passwords
+	// offered at a switch count against Limiter, as sign-ins do.
+	Household *household.Store
+	PINs      *household.Limiter
+	// switchLocks serializes password checks per profile (*sync.Mutex by id),
+	// so the sign-in limiter's check and its count cannot be raced.
+	switchLocks sync.Map
 	// AllowedHosts are names, besides IP addresses and localhost, that a
 	// request's Host may carry. Anything else is refused (DNS rebinding).
 	AllowedHosts []string

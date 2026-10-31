@@ -122,7 +122,9 @@ paths:
         Switch this device to another household profile and get a fresh session for it. The caller's own
         session, if any, ends. A profile with a PIN needs it (or its password); an admin profile reached from a
         restricted profile or the picker always needs its PIN or password, on any network. Wrong PINs are
-        limited per address and per profile: 5 per 15 minutes, counted separately on and off the LAN. Requests
+        limited per 15 minutes, counted before the PIN is checked: 5 per address, and per profile 25 shared by
+        the LAN or 5 from away. A password counts against the sign-in limits instead, so an admin whose PIN is
+        locked can still use it. Requests
         without a bearer token must send X-VCRX-Client.
       security: [{ bearer: [] }, { cookie: [] }, {}]
       requestBody:

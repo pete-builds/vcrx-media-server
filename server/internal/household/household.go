@@ -9,8 +9,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
@@ -368,18 +368,24 @@ func CheckSwitch(caller *Profile, target Profile, cred Credential) error {
 	if cred.PIN == "" && cred.Password == "" {
 		return need
 	}
-	if cred.PIN != "" && target.HasPIN && auth.CheckPassword(target.pinHash, cred.PIN) {
-		return nil
+	if cred.PIN != "" && target.HasPIN {
+		hashChecks.Add(1)
+		if auth.CheckPassword(target.pinHash, cred.PIN) {
+			return nil
+		}
 	}
-	if cred.Password != "" && target.passwordHash != auth.NoPassword && auth.CheckPassword(target.passwordHash, cred.Password) {
-		return nil
+	if cred.Password != "" && target.passwordHash != auth.NoPassword {
+		hashChecks.Add(1)
+		if auth.CheckPassword(target.passwordHash, cred.Password) {
+			return nil
+		}
 	}
 	return ErrWrongCredential
 }
 
-// ProfileKey and LANProfileKey are a profile's PIN limiter buckets, one per
-// scope like the sign-in limiter's account buckets: failures from off the LAN
-// never lock a profile at home.
-func ProfileKey(id int64) string { return "profile:" + strconv.FormatInt(id, 10) }
+// hashChecks counts PIN and password hashes compared by CheckSwitch, so a
+// test can prove the limiter stops guesses before the hash, not after.
+var hashChecks atomic.Int64
 
-func LANProfileKey(id int64) string { return "lanprofile:" + strconv.FormatInt(id, 10) }
+// HashChecks is how many PINs and passwords CheckSwitch has hashed.
+func HashChecks() int64 { return hashChecks.Load() }

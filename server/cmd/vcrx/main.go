@@ -335,10 +335,9 @@ func serve() error {
 	// does nothing until switched on in Settings.
 	srv.Newsletter = &newsletter.Service{DB: a.db, Hooks: hooks, Log: log.With("component", "newsletter")}
 	go srv.Newsletter.Run(ctx)
-	// Profiles: five wrong PINs per window, half the sign-in limit, because a
-	// PIN is four to eight digits rather than a password.
+	// Profiles: PIN attempts have their own, stricter limiter (household.PIN*).
 	srv.Household = &household.Store{DB: a.db, AvatarDir: cfg.AvatarDir()}
-	srv.PINLimiter, srv.ProfilePicker = auth.NewLimiter(5, 15*time.Minute), cfg.AutoSignInPicker
+	srv.PINs, srv.ProfilePicker = household.NewLimiter(household.PINWindow), cfg.AutoSignInPicker
 	if users, err := authStore.CountUsers(ctx); err == nil && users == 0 {
 		log.Warn("no users yet: create the admin with `docker compose exec vcrx vcrx user add -username <name> -admin`")
 	}
