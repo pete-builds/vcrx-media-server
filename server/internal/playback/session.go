@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
+	"github.com/pete-builds/vcrx-media-server/server/internal/loans"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
@@ -215,7 +216,15 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 	converted := s.CanRemux && (req.Capabilities.FMP4Stream || hls) && (((d.Kind == Remux || d.Kind == AudioTranscode) &&
 		remux.MP4Video(s2(v.VideoCodec))) || (d.Kind == Transcode && s.CanTranscode && decodesH264(req.Capabilities)))
 	var refusal *Refusal
-	if d.Kind != DirectPlay {
+	lent, due, err := s.Catalog.OnLoan(ctx, pol, req.ItemID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if lent {
+		// One loan per copy: the owner's copy is out, so nobody else plays it,
+		// the owner included. Refused like any policy block, and recorded.
+		refusal = &Refusal{Status: 409, Code: "on_loan", Message: loans.OnLoanMessage(time.UnixMilli(due))}
+	} else if d.Kind != DirectPlay {
 		switch {
 		case !pol.IsAdmin && !pol.AllowTranscode:
 			refusal = &Refusal{Status: 403, Code: "playback_refused", Message: "This needs converting on the server, and your account is not allowed to do that. Reason: " + d.Reason + "."}

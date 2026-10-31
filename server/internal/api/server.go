@@ -20,6 +20,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
 	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
+	"github.com/pete-builds/vcrx-media-server/server/internal/loans"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
@@ -84,6 +85,8 @@ type Server struct {
 	Invites     *invites.Store
 	Pairings    *invites.Pairings
 	PairLimiter *auth.Limiter
+	// Loans are lent tapes: one movie, on a printed card, for a day to a week.
+	Loans *loans.Store
 	// AllowedHosts are names, besides IP addresses and localhost, that a
 	// request's Host may carry. Anything else is refused (DNS rebinding).
 	AllowedHosts []string
@@ -167,6 +170,10 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/admin/pairings/{code}", adminOnly, s.adminPairing},
 		{"POST", "/api/v1/admin/pairings/{code}/approve", adminOnly, s.adminApprovePairing},
 		{"DELETE", "/api/v1/admin/pairings/{code}", adminOnly, s.adminDenyPairing},
+		// Lend a tape: one movie, on a printed card, and return it early.
+		{"GET", "/api/v1/admin/loans", adminOnly, s.adminLoans},
+		{"POST", "/api/v1/admin/loans", adminOnly, s.adminLend},
+		{"POST", "/api/v1/admin/loans/{loan_id}/return", adminOnly, s.adminReturnLoan},
 		{"GET", "/api/v1/admin/libraries", adminOnly, s.adminLibraries},
 		{"POST", "/api/v1/admin/libraries", adminOnly, s.adminCreateLibrary},
 		{"POST", "/api/v1/admin/libraries/{library_id}/scan", adminOnly, s.adminScan},

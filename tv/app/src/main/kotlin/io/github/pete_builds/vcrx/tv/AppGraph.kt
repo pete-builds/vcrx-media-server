@@ -14,9 +14,14 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import io.github.pete_builds.vcrx.tv.ui.rewind.RewindLogic
+import io.github.pete_builds.vcrx.tv.ui.rewind.RewindState
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
@@ -54,9 +59,22 @@ class AppGraph(context: Context) {
     /** Emits when any request gets a 401; the UI returns to the Login screen. */
     val signedOut: SharedFlow<Unit> = signedOutEvents.asSharedFlow()
 
-    val api = ServerApi(httpClient, { settings.serverUrl }, json) {
+    private val rewindState = MutableStateFlow<RewindState?>(null)
+
+    /**
+     * Set when a lent tape's loan is over (401 loan_ended): the UI shows "Be kind,
+     * rewind." instead of Login, and the player closes. Cleared by the next sign-in.
+     */
+    val rewind: StateFlow<RewindState?> = rewindState.asStateFlow()
+
+    fun clearRewind() {
+        rewindState.value = null
+    }
+
+    val api = ServerApi(httpClient, { settings.serverUrl }, json) { error ->
         tokens.clear()
-        signedOutEvents.tryEmit(Unit)
+        val rewound = RewindLogic.from(error)
+        if (rewound != null) rewindState.value = rewound else signedOutEvents.tryEmit(Unit)
     }
 
     val playbackEvents = PlaybackEventSender(context, api, json, appScope)

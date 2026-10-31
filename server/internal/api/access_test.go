@@ -38,6 +38,11 @@ import (
 // list it in noItemRoutes with the reason) and make the handler apply the
 // caller's policy until the probe passes.
 //
+// A lent tape (milestone 10) is the one thing the friend still sees but may not
+// play: restrict also lends a movie to someone else, and every way of playing
+// it must refuse the friend, playback start with 409 on_loan and every file,
+// stream and subtitle route with the policy's 404.
+//
 // The whole walk runs once for each kind of principal: an account ("user"), a
 // household profile ("profile") and an invited device ("token"). Policy has
 // one enforcement path for all three, and this proves every route takes it,
@@ -88,6 +93,10 @@ type probe struct {
 	// friend's 404 must carry it, proving the call got past the policy; the
 	// restricted friend's 404 must not.
 	pastPolicy string
+	// refusal, when set, is the error code the restricted friend must get
+	// instead of the 404, with status: a recorded refusal such as on_loan.
+	status  int
+	refusal string
 }
 
 var routeParam = regexp.MustCompile(`\{[a-z_]+\}`)
@@ -111,6 +120,10 @@ func (p probe) query(q string) probe       { p.path += "?" + q; return p }
 func (p probe) ownedBy(tok string) probe   { p.owner = tok; return p }
 func (p probe) hides(text ...string) probe { p.list = text; return p }
 func (p probe) past(text string) probe     { p.pastPolicy = text; return p }
+func (p probe) refused(status int, code string) probe {
+	p.status, p.refusal = status, code
+	return p
+}
 
 func (p probe) method() string { m, _, _ := strings.Cut(p.route, " "); return m }
 
@@ -123,6 +136,7 @@ type walkFixture struct {
 	kind string
 	// Hidden from the restricted friend, each for a different reason.
 	vaultMovie, horrorMovie, ratedMovie     int64 // ungranted library, denied label, rated R
+	lentMovie                               int64 // visible, but out on loan to someone else
 	horrorShow, horrorSeason, horrorEpisode int64 // denied label on the show
 	strictSeason, strictEpisode             int64 // TV-MA episode of a TV-14 show
 	mixedCollection, hiddenCollection       int64
@@ -235,6 +249,11 @@ func newWalkFixture(t *testing.T) *walkFixture {
 	w.horrorMovie = movie(w.movies, f.root, "Zebra Night", "PG-13")
 	exec(`INSERT INTO item_labels (item_id, label_id) VALUES (?, ?)`, w.horrorMovie, horror)
 	w.ratedMovie = movie(w.movies, f.root, "Zebra Rated", "R")
+	// The lent tape stays on the shelf, poster and all; only playing it is
+	// refused. Its version and subtitle are in the hidden lists.
+	w.lentMovie = movie(w.movies, f.root, "Zebra Lent", "PG-13")
+	w.posters = w.posters[:len(w.posters)-1]
+	exec(`DELETE FROM item_tags WHERE item_id = ?`, w.lentMovie) // the filters probe looks for the hidden titles' genre
 
 	// A show with the denied label: its seasons and episodes inherit it.
 	w.horrorShow = exec(`INSERT INTO items (library_id, kind, group_key, title, sort_title, content_rating, added_at, updated_at)
@@ -282,6 +301,17 @@ func (w *walkFixture) open() {
 func (w *walkFixture) restrict() {
 	w.setAccess([]int64{w.movies, w.tv}, map[string]any{"max_resolution": "1080p", "max_content_rating": "PG-13",
 		"deny_labels": []string{"horror"}, "allow_transcode": true, "allow_4k_transcode": true})
+	r := w.do("POST", "/api/v1/admin/loans", w.adminTok, map[string]any{"item_id": w.lentMovie, "name": "Someone else"})
+	if r.code != 201 {
+		w.t.Fatalf("lend: %d %s", r.code, r.body)
+	}
+	// Lending ends the open streams of the title (TestLentTitleRefusesEveryoneElse).
+	// Revive the friend's, so the walk shows the policy refuses them on its
+	// own rather than the ended session doing it.
+	if _, err := w.db.Exec(`UPDATE playback_sessions SET ended_at = NULL, state = 'playing', terminated_message = NULL, terminated_by = NULL
+		WHERE item_id = ? AND user_id = ?`, w.lentMovie, w.friendID); err != nil {
+		w.t.Fatal(err)
+	}
 }
 
 func (w *walkFixture) setAccess(libs []int64, pol map[string]any) {
@@ -357,7 +387,8 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 	for _, id := range append(hiddenPlayables, w.horrorShow) {
 		ps = append(ps, at("POST /api/v1/playback/sessions").with(map[string]any{"item_id": id, "capabilities": tclCaps()}))
 	}
-	ps = append(ps, at("POST /api/v1/playback/sessions").with(map[string]any{"item_id": f.movieID, "version_id": f.v4k, "capabilities": tclCaps()}))
+	ps = append(ps, at("POST /api/v1/playback/sessions").with(map[string]any{"item_id": f.movieID, "version_id": f.v4k, "capabilities": tclCaps()}),
+		at("POST /api/v1/playback/sessions").with(map[string]any{"item_id": w.lentMovie, "capabilities": tclCaps()}).refused(409, "on_loan"))
 	for _, v := range w.hiddenVersions {
 		// Direct play inside the principal's own playback session, the only
 		// way an invited device reaches a file (TestNoTokenRouteServesAWholeFile)...
@@ -522,7 +553,7 @@ func accessWalk(t *testing.T, kind string) {
 	// The friend's own sessions on everything about to be hidden, opened while
 	// allowed: a policy tightened mid-play must cut them off.
 	var sessions []string
-	for _, id := range []int64{w.vaultMovie, w.horrorMovie, w.ratedMovie, w.horrorEpisode, w.strictEpisode} {
+	for _, id := range []int64{w.vaultMovie, w.horrorMovie, w.ratedMovie, w.horrorEpisode, w.strictEpisode, w.lentMovie} {
 		sessions = append(sessions, w.startSession(w.friendTok, id, nil))
 	}
 	sessions = append(sessions, w.startSession(w.friendTok, w.movieID, &w.v4k))
@@ -584,6 +615,12 @@ func accessWalk(t *testing.T, kind string) {
 		t.Run(key, func(t *testing.T) {
 			for _, p := range byRoute[key] {
 				r := call(p, w.friendTok)
+				if p.refusal != "" {
+					if r.code != p.status || !strings.Contains(string(r.body), `"error":"`+p.refusal+`"`) {
+						t.Errorf("%s: the restricted friend got %d %.200s, want %d %s", label(p), r.code, r.body, p.status, p.refusal)
+					}
+					continue
+				}
 				if p.list == nil {
 					if r.code != http.StatusNotFound || (p.pastPolicy != "" && strings.Contains(string(r.body), p.pastPolicy)) {
 						t.Errorf("%s: the restricted friend got %d %.200s, want the policy's 404", label(p), r.code, r.body)

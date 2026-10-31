@@ -106,10 +106,24 @@ func (s *Server) redeemInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("login", "user", sess.User.Username, "device_token", d.ID, "name", d.Name, "ip", ip, "device", dev.Name,
 		"client", dev.Client, "method", "invite")
+	// A lent tape's device is told "Be kind, rewind." when the loan is over,
+	// which needs its session known to the loan.
+	var loan *meLoan
+	if s.Loans != nil {
+		if err := s.Loans.RememberSession(r.Context(), d.ID, token); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if loan, err = s.borrowerLoan(r.Context(), d.ID); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
 	if req.Cookie {
 		s.setSessionCookie(w, r, token)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": sess.ExpiresAt, "user": toUserJSON(sess.User), "device": d})
+	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": sess.ExpiresAt, "user": toUserJSON(sess.User), "device": d,
+		"loan": loan})
 }
 
 func pairKey(kind, ip string) string { return "pair-" + kind + ":" + auth.IPKey(ip) }
@@ -256,6 +270,18 @@ func (s *Server) adminRevokeDevice(w http.ResponseWriter, r *http.Request) {
 // same stream registry Activity's Stop uses. Its sessions are already gone, so
 // the device's very next request is refused too.
 func (s *Server) revokeDevice(ctx context.Context, id int64, by string) (int, error) {
+	// A lent tape's device is the loan: revoking it (or the borrower signing
+	// out) brings the tape back, rather than leaving the owner's copy held
+	// by a device that can no longer play it.
+	if s.Loans != nil {
+		l, ok, err := s.Loans.ForToken(ctx, id)
+		if err != nil {
+			return 0, err
+		}
+		if ok && l.State == "out" {
+			return s.returnLoan(ctx, l.ID, by)
+		}
+	}
 	open, err := s.Invites.Revoke(ctx, id, by)
 	if err != nil {
 		return 0, err
@@ -280,17 +306,29 @@ func (s *Server) cutStreams(sessions []string) int {
 // the next request is refused anyway, and this ends a film already playing.
 // The server runs it every minute.
 func (s *Server) CutExpiredDevices(ctx context.Context) int {
+	// Lent tapes first, so a borrower's film ends with "Be kind, rewind."
+	// rather than the plain expired-invite message.
+	n := 0
+	if s.Loans != nil {
+		due, err := s.Loans.SweepExpired(ctx)
+		if err != nil {
+			s.Log.Warn("end expired loans", "err", err)
+		} else if len(due) > 0 {
+			n = s.cutStreams(due)
+			s.Log.Info("expired loans' streams stopped", "sessions", len(due), "open_streams", n)
+		}
+	}
 	open, err := s.Invites.EndExpired(ctx)
 	if err != nil {
 		s.Log.Warn("end expired devices' streams", "err", err)
-		return 0
+		return n
 	}
 	if len(open) == 0 {
-		return 0
+		return n
 	}
-	n := s.cutStreams(open)
-	s.Log.Info("expired devices' streams stopped", "sessions", len(open), "open_streams", n)
-	return n
+	cut := s.cutStreams(open)
+	s.Log.Info("expired devices' streams stopped", "sessions", len(open), "open_streams", cut)
+	return n + cut
 }
 
 // streamOnly keeps invited devices to streaming (milestone 9's no-copy line):

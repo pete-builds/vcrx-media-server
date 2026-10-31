@@ -1,20 +1,22 @@
 import { api, artUrl } from "../api.js";
 import { h, s, clock, hours, when, bitrate, errorBox, toast } from "../dom.js";
 import { state } from "../app.js";
+import { dueDate, returnButton } from "./lend.js";
 
 // Activity, Tautulli style: now playing (refreshed every five seconds),
-// history, stats and users. Admin only; the server enforces it too.
+// history, stats and users, and the tapes lent out. Admin only; the server
+// enforces it too.
 export async function activityView({ match, params }) {
   if (!state.me || !state.me.is_admin) {
     return { el: errorBox("Admins only", "Activity is only available to an admin account on the local network.") };
   }
   const tab = match[1] || "now";
   const tabs = h("nav", { class: "tabs", "aria-label": "Activity" },
-    [["now", "Now Playing"], ["history", "History"], ["stats", "Stats"], ["users", "Users"]]
+    [["now", "Now Playing"], ["history", "History"], ["stats", "Stats"], ["users", "Users"], ["loans", "Loans"]]
       .map(([k, label]) => h("a", { href: `#/activity/${k}`, class: k === tab ? "active" : "" }, label)));
   const body = h("div", {});
   const el = h("div", {}, h("h1", {}, "Activity"), tabs, body);
-  const view = { now: nowTab, history: historyTab, stats: statsTab, users: usersTab }[tab];
+  const view = { now: nowTab, history: historyTab, stats: statsTab, users: usersTab, loans: loansTab }[tab];
   const cleanup = await view(body, params);
   return { el, title: "Activity", cleanup };
 }
@@ -309,4 +311,31 @@ async function usersTab(body) {
       h("td", {}, u.last_title || ""),
       h("td", {}, u.last_device || ""),
       h("td", {}, address(u.last_ip, u.last_location)))))));
+}
+
+// Loans: every tape lent out, who has it or had it, when, and how it came
+// back: returned early (and by whom) or run out at its due date.
+
+const LOAN_STATES = { out: "Out", returned: "Returned", expired: "Expired" };
+
+async function loansTab(body) {
+  const draw = async () => {
+    const data = await api("/admin/loans");
+    if (!data.loans.length) {
+      body.replaceChildren(h("div", { class: "empty" }, "No tapes lent yet. Lend one from a movie's page."));
+      return;
+    }
+    body.replaceChildren(h("table", { class: "list loans" },
+      h("thead", {}, h("tr", {}, ["Title", "Lent to", "Lent", "Due back", "Card", "State", ""].map((c) => h("th", {}, c)))),
+      h("tbody", {}, data.loans.map((l) => h("tr", { "data-state": l.state },
+        h("td", {}, l.item_id ? h("a", { href: `#/item/${l.item_id}` }, l.title) : l.title),
+        h("td", {}, l.borrower, l.device_name ? h("span", { class: "faint" }, ` · ${l.device_name}`) : null),
+        h("td", {}, when(l.created_at), l.lent_by ? h("span", { class: "faint" }, ` by ${l.lent_by}`) : null),
+        h("td", {}, dueDate(l.due_at)),
+        h("td", {}, l.redeemed_at ? `Scanned ${when(l.redeemed_at)}` : "Not scanned"),
+        h("td", {}, h("span", { class: `pill loan-state ${l.state}` }, LOAN_STATES[l.state] || l.state),
+          l.state !== "out" && l.ended_at ? h("span", { class: "faint" }, ` ${when(l.ended_at)}${l.state === "returned" && l.ended_by ? " by " + l.ended_by : ""}`) : null),
+        h("td", {}, l.state === "out" ? returnButton(l, l.title, draw) : null))))));
+  };
+  await draw();
 }

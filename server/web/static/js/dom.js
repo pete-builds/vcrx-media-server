@@ -50,8 +50,10 @@ export function icon(name) {
     restart: "M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z",
     menu: "M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z",
     star: "m12 17.3 6.2 3.7-1.6-7 5.4-4.7-7.2-.6L12 2 9.2 8.7 2 9.3l5.4 4.7-1.6 7z",
+    // A cassette: the shell, a window, and two reels (holes, by even-odd).
+    tape: "M2 5h20v14H2zM4 7v10h16V7zm1.5 2h13v6h-13zM9 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm6 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z",
   };
-  return s("svg", { viewBox: "0 0 24 24", "aria-hidden": "true" }, s("path", { d: paths[name] }));
+  return s("svg", { viewBox: "0 0 24 24", "aria-hidden": "true" }, s("path", { d: paths[name], "fill-rule": name === "tape" ? "evenodd" : null }));
 }
 
 export function clock(ms) {

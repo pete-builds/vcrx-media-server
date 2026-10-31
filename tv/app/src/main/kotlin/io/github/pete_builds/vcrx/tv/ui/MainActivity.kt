@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.navigation.compose.NavHost
@@ -18,6 +20,8 @@ import io.github.pete_builds.vcrx.tv.ui.collection.CollectionScreen
 import io.github.pete_builds.vcrx.tv.ui.details.DetailsScreen
 import io.github.pete_builds.vcrx.tv.ui.pair.PairScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.ProfilePickerScreen
+import io.github.pete_builds.vcrx.tv.ui.rewind.RewindScreen
+import kotlinx.coroutines.flow.filterNotNull
 import io.github.pete_builds.vcrx.tv.ui.profiles.StartScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.startScreen
 import io.github.pete_builds.vcrx.tv.ui.settings.AboutScreen
@@ -41,6 +45,8 @@ class MainActivity : ComponentActivity() {
                 val actions = remember(nav) { AppActions(nav, this) }
                 // Any 401 anywhere lands here and returns to Login with a clean back stack.
                 LaunchedEffect(nav) { graph.signedOut.collect { actions.toLogin() } }
+                // A lent tape that came back: "Be kind, rewind." rather than Login.
+                LaunchedEffect(nav) { graph.rewind.filterNotNull().collect { actions.toRewind() } }
                 CompositionLocalProvider(LocalAppActions provides actions) {
                     NavHost(navController = nav, startDestination = start) {
                         composable<ConnectRoute> { ConnectScreen() }
@@ -54,6 +60,10 @@ class MainActivity : ComponentActivity() {
                         composable<AboutRoute> { AboutScreen() }
                         composable<ProfilesRoute> { ProfilePickerScreen() }
                         composable<PairRoute> { PairScreen() }
+                        composable<RewindRoute> {
+                            val rewound by graph.rewind.collectAsState()
+                            RewindScreen(rewound)
+                        }
                     }
                 }
             }

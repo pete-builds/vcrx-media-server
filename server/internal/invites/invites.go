@@ -176,6 +176,32 @@ func (s *Store) create(ctx context.Context, createdBy, name, source string, sc S
 		return 0, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	tokenID, userID, err := s.createIn(ctx, tx, createdBy, name, source, sc, inviteHash, dev)
+	if err != nil {
+		return 0, 0, err
+	}
+	return tokenID, userID, tx.Commit()
+}
+
+// MintIn makes an invite inside the caller's transaction, for a caller that
+// writes more alongside it (a lent tape writes its loan in the same commit).
+// The scope must have passed Validate. It returns the token id, the device's
+// user id and the secret, which is not kept.
+func (s *Store) MintIn(ctx context.Context, tx *sql.Tx, createdBy, name string, sc Scope) (int64, int64, string, error) {
+	name, err := CleanName(name)
+	if err != nil {
+		return 0, 0, "", err
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		return 0, 0, "", err
+	}
+	hash, _ := HashSecret(secret)
+	tokenID, userID, err := s.createIn(ctx, tx, createdBy, name, "invite", sc, hash, auth.Device{})
+	return tokenID, userID, secret, err
+}
+
+func (s *Store) createIn(ctx context.Context, tx *sql.Tx, createdBy, name, source string, sc Scope, inviteHash []byte, dev auth.Device) (int64, int64, error) {
 	now := s.now().UnixMilli()
 	tag := make([]byte, 6)
 	if _, err := rand.Read(tag); err != nil {
@@ -220,7 +246,7 @@ func (s *Store) create(ctx context.Context, createdBy, name, source string, sc S
 		return 0, 0, err
 	}
 	tokenID, _ := res.LastInsertId()
-	return tokenID, userID, tx.Commit()
+	return tokenID, userID, nil
 }
 
 // Mint makes an invite and returns its device row and the secret. The secret
@@ -330,7 +356,13 @@ func (s *Store) scan(ctx context.Context, rows *sql.Rows) ([]Device, error) {
 			return nil, err
 		}
 		out[i].Scope.LibraryIDs = append([]int64{}, libs.LibraryIDs...)
-		out[i].Summary, err = s.summary(ctx, out[i].Scope)
+		// A lent tape's device sees one title, whatever its library says.
+		var loanTitle string
+		if err := s.DB.QueryRowContext(ctx, `SELECT title FROM loans WHERE token_id = ?`, out[i].ID).Scan(&loanTitle); err != nil &&
+			!errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		out[i].Summary, err = s.summary(ctx, out[i].Scope, loanTitle)
 		if err != nil {
 			return nil, err
 		}
@@ -338,8 +370,9 @@ func (s *Store) scan(ctx context.Context, rows *sql.Rows) ([]Device, error) {
 	return out, nil
 }
 
-// summary says what a scope allows in one line.
-func (s *Store) summary(ctx context.Context, sc Scope) (string, error) {
+// summary says what a scope allows in one line. loanTitle names the one
+// title a lent tape's device may see, when it is one.
+func (s *Store) summary(ctx context.Context, sc Scope, loanTitle string) (string, error) {
 	var names []string
 	for _, id := range sc.LibraryIDs {
 		var n string
@@ -354,6 +387,9 @@ func (s *Store) summary(ctx context.Context, sc Scope) (string, error) {
 	out := "Sees " + joinAnd(names)
 	if len(names) == 0 {
 		out = "Sees nothing"
+	}
+	if loanTitle != "" {
+		out = "Borrowing “" + loanTitle + "” only"
 	}
 	if sc.MaxResolution != "" {
 		out += ", up to " + sc.MaxResolution

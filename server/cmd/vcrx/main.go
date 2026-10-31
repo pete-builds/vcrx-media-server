@@ -42,6 +42,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
+	"github.com/pete-builds/vcrx-media-server/server/internal/loans"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
@@ -344,6 +345,8 @@ func serve() error {
 	// polls with an unknown code, and ten wrong codes typed by an admin, per
 	// address per window.
 	srv.Invites, srv.Pairings, srv.PairLimiter = &invites.Store{DB: a.db}, &invites.Pairings{}, auth.NewLimiter(10, 15*time.Minute)
+	// Lent tapes; their expiry is swept with the devices' every minute.
+	srv.Loans = &loans.Store{DB: a.db, Invites: srv.Invites}
 	go func() {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()

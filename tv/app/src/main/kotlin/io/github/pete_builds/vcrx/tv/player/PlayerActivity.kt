@@ -9,7 +9,12 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
+import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.ui.theme.BrandTheme
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * Full-screen playback. Its own activity so leaving it, by Back, by the end of the
@@ -36,6 +41,12 @@ class PlayerActivity : ComponentActivity() {
             }
         }
         controller.start()
+        // A lent tape that came back mid-film: close the player, and the main
+        // screen says "Be kind, rewind."
+        lifecycleScope.launch {
+            graph.rewind.filterNotNull().first()
+            exit()
+        }
     }
 
     // Activity.dispatchKeyEvent is public framework API. androidx.core's ComponentActivity
