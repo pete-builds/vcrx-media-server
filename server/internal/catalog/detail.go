@@ -97,6 +97,9 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 	if d.Collections, err = c.ItemCollections(ctx, id); err != nil {
 		return d, err
 	}
+	if err := c.extras(ctx, pol, &d); err != nil {
+		return d, err
+	}
 	if d.Kind == "movie" || d.Kind == "episode" {
 		if d.Versions, err = c.Versions(ctx, pol, id); err != nil {
 			return d, err

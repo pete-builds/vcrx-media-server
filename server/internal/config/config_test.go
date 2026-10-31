@@ -122,3 +122,23 @@ func TestTrustedNetworksHaveNoDefault(t *testing.T) {
 		t.Fatalf("env: %q %v %v %v", c.AutoSignInUser, c.TrustedNetworks, c.AllowedHosts, err)
 	}
 }
+
+// YouTube trailers are off unless asked for, and need a TMDb key as well.
+func TestTrailersYouTubeIsOptIn(t *testing.T) {
+	t.Setenv("VCRX_CONFIG_DIR", t.TempDir())
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TrailersYouTube || c.YouTubeTrailers() {
+		t.Fatal("YouTube trailers on by default")
+	}
+	t.Setenv("VCRX_TRAILERS_YOUTUBE", "true")
+	if c, _ = Load(); !c.TrailersYouTube || c.YouTubeTrailers() {
+		t.Fatalf("without a TMDb key: setting %v, on %v", c.TrailersYouTube, c.YouTubeTrailers())
+	}
+	t.Setenv("VCRX_TMDB_API_KEY", "fake-tmdb-key")
+	if c, _ = Load(); !c.YouTubeTrailers() {
+		t.Fatal("trailers_youtube with a key is not on")
+	}
+}

@@ -93,7 +93,7 @@ func (s *Server) openapi(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serverInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": s.ServerName, "product": "vcrx-media-server", "version": s.Version, "api_version": 1,
-		"auto_sign_in": s.autoSignIn(info(r).IP),
+		"auto_sign_in": s.autoSignIn(info(r).IP), "trailers_youtube": s.TrailersYouTube,
 	})
 }
 
@@ -417,7 +417,7 @@ func (s *Server) startPlayback(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if req.ItemID <= 0 {
+	if req.ItemID <= 0 && req.ExtraID == nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "item_id is required.")
 		return
 	}
@@ -451,7 +451,7 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 	// Progress lands in the item's watch state, so the caller must still be
 	// allowed the session's version, as for its streams.
 	if ss, err := s.Playback.ForStream(r.Context(), ri.Session.User.ID, r.PathValue("session_id")); err == nil {
-		if ok, err := s.Catalog.CanPlay(r.Context(), ri.Policy, ss.VersionID); err != nil || !ok {
+		if ok, err := s.canPlaySession(r.Context(), ri.Policy, ss); err != nil || !ok {
 			if err != nil {
 				s.internal(w, r, err)
 				return

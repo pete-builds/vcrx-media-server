@@ -106,6 +106,15 @@ extra_movies=("Hollow Pines (1987)" "The Lantern Hour (1994)" "Grave Weather (20
 for m in "${extra_movies[@]}"; do tiny "$media/Movies/$m/$m.mp4"; done
 for s in "Lamplight Lane" "North Ferry" "Signal Hill"; do tiny "$media/TV/$s/Season 01/$s - S01E01.mp4"; done
 
+# Extras: a trailer beside a film, two extras folders, and a show's theme
+# music. None may become a title; they attach to Harbor Lights and Quiet Street.
+harbor="$media/Movies/Harbor Lights (2001)"
+clip "$harbor/Harbor Lights (2001)-trailer.mp4" 12 libx264 aac -movflags +faststart
+clip "$harbor/Featurettes/Raising the Lighthouse.mp4" 8 libx264 aac -movflags +faststart
+clip "$harbor/Deleted Scenes/The Long Night.mp4" 6 libx264 aac -movflags +faststart
+theme="$media/TV/Quiet Street/theme.mp3"
+[ -f "$theme" ] || ffmpeg -loglevel error -y -f lavfi -i "sine=frequency=262:duration=12" -c:a libmp3lame -q:a 6 "$theme"
+
 # NFO ratings let the poster overlays show without network access; the optional
 # fifth argument is more NFO XML, such as an invented cast, genres and plots.
 nfo() { # dir file rating votes [extra-xml]

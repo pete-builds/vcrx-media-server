@@ -14,8 +14,14 @@ data class Preferences(
     val audio: AudioPrefs = AudioPrefs(),
     val video: VideoPrefs = VideoPrefs(),
     val home: HomePrefs = HomePrefs(),
-    /** Hook for the trailers feature: read it there; Settings shows the row once [FeatureHooks.TRAILERS] is on. */
-    val trailers: TrailerMode = TrailerMode.LocalOnly,
+    /**
+     * Where the Trailer button's trailer may come from (trailers/Trailers.kt).
+     * YouTube is offered only when the server has YouTube trailers on, so the
+     * default means local and YouTube where the server offers it, else local.
+     */
+    val trailers: TrailerMode = TrailerMode.LocalAndYouTube,
+    /** A show's theme.mp3 plays quietly on its details screen. */
+    val themeMusic: Boolean = true,
     /** Hook for the skip-intro feature: read it there; Settings shows the row once [FeatureHooks.SKIP_INTRO] is on. */
     val skipIntro: SkipIntroMode = SkipIntroMode.ShowButton,
 ) {
@@ -50,7 +56,7 @@ data class Preferences(
  * features only read them; the rows appear in Settings when the flag is true.
  */
 object FeatureHooks {
-    const val TRAILERS = false
+    const val TRAILERS = true
     const val SKIP_INTRO = false
 }
 

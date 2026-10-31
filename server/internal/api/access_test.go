@@ -118,6 +118,8 @@ type walkFixture struct {
 	hiddenVersions                          []int64 // one per hidden playable, plus the film's 4K
 	hiddenSubs                              []int64
 	posters                                 []int64
+	// Extras hidden with their film (a denied label) or by the ceiling (4K).
+	hiddenExtras []int64
 }
 
 func newWalkFixture(t *testing.T) *walkFixture {
@@ -256,6 +258,26 @@ func newWalkFixture(t *testing.T) *walkFixture {
 		}
 		return id
 	}
+	// A trailer of the labelled film, and a 4K featurette of the visible one:
+	// extras follow their film's visibility and the resolution ceiling.
+	extra := func(item, lib int64, dir, name, kind, res string) int64 {
+		t.Helper()
+		p := filepath.Join(dir, name+".mkv")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, content(10_000), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return exec(`INSERT INTO item_extras (item_id, library_id, kind, title, path, rel_path, size, mtime, container, duration_ms,
+				video_codec, video_profile, bit_depth, width, height, resolution, audio_streams, probe_status, added_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, 10000, 0, 'mkv', 90000, 'hevc', 'main 10', 10, 1920, 1080, ?,
+				'[{"index":1,"codec":"eac3","channels":6,"default":true}]', 'ok', ?, ?)`,
+			item, lib, kind, name, p, filepath.Base(p), res, now, now)
+	}
+	w.hiddenExtras = append(w.hiddenExtras,
+		extra(w.horrorMovie, w.movies, filepath.Join(f.root, "Zebra Night", "Trailers"), "Zebra Teaser", "trailer", "1080p"),
+		extra(f.movieID, w.movies, filepath.Join(f.root, "Film 2001 2160p", "Featurettes"), "Making Of 4K", "featurette", "4K"))
 	w.hiddenCollection = coll("Zebra Collection", w.horrorMovie, w.ratedMovie)
 	w.mixedCollection = coll("Mixed Collection", f.movieID, w.horrorMovie)
 	return w
@@ -300,6 +322,21 @@ func (w *walkFixture) startSession(tok string, item int64, version *int64) strin
 	return out.SessionID
 }
 
+// startExtraSession opens a converted-stream session on an extra.
+func (w *walkFixture) startExtraSession(tok string, extra int64) string {
+	w.t.Helper()
+	r := w.do("POST", "/api/v1/playback/sessions", tok, map[string]any{"extra_id": extra, "capabilities": browserCaps(true)})
+	var out struct {
+		SessionID string `json:"session_id"`
+		Stream    struct{ Protocol string }
+	}
+	r.json(w.t, &out)
+	if r.code != 201 || out.Stream.Protocol != "fmp4" {
+		w.t.Fatalf("session on extra %d: %d %s", extra, r.code, r.body)
+	}
+	return out.SessionID
+}
+
 // probes lists every call the walk makes. sessions are the friend's, opened
 // while the friend could still play the hidden things; adminSession is not the
 // friend's at all.
@@ -339,6 +376,10 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 	}
 	for _, s := range w.hiddenSubs {
 		ps = append(ps, at("GET /api/v1/subtitles/{stream_id}", s))
+	}
+	for _, x := range w.hiddenExtras {
+		ps = append(ps, at("GET /api/v1/extras/{extra_id}/file", x), at("HEAD /api/v1/extras/{extra_id}/file", x),
+			at("POST /api/v1/playback/sessions").with(map[string]any{"extra_id": x, "capabilities": tclCaps()}))
 	}
 	sessionProbes := func(id, owner string) {
 		ps = append(ps,
@@ -447,6 +488,11 @@ func TestAccessWalkEveryRouteAppliesThePolicy(t *testing.T) {
 		sessions = append(sessions, w.startSession(w.friendTok, id, nil))
 	}
 	sessions = append(sessions, w.startSession(w.friendTok, w.movieID, &w.v4k))
+	// And on the extras about to be hidden: a trailer session has no version,
+	// so its events and streams must check the extra itself.
+	for _, x := range w.hiddenExtras {
+		sessions = append(sessions, w.startExtraSession(w.friendTok, x))
+	}
 	adminSession := w.startSession(w.adminTok, w.movieID, &w.v1080)
 	ps := w.probes(sessions, adminSession)
 	checkCoverage(t, w.srv.Routes(), ps)

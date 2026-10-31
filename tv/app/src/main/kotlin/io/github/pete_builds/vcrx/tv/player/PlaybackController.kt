@@ -87,6 +87,8 @@ class PlaybackController(
     private val versionId: Long?,
     private val request: StartRequest,
     val title: String,
+    /** Set when playing one of the item's extras (a trailer) rather than the item. */
+    private val extraId: Long? = null,
 ) {
     private val graph = activity.graph
 
@@ -264,7 +266,7 @@ class PlaybackController(
     }
 
     private suspend fun open(capabilities: Capabilities, startMs: Long?) {
-        val created = graph.api.startPlayback(PlaybackRequest(itemId, versionId, startMs, capabilities))
+        val created = graph.api.startPlayback(PlaybackRequest(itemId, versionId, startMs, capabilities, extraId))
         if (released) return
         play(created)
     }

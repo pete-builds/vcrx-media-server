@@ -266,7 +266,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	cat := &catalog.Catalog{DB: a.db, Seasons: seasons, Today: devHomeDate(log)}
+	cat := &catalog.Catalog{DB: a.db, Seasons: seasons, Today: devHomeDate(log), TrailersYouTube: cfg.YouTubeTrailers()}
 	authStore := &auth.Store{DB: a.db, TTL: cfg.SessionTTL}
 	// Converted streams that copy the video convert at most the audio, a small
 	// fraction of a core each; four at once is well within nix1's budget.
@@ -348,6 +348,7 @@ func serve() error {
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
 		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets, AllowedHosts: cfg.AllowedHosts,
+		TrailersYouTube: cfg.YouTubeTrailers(),
 	}
 	srv.SmartCollections = smart
 	// The weekly newsletter checks once a minute whether its time has come; it
@@ -389,6 +390,12 @@ func serve() error {
 	case cfg.TMDbHomeLists:
 		lists := &homelists.Refresher{DB: a.db, TMDb: tmdb.New(cfg.TMDbAPIKey, cfg.TMDbLanguage), Log: log.With("component", "homelists")}
 		go lists.Run(ctx, 6*time.Hour)
+	}
+	switch {
+	case cfg.YouTubeTrailers():
+		log.Info("YouTube trailers on: titles without a local trailer offer TMDb's official one")
+	case cfg.TrailersYouTube:
+		log.Warn("trailers_youtube is on but there is no TMDb key to look trailers up with; set VCRX_TMDB_API_KEY")
 	}
 
 	if cfg.ArrWebhookToken != "" {
@@ -798,7 +805,7 @@ func watchExport(ctx context.Context, conn *sql.DB, out io.Writer, library strin
 
 func newEnricher(a *app) *enrich.Enricher {
 	return &enrich.Enricher{DB: a.db, TMDb: tmdb.New(a.cfg.TMDbAPIKey, a.cfg.TMDbLanguage), Dir: a.cfg.MetadataDir(),
-		Country: a.cfg.TMDbCountry, Log: a.log.With("component", "tmdb")}
+		Country: a.cfg.TMDbCountry, Log: a.log.With("component", "tmdb"), Trailers: a.cfg.YouTubeTrailers()}
 }
 
 func metadataCmd(args []string) error {
@@ -845,6 +852,11 @@ func metadataCmd(args []string) error {
 		}
 		st, err := enr.Drain(ctx)
 		fmt.Printf("tmdb: %d matched, %d unmatched, %d errors, %d episodes filled\n", st.Matched, st.Unmatched, st.Errors, st.Episodes)
+		if err == nil && enr.Trailers {
+			var ts enrich.TrailerStats
+			ts, err = enr.RefreshTrailers(ctx)
+			fmt.Printf("trailers: %d found on YouTube, %d without one, %d lookups failed\n", ts.Found, ts.None, ts.Errors)
+		}
 		if st.Unmatched > 0 {
 			fmt.Println("run `vcrx metadata status` to see what was skipped and why")
 		}

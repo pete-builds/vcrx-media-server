@@ -103,6 +103,11 @@ type ItemDetail struct {
 	Versions      []Version          `json:"versions"`
 	NextEpisode   *ItemSummary       `json:"next_episode"`
 	Collections   []CollectionRef    `json:"collections"`
+	// Extras are a movie's or show's local trailers, featurettes and the like;
+	// Trailer is the one to play first; ThemeMusic is a show's theme.mp3.
+	Extras     []Extra     `json:"extras"`
+	Trailer    *Trailer    `json:"trailer"`
+	ThemeMusic *ThemeMusic `json:"theme_music"`
 }
 
 // CastMember is one actor in billing order, with the part they play when known.

@@ -20,6 +20,7 @@ Written 2026-10-30. `docs/REFERENCE.md` holds the verified facts and governs whe
 | Web client | Served by the server itself on 3750; vanilla ES modules, no framework, no build step, nothing from the internet. Browser sessions are an HttpOnly SameSite=Strict cookie because media elements cannot send a bearer header; changes need the `X-VCRX-Client` header. |
 | Browser playback | Browsers decode H.264, HEVC (Chrome on a Mac) and AV1 but not AC-3, E-AC-3, DTS or TrueHD, which are most first audio tracks on nix1. So the server copies video and converts only audio (#8) where it can, and transcodes the video to H.264 only when the browser cannot decode it at all. |
 | Overlays | Baked into the served poster (like Kometa into Plex), so every client gets them unchanged. VCRX lettering, not third-party logos. Kometa's ribbon lists (IMDb Top 250, RT) have no source here; the ribbon is an IMDb rating and votes rule. |
+| Trailers | Offline first (2026-10-31): local extras in Plex's layout (`-trailer` files, `Trailers` and the other extras folders, a show's `theme.mp3`) attach to their title and play through the same decision and access rules as a version, without touching watch state. YouTube trailers are opt-in (`trailers_youtube`, needs a TMDb key): TMDb's best official trailer, embedded from youtube-nocookie.com on the web (the only frame the CSP then allows) and opened in the YouTube app on the TV. |
 
 ## Server shape
 

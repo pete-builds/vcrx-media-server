@@ -510,6 +510,29 @@ paths:
         - { name: version_id, in: path, required: true, schema: { type: integer } }
       responses:
         "200": { description: Headers only }
+  /api/v1/extras/{extra_id}/file:
+    get:
+      operationId: streamExtra
+      summary: |
+        An extra's file: a trailer or featurette for direct play (the stream URL of a
+        session started with extra_id), or a show's theme music (theme_music.url, no
+        session). Supports Range, If-Range and HEAD. Access is the item's: 404 for a
+        caller who cannot see the movie or show it belongs to.
+      parameters:
+        - { name: extra_id, in: path, required: true, schema: { type: integer } }
+        - { name: session, in: query, schema: { type: string }, description: Playback session id, for activity accounting. }
+      responses:
+        "200": { description: Whole file }
+        "206": { description: Partial content }
+        "404": { $ref: "#/components/responses/Error" }
+        "416": { description: Range not satisfiable }
+    head:
+      operationId: headExtra
+      parameters:
+        - { name: extra_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: Headers only }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/subtitles/{stream_id}:
     get:
       operationId: getSubtitle
@@ -1317,6 +1340,7 @@ components:
         version: { type: string }
         api_version: { type: integer, const: 1 }
         auto_sign_in: { type: boolean, description: "True when this client may sign in without a password (POST /api/v1/auth/auto)." }
+        trailers_youtube: { type: boolean, description: "True when the admin turned on YouTube trailers (trailers_youtube, with a TMDb key): details may carry a trailer with source youtube." }
     AutoLoginRequest:
       type: object
       required: [device]
@@ -1467,7 +1491,48 @@ components:
                   id: { type: integer }
                   name: { type: string }
               description: Collections this item is in.
+            extras:
+              type: array
+              items: { $ref: "#/components/schemas/Extra" }
+              description: >-
+                A movie's or show's local extras (trailers first, then featurettes, behind the scenes, deleted scenes,
+                interviews, scenes, shorts, other), from files beside it on disk. Empty for seasons and episodes.
+                Play one with POST /api/v1/playback/sessions and extra_id.
+            trailer: { oneOf: [{ $ref: "#/components/schemas/Trailer" }, { type: "null" }], description: "The trailer a Trailer button plays: a local one first, else YouTube when trailers_youtube is on. Null when there is none." }
+            theme_music:
+              oneOf:
+                - type: object
+                  required: [id, url]
+                  properties:
+                    id: { type: integer }
+                    url: { type: string, description: Path of the MP3 relative to the server base URL. }
+                - type: "null"
+              description: A show's theme.mp3, for clients to play quietly on its page.
             next_episode: { oneOf: [{ $ref: "#/components/schemas/ItemSummary" }, { type: "null" }], description: "For a show or season: the episode Play should start (first unwatched, or in progress). For an episode: the one after it, for Up Next (the rest of the season, then the next; specials only after a special); null at the end of the show." }
+    Extra:
+      type: object
+      required: [id, kind, title]
+      properties:
+        id: { type: integer }
+        kind: { type: string, enum: [trailer, featurette, behind_the_scenes, deleted_scene, interview, scene, short, other] }
+        title: { type: string }
+        duration_ms: { type: [integer, "null"] }
+        container: { type: [string, "null"] }
+        resolution: { oneOf: [{ $ref: "#/components/schemas/Resolution" }, { type: "null" }] }
+    Trailer:
+      type: object
+      required: [source, title]
+      properties:
+        source: { type: string, enum: [local, youtube] }
+        title: { type: string }
+        extra_id: { type: [integer, "null"], description: "For a local trailer: play it with POST /api/v1/playback/sessions and this extra_id." }
+        duration_ms: { type: [integer, "null"] }
+        youtube_key:
+          type: [string, "null"]
+          pattern: "^[A-Za-z0-9_-]{11}$"
+          description: >-
+            For a YouTube trailer: the video id. The web app embeds https://www.youtube-nocookie.com/embed/<key>;
+            the TV app opens vnd.youtube:<key>, else https://www.youtube.com/watch?v=<key>.
     Collection:
       type: object
       required: [id, library_id, name, item_count, poster_item_ids]
@@ -1566,12 +1631,18 @@ components:
         default_audio_only: { type: boolean, description: "The client plays only the default audio track (a browser), so that track is the one that has to decode." }
     PlaybackRequest:
       type: object
-      required: [item_id, capabilities]
+      required: [capabilities]
       properties:
-        item_id: { type: integer, description: A movie or episode. }
+        item_id: { type: integer, description: A movie or episode. Required unless extra_id is given. }
         version_id: { type: [integer, "null"], description: Omit to let the server pick the best version the device can play. }
         start_position_ms: { type: [integer, "null"], description: Omit to resume from the saved position. }
         capabilities: { $ref: "#/components/schemas/Capabilities" }
+        extra_id:
+          type: [integer, "null"]
+          description: >-
+            Play one of the item's extras (a trailer) instead of a version. item_id may then be omitted or 0; when
+            given it must be the extra's item. Same decision ladder and policy as a version; no watch state is
+            written, and theme music is refused (422).
     SubtitleSource:
       type: object
       required: [track_id, url, codec, mime_type]
@@ -1593,7 +1664,8 @@ components:
         decision: { type: string, enum: [direct_play, remux, audio_transcode, transcode] }
         reason: { type: string, description: Why this decision, in plain words. Recorded in activity. }
         item_id: { type: integer }
-        version: { $ref: "#/components/schemas/Version" }
+        extra_id: { type: integer, description: Present when the session plays an extra. }
+        version: { $ref: "#/components/schemas/Version", description: "The file being played; for an extra, its id is the extra's." }
         stream:
           type: object
           required: [url, protocol]

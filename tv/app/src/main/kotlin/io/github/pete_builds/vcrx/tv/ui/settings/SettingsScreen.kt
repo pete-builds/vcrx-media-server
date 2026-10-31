@@ -342,7 +342,17 @@ private fun PlaybackSettings() {
         }
         if (FeatureHooks.TRAILERS) {
             item(key = "trailers") {
-                ChoiceRow("Trailers", prefs.trailers, TrailerMode.entries, Describe::trailers, "Where trailers come from.", { v -> update { it.copy(trailers = v) } })
+                ChoiceRow(
+                    "Trailers",
+                    prefs.trailers,
+                    TrailerMode.entries,
+                    Describe::trailers,
+                    "Where the Trailer button plays from. YouTube trailers appear only when the server offers them, and open in the YouTube app.",
+                    { v -> update { it.copy(trailers = v) } },
+                )
+            }
+            item(key = "theme") {
+                ToggleRow("Theme music", prefs.themeMusic, "Play a show's theme quietly on its page.", { v -> update { it.copy(themeMusic = v) } })
             }
         }
     }
@@ -526,7 +536,7 @@ fun summary(page: SettingsPage, prefs: Preferences): String = when (page) {
 /** The description each category shows when focused. */
 fun pageHelp(page: SettingsPage): String = when (page) {
     SettingsPage.Subtitles -> "On or off for every video, languages, and how they look."
-    SettingsPage.Playback -> "Next episode, resume, skip steps and streaming quality."
+    SettingsPage.Playback -> "Next episode, resume, skip steps, streaming quality, trailers and theme music."
     SettingsPage.Audio -> "Audio language and passthrough to a receiver."
     SettingsPage.Video -> "HDR and Dolby Vision, for a TV that shows them badly."
     SettingsPage.Home -> "Which rows Home shows, and in what order."

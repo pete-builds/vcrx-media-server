@@ -14,6 +14,9 @@ var ErrNotFound = errors.New("not found")
 
 type Catalog struct {
 	DB *sql.DB
+	// TrailersYouTube offers the YouTube trailer TMDb lists when an item has no
+	// local one (the trailers_youtube setting, which needs a TMDb key).
+	TrailersYouTube bool
 	// Seasons are Home's holiday rows; nil means DefaultSeasons.
 	Seasons []Season
 	// Now and Location exist for tests. Today, when set, is the date Home's
