@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/activity"
@@ -24,6 +25,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
+	"github.com/pete-builds/vcrx-media-server/server/internal/subsearch"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 )
 
@@ -48,6 +50,9 @@ type Server struct {
 	// HLS writes converted streams as HLS for clients that report
 	// hls_stream (Safari). Nil turns it off.
 	HLS *remux.HLS
+	// SubSearch finds and downloads missing subtitles; nil or without a
+	// provider, search is off.
+	SubSearch *subsearch.Service
 	// Arr turns Radarr and Sonarr webhooks into scans; ArrToken guards it.
 	Arr      *arr.Dispatcher
 	ArrToken string
@@ -75,9 +80,13 @@ type Server struct {
 	// ProfilePicker sends trusted-network clients to the "Who's watching?"
 	// picker instead of signing them in as AutoSignInUser.
 	ProfilePicker bool
-	// Household backs profile switching; PINLimiter counts wrong PINs.
-	Household  *household.Store
-	PINLimiter *auth.Limiter
+	// Household backs profile switching; PINs counts PIN attempts. Passwords
+	// offered at a switch count against Limiter, as sign-ins do.
+	Household *household.Store
+	PINs      *household.Limiter
+	// switchLocks serializes password checks per profile (*sync.Mutex by id),
+	// so the sign-in limiter's check and its count cannot be raced.
+	switchLocks sync.Map
 	// Invites are invited devices (the invite is the account); Pairings are
 	// TVs waiting for a phone to approve them. PairLimiter counts pairing
 	// starts, polls with unknown codes, and wrong codes typed by an admin.
@@ -167,6 +176,9 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/admin/pairings/{code}", adminOnly, s.adminPairing},
 		{"POST", "/api/v1/admin/pairings/{code}/approve", adminOnly, s.adminApprovePairing},
 		{"DELETE", "/api/v1/admin/pairings/{code}", adminOnly, s.adminDenyPairing},
+		{"GET", "/api/v1/versions/{version_id}/subtitles/search", signedIn, s.searchSubtitles},
+		{"POST", "/api/v1/versions/{version_id}/subtitles/download", signedIn, s.downloadSubtitle},
+		{"PUT", "/api/v1/versions/{version_id}/subtitle-offset", signedIn, s.setSubtitleOffset},
 		{"GET", "/api/v1/speedtest", signedIn, s.speedTest},
 		{"GET", "/api/v1/admin/libraries", adminOnly, s.adminLibraries},
 		{"POST", "/api/v1/admin/libraries", adminOnly, s.adminCreateLibrary},
@@ -195,6 +207,8 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/admin/newsletter", adminOnly, s.newsletterStatus},
 		{"PUT", "/api/v1/admin/newsletter", adminOnly, s.newsletterSave},
 		{"POST", "/api/v1/admin/newsletter/preview", adminOnly, s.newsletterPreview},
+		{"GET", "/api/v1/admin/items/{item_id}/subtitles", adminOnly, s.adminItemSubtitles},
+		{"DELETE", "/api/v1/admin/subtitles/{stream_id}", adminOnly, s.adminDeleteSubtitle},
 	}
 }
 

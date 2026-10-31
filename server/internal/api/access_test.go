@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/admin"
-	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
 )
@@ -58,20 +57,11 @@ var publicRoutes = map[string]string{
 	"POST /api/v1/pair/poll":      "a TV asks whether it was approved; returns its session, no titles",
 }
 
-// householdRoutes serve the profile picker. They carry names and pictures of
-// the household, never titles, and every one of them refuses an invited
-// device: the walk checks that for the token principal.
-var householdRoutes = map[string]string{
-	"GET /api/v1/profiles":                  "the household's profiles for the picker",
-	"GET /api/v1/profiles/{user_id}/avatar": "a household member's picture",
-	"POST /api/v1/auth/switch":              "switches the device to another household profile",
-}
-
 // noItemRoutes are signed-in routes that read nothing about titles.
 var noItemRoutes = map[string]string{
 	"POST /api/v1/auth/logout": "ends the caller's own session",
 	"GET /api/v1/me":           "the caller's own account",
-	"GET /api/v1/speedtest":    "random filler bytes to time the connection; reads nothing from the library",
+	"GET /api/v1/speedtest":    "random filler bytes for timing the connection; reads nothing from the library",
 }
 
 type probe struct {
@@ -137,7 +127,7 @@ func newWalkFixture(t *testing.T) *walkFixture {
 	w := &walkFixture{fixture: newFixture(t), kind: "user"}
 	f := w.fixture
 	f.srv.Household = &household.Store{DB: f.db, AvatarDir: filepath.Join(t.TempDir(), "avatars")}
-	f.srv.PINLimiter = auth.NewLimiter(5, 15*time.Minute)
+	f.srv.PINs = household.NewLimiter(household.PINWindow)
 	withHLS(t, f, remux.New("ffmpeg", "ffprobe", 2, nil))
 	now := time.Now().UnixMilli()
 	exec := func(q string, args ...any) int64 {
@@ -369,6 +359,13 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 		if w.kind != "token" {
 			ps = append(ps, at("GET /api/v1/versions/{version_id}/file", v), at("HEAD /api/v1/versions/{version_id}/file", v))
 		}
+		// Subtitle search is off in the fixture, so even the open friend gets a
+		// 404, but only one written after the version passed the policy.
+		const off = "Subtitle search is not set up"
+		ps = append(ps,
+			at("GET /api/v1/versions/{version_id}/subtitles/search", v).past(off),
+			at("POST /api/v1/versions/{version_id}/subtitles/download", v).with(map[string]any{"file_id": 1}).past(off),
+			at("PUT /api/v1/versions/{version_id}/subtitle-offset", v).with(map[string]any{"offset_ms": 250}))
 	}
 	for _, s := range w.hiddenSubs {
 		ps = append(ps, at("GET /api/v1/subtitles/{stream_id}", s))
@@ -441,14 +438,11 @@ func checkCoverage(t *testing.T, routes []route, ps []probe) {
 		switch rt.access {
 		case adminOnly:
 			continue // every admin route is called below and must refuse the friend
+		case householdOnly:
+			continue // profiles, not titles; called below and must refuse the friend outside the household
 		case public:
 			if publicRoutes[key] == "" {
 				t.Errorf("%s is public: if it really must answer without a session, add it to publicRoutes with the reason it carries no titles", key)
-			}
-			continue
-		case householdOnly:
-			if householdRoutes[key] == "" {
-				t.Errorf("%s serves the profile picker: add it to householdRoutes with the reason it carries no titles", key)
 			}
 			continue
 		}
@@ -617,9 +611,10 @@ func accessWalk(t *testing.T, kind string) {
 			t.Errorf("%s %s: the admin from the internet got %d, want 403 lan_only", rt.Method, rt.Path, r.code)
 		}
 	}
-	// The profile picker's routes: an invited device is refused every one,
-	// whatever its scope; a household profile reaches them, which shows the
-	// refusal is about the token and not a broken route.
+	// The profile picker's routes. The friend's account (not in the
+	// household) and an invited device are refused every one, whatever their
+	// scope; a household profile reaches them, which shows the refusal is
+	// about who is asking and not a broken route.
 	for _, rt := range w.srv.Routes() {
 		if rt.access != householdOnly {
 			continue
@@ -627,9 +622,9 @@ func accessWalk(t *testing.T, kind string) {
 		path := routeParam.ReplaceAllString(rt.Path, fmt.Sprint(w.friendID))
 		r := w.do(rt.Method, path, w.friendTok, map[string]any{"user_id": w.friendID})
 		switch kind {
-		case "token":
+		case "user", "token":
 			if r.code != http.StatusForbidden || !strings.Contains(string(r.body), "not_household") {
-				t.Errorf("%s %s: the invited device got %d %.120s, want 403 not_household", rt.Method, rt.Path, r.code, r.body)
+				t.Errorf("%s %s: the %s got %d %.120s, want 403 not_household", rt.Method, rt.Path, kind, r.code, r.body)
 			}
 		case "profile":
 			if rt.Method == "GET" && rt.Path == "/api/v1/profiles" && r.code != 200 {

@@ -79,7 +79,7 @@ func loadState(ctx context.Context, db *sql.DB, lib Library) (*state, error) {
 		return nil, err
 	}
 	err = query(ctx, db, `SELECT s.version_id, s.external_path FROM media_streams s JOIN media_versions v ON v.id = s.version_id
-		WHERE v.library_id = ? AND s.is_external = 1 AND s.external_path IS NOT NULL`, lib.ID, func(rows *sql.Rows) error {
+		WHERE v.library_id = ? AND s.is_external = 1 AND s.external_path IS NOT NULL AND s.downloaded_id IS NULL`, lib.ID, func(rows *sql.Rows) error {
 		var id int64
 		var p string
 		if err := rows.Scan(&id, &p); err != nil {
@@ -807,7 +807,8 @@ func (t *txw) writeSidecars(v *verRow, subs []Sidecar) error {
 	if slices.Equal(v.external, paths) {
 		return nil
 	}
-	if err := t.exec(`DELETE FROM media_streams WHERE version_id = ? AND is_external = 1`, v.id); err != nil {
+	// Downloaded subtitles are not beside the media, so a scan never removes them.
+	if err := t.exec(`DELETE FROM media_streams WHERE version_id = ? AND is_external = 1 AND downloaded_id IS NULL`, v.id); err != nil {
 		return err
 	}
 	for _, s := range subs {

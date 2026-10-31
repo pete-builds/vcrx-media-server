@@ -493,10 +493,15 @@ private fun AccountSettings() {
         item(key = "server") {
             FactRow("Server", listOfNotNull(graph.settings.serverName, graph.settings.serverUrl).joinToString("  ").ifEmpty { "None" })
         }
+        // An invited device is its own principal: no profiles to switch to.
         if (!invited) {
             item(key = "profile") {
-                SettingRow("Switch profile", null, "Who's watching: another household profile, with its PIN if it has one.",
-                    onClick = { actions.openProfiles() })
+                SettingRow(
+                    "Switch profile",
+                    null,
+                    "Who's watching? Pick another household profile, with its PIN if it has one.",
+                    onClick = { actions.openProfiles() },
+                )
             }
         }
         item(key = "switch") {

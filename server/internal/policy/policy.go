@@ -60,6 +60,9 @@ type Policy struct {
 	DenyLabels       []string
 	AllowTranscode   bool
 	Allow4KTranscode bool
+	// AllowSubtitleDownload lets a non-admin spend the server's OpenSubtitles
+	// quota. Off unless an admin turns it on.
+	AllowSubtitleDownload bool
 }
 
 // Load reads a user's grants and policy row. A missing policy row means no extra
@@ -72,8 +75,9 @@ func Load(ctx context.Context, conn *sql.DB, userID int64, isAdmin bool) (Policy
 	}
 	var maxRes, maxRating sql.NullString
 	var allow, deny string
-	err = conn.QueryRowContext(ctx, `SELECT max_resolution, max_content_rating, allow_labels, deny_labels, allow_transcode, allow_4k_transcode
-		FROM user_policies WHERE user_id = ?`, userID).Scan(&maxRes, &maxRating, &allow, &deny, &p.AllowTranscode, &p.Allow4KTranscode)
+	err = conn.QueryRowContext(ctx, `SELECT max_resolution, max_content_rating, allow_labels, deny_labels, allow_transcode, allow_4k_transcode,
+		allow_subtitle_download FROM user_policies WHERE user_id = ?`, userID).Scan(&maxRes, &maxRating, &allow, &deny, &p.AllowTranscode,
+		&p.Allow4KTranscode, &p.AllowSubtitleDownload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, nil
 	}

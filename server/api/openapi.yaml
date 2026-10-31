@@ -122,7 +122,9 @@ paths:
         Switch this device to another household profile and get a fresh session for it. The caller's own
         session, if any, ends. A profile with a PIN needs it (or its password); an admin profile reached from a
         restricted profile or the picker always needs its PIN or password, on any network. Wrong PINs are
-        limited per address and per profile: 5 per 15 minutes, counted separately on and off the LAN. Requests
+        limited per 15 minutes, counted before the PIN is checked: 5 per address, and per profile 25 shared by
+        the LAN or 5 from away. A password counts against the sign-in limits instead, so an admin whose PIN is
+        locked can still use it. Requests
         without a bearer token must send X-VCRX-Client.
       security: [{ bearer: [] }, { cookie: [] }, {}]
       requestBody:
@@ -655,6 +657,105 @@ paths:
                   message: { type: string }
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /api/v1/versions/{version_id}/subtitles/search:
+    get:
+      operationId: searchSubtitles
+      summary: >-
+        Search OpenSubtitles for subtitles for this file: by the file's OpenSubtitles hash first, then by the IMDb or
+        TMDb id (the show's, with season and episode, for an episode), then by title and year only when the ids found
+        nothing. Ranked: hash matches, then trusted uploaders, then the hearing-impaired preference, then download count.
+        Any signed-in user who may play the version. 404 search_off when no API key is configured; 503 when
+        OpenSubtitles cannot be reached; 429 rate_limited (with Retry-After). Admins also get the download quota.
+      parameters:
+        - { name: version_id, in: path, required: true, schema: { type: integer } }
+        - name: languages
+          in: query
+          schema: { type: string }
+          description: Comma separated, as ISO 639-1 or 639-2 codes or English names (en,eng,English). Default the server's subtitle_languages.
+        - { name: hearing_impaired, in: query, schema: { type: boolean }, description: Rank hearing-impaired files first. Default false. }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, can_download]
+                properties:
+                  results: { type: array, items: { $ref: "#/components/schemas/SubtitleHit" } }
+                  can_download: { type: boolean, description: Whether the caller may download one of them. }
+                  quota: { $ref: "#/components/schemas/SubtitleQuota" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/v1/versions/{version_id}/subtitles/download:
+    post:
+      operationId: downloadSubtitle
+      summary: >-
+        Download one file a search just offered for this version and add it as an external subtitle track every client
+        sees. Stored in the server's data directory, never beside the media. Admins, and users whose policy has
+        allow_subtitle_download. Downloading a file the version already has is free and answers 200. 409 search_again
+        when the file was not in a search for this version in the last hour; 429 quota_exhausted when today's
+        OpenSubtitles downloads are used up.
+      parameters:
+        - { name: version_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_id]
+              properties:
+                file_id: { type: integer }
+      responses:
+        "201": { description: Downloaded, content: { application/json: { schema: { $ref: "#/components/schemas/SubtitleDownloadResult" } } } }
+        "200": { description: Already downloaded, content: { application/json: { schema: { $ref: "#/components/schemas/SubtitleDownloadResult" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/v1/versions/{version_id}/subtitle-offset:
+    put:
+      operationId: setSubtitleOffset
+      summary: >-
+        The caller's subtitle delay for this file, kept on the server. Positive shows subtitles later. WebVTT answers
+        (format=vtt) are shifted by it from then on; playback sessions report it as subtitle_offset_ms. 0 clears it.
+      parameters:
+        - { name: version_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [offset_ms]
+              properties:
+                offset_ms: { type: integer, minimum: -600000, maximum: 600000 }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { type: object, required: [offset_ms], properties: { offset_ms: { type: integer } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/speedtest:
+    get:
+      operationId: speedTest
+      summary: >-
+        Filler bytes for a client to time its connection to the server (the TV app's Settings > About speed test).
+        Random, so a compressing proxy cannot flatter the result. Reads nothing from the library.
+      parameters:
+        - { name: bytes, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 64000000, default: 8000000 } }
+      responses:
+        "200": { description: The bytes asked for, application/octet-stream }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
 
   /api/v1/admin/profiles:
     get:
@@ -852,20 +953,6 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
-
-  /api/v1/speedtest:
-    get:
-      operationId: speedTest
-      summary: >-
-        Filler bytes for a client to time its connection to the server (the TV app's Settings > About speed test).
-        Random, so a compressing proxy cannot flatter the result. Reads nothing from the library.
-      parameters:
-        - { name: bytes, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 64000000, default: 8000000 } }
-      responses:
-        "200": { description: The bytes asked for, application/octet-stream }
-        "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
-
   /api/v1/admin/libraries:
     get:
       operationId: adminListLibraries
@@ -1390,6 +1477,44 @@ paths:
               schema: { $ref: "#/components/schemas/ActivityEntry" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/items/{item_id}/subtitles:
+    get:
+      operationId: adminItemSubtitles
+      summary: Subtitles downloaded from OpenSubtitles for a movie's or episode's versions, and the account's download quota. Admin and LAN only.
+      parameters:
+        - $ref: "#/components/parameters/ItemID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, can_download, subtitles, quota]
+                properties:
+                  enabled: { type: boolean }
+                  can_download: { type: boolean }
+                  subtitles:
+                    type: array
+                    items:
+                      allOf:
+                        - { $ref: "#/components/schemas/DownloadedSubtitle" }
+                        - type: object
+                          properties:
+                            created_at: { type: integer }
+                            downloaded_by: { type: [string, "null"], description: Null for the automatic fetch or a deleted user. }
+                  quota: { oneOf: [{ $ref: "#/components/schemas/SubtitleQuota" }, { type: "null" }] }
+        "403": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/subtitles/{stream_id}:
+    delete:
+      operationId: adminDeleteSubtitle
+      summary: Delete a downloaded subtitle (its track and its file). Sidecar files and embedded tracks are never deleted. Admin and LAN only.
+      parameters:
+        - { name: stream_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 
   /api/v1/admin/newsletter:
     get:
@@ -1671,6 +1796,7 @@ components:
         is_forced: { type: boolean }
         is_external: { type: boolean }
         is_image_based: { type: boolean }
+        is_downloaded: { type: boolean, description: A subtitle the server downloaded from OpenSubtitles. }
     Version:
       type: object
       required: [id, size]
@@ -1803,6 +1929,7 @@ components:
         title: { type: [string, "null"] }
         is_forced: { type: boolean }
         embedded: { type: boolean, description: "True for a track inside the media file. Players that read the container already have it; browsers use the WebVTT URL." }
+        downloaded: { type: boolean, description: A subtitle the server downloaded from OpenSubtitles. Side-load it like a sidecar file. }
     PlaybackSession:
       type: object
       required: [session_id, decision, reason, item_id, version, stream, resume_position_ms, heartbeat_interval_ms]
@@ -1830,6 +1957,19 @@ components:
             it out of the file; retry after the Retry-After seconds.
         resume_position_ms: { type: integer }
         heartbeat_interval_ms: { type: integer }
+        subtitle_offset_ms:
+          type: integer
+          description: >-
+            The user's subtitle delay for this version, set with PUT /versions/{version_id}/subtitle-offset. Positive
+            shows subtitles later. URLs in webvtt_subtitles are already shifted by it. A player that side-loads the
+            files in subtitles, or shows tracks from inside the container, applies it itself (Media3: shift the cue
+            times, or offset the text renderer's position by this many ms). Do not apply it to a WebVTT URL again.
+        subtitle_search:
+          type: object
+          required: [enabled, can_download]
+          properties:
+            enabled: { type: boolean, description: Offer "Search for subtitles". }
+            can_download: { type: boolean, description: The user may download a result. }
     PlaybackEvent:
       type: object
       required: [type, position_ms]
@@ -1914,6 +2054,53 @@ components:
           description: Titles carrying any of these labels (on the title or its show) are invisible.
         allow_transcode: { type: boolean }
         allow_4k_transcode: { type: boolean }
+        allow_subtitle_download: { type: boolean, description: May download subtitles from OpenSubtitles (spends the server's daily quota). Default false; admins always may. }
+    SubtitleHit:
+      type: object
+      required: [file_id, language_code, release, file_name, hearing_impaired, hash_match, trusted, download_count, matched_by]
+      properties:
+        file_id: { type: integer, description: Pass to the download route. }
+        language: { type: [string, "null"], description: ISO 639-2/B, like every other track. }
+        language_code: { type: string, description: OpenSubtitles' own code (ISO 639-1). }
+        release: { type: string }
+        file_name: { type: string }
+        hearing_impaired: { type: boolean }
+        hash_match: { type: boolean, description: Made for this exact file. }
+        trusted: { type: boolean, description: From a trusted uploader. }
+        download_count: { type: integer }
+        uploader: { type: string }
+        matched_by: { type: string, enum: [hash, id, title] }
+        stream_id: { type: [integer, "null"], description: Set when this version already has the file. }
+    DownloadedSubtitle:
+      type: object
+      required: [stream_id, version_id, release, hearing_impaired, hash_match, codec, existing]
+      properties:
+        stream_id: { type: integer, description: "The subtitle track id, as in /subtitles/{stream_id}." }
+        version_id: { type: integer }
+        language: { type: [string, "null"] }
+        release: { type: string }
+        hearing_impaired: { type: boolean }
+        hash_match: { type: boolean }
+        codec: { type: string }
+        existing: { type: boolean, description: Already downloaded; no quota spent. }
+    SubtitleDownloadResult:
+      type: object
+      required: [subtitle, webvtt]
+      properties:
+        subtitle: { $ref: "#/components/schemas/DownloadedSubtitle" }
+        webvtt: { $ref: "#/components/schemas/SubtitleSource" }
+        quota: { $ref: "#/components/schemas/SubtitleQuota" }
+    SubtitleQuota:
+      type: object
+      description: OpenSubtitles downloads left today, as last reported. Admins only.
+      required: [known, remaining, allowed, reset_at, checked_at]
+      properties:
+        known: { type: boolean }
+        remaining: { type: integer }
+        allowed: { type: integer }
+        reset_at: { type: string, format: date-time, description: Zero time when not reported. }
+        level: { type: string }
+        checked_at: { type: string, format: date-time }
     ActivityEntry:
       type: object
       required: [id, state, decision, decision_reason, start_position_ms, position_ms, played_ms, watched, started_at, last_event_at]
