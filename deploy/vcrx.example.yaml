@@ -22,6 +22,12 @@ server_name: VCRX
 # downloaded once a day. IMDb licenses it for personal, non-commercial use.
 #imdb_ratings: true
 
+# Subtitles from OpenSubtitles, when VCRX_OPENSUBTITLES_API_KEY is set in .env:
+# the languages searched by default, and whether to fetch them for new files
+# that have none (once per file; off by default).
+#subtitle_languages: [en]
+#subtitle_auto_fetch: true
+
 # Radarr and Sonarr webhooks find the folder by name in a library. If they see
 # the NAS at another path and folder names differ, map their prefix to VCRX's.
 #arr_path_map:

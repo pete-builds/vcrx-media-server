@@ -44,10 +44,12 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/music"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
+	"github.com/pete-builds/vcrx-media-server/server/internal/opensubtitles"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/probe"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
+	"github.com/pete-builds/vcrx-media-server/server/internal/subsearch"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 	"github.com/pete-builds/vcrx-media-server/server/internal/tmdb"
 	"github.com/pete-builds/vcrx-media-server/server/web"
@@ -289,6 +291,17 @@ func serve() error {
 		log.Info("webhooks on", "count", len(cfg.WebhookURLs), "events", cfg.WebhookEvents)
 	}
 
+	subs := subtitleSearch(ctx, a, version)
+	if cfg.SubtitleAutoFetch && subs.CanDownload() {
+		prev := scanner.OnAdded
+		scanner.OnAdded = func(ctx context.Context, lib library.Library, run library.Run, idsAbove int64) {
+			if prev != nil {
+				prev(ctx, lib, run, idsAbove)
+			}
+			subs.Kick()
+		}
+	}
+
 	proxies, err := prefixes(cfg.TrustedProxies)
 	if err != nil {
 		return fmt.Errorf("trusted proxies: %w", err)
@@ -325,6 +338,7 @@ func serve() error {
 		Artwork: art, Admin: adm, Scans: scanAdapter{scans},
 		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, Remux: rmx, HLS: hls, WebDir: os.Getenv("VCRX_WEB_DIR"),
 		Subtitles:        subtitles.New(cfg.SubtitleCacheDir(), cfg.FFmpegPath, log.With("component", "subtitles")),
+		SubSearch:        subs,
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
 		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets, AllowedHosts: cfg.AllowedHosts,
@@ -414,6 +428,38 @@ func serve() error {
 		log.Warn("scans did not stop cleanly", "err", err)
 	}
 	return herr
+}
+
+// subtitleSearch sets up OpenSubtitles search, off without an API key, and
+// starts the automatic fetch when it is turned on and downloads can work.
+func subtitleSearch(ctx context.Context, a *app, version string) *subsearch.Service {
+	cfg, log := a.cfg, a.log
+	var provider subsearch.Provider
+	switch {
+	case cfg.OpenSubtitlesStub:
+		provider = opensubtitles.NewStub()
+		log.Warn("subtitle search uses the offline stub (VCRX_OPENSUBTITLES_STUB): results are invented, for development only")
+	case cfg.OpenSubtitlesAPIKey != "":
+		provider = opensubtitles.New(cfg.OpenSubtitlesAPIKey, cfg.OpenSubtitlesUsername, cfg.OpenSubtitlesPassword, "VCRX v"+version)
+	}
+	subs := subsearch.New(a.db, provider, cfg.SubtitleDownloadDir(), cfg.SubtitleLanguages, log.With("component", "subsearch"))
+	switch {
+	case provider == nil:
+		log.Info("subtitle search is off: set VCRX_OPENSUBTITLES_API_KEY to search OpenSubtitles")
+		return subs
+	case !subs.CanDownload():
+		log.Warn("subtitle search is on but downloads are off: set VCRX_OPENSUBTITLES_USERNAME and VCRX_OPENSUBTITLES_PASSWORD")
+	default:
+		log.Info("subtitle search on", "languages", subs.Languages, "auto_fetch", cfg.SubtitleAutoFetch)
+	}
+	if cfg.SubtitleAutoFetch && subs.CanDownload() {
+		if err := subs.InitAuto(ctx); err != nil {
+			log.Error("automatic subtitle fetch off", "err", err)
+			return subs
+		}
+		go subs.RunAuto(ctx, 30*time.Minute)
+	}
+	return subs
 }
 
 // rootStates answers the readiness check: each library root must list, quickly.

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/fsafe"
 	"github.com/pete-builds/vcrx-media-server/server/internal/music"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
+	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
 )
 
@@ -329,4 +331,26 @@ func (s *Server) musicStream(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.Log.Warn("converted music failed", "track", f.TrackID, "err", err)
 	}
+}
+
+// musicListenAllowed is false when the session is the caller's listen of a
+// track their policy no longer lets them play; true for anything else,
+// which the events route checks its own way.
+func (s *Server) musicListenAllowed(ctx context.Context, pol policy.Policy, userID int64, sessionID string) (bool, error) {
+	var track sql.NullInt64
+	err := s.DB.QueryRowContext(ctx, `SELECT track_id FROM playback_sessions WHERE id = ? AND user_id = ?`, sessionID, userID).Scan(&track)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !track.Valid) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if s.Music == nil || s.Music.Catalog == nil {
+		return false, nil
+	}
+	_, err = s.Music.Catalog.File(ctx, pol, track.Int64)
+	if errors.Is(err, music.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }

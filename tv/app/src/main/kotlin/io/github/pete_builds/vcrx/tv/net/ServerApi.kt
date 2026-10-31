@@ -18,6 +18,7 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okio.Buffer
 
 /** The /api/v1 routes this client uses. Every call throws [ApiException] on failure. */
 class ServerApi(
@@ -102,6 +103,55 @@ class ServerApi(
         return send(Request.Builder().url(url).build(), ConvertedStart.serializer())
     }
 
+    /**
+     * A subtitle file. An embedded track answers 202 while the server reads every text
+     * track out of the media file in one pass, which takes minutes on a large file.
+     */
+    suspend fun subtitle(path: String): SubtitleAnswer {
+        val answer = exchange(Request.Builder().url(url(path)).build())
+        return when (answer.status) {
+            200 -> SubtitleAnswer.Ready(answer.body)
+            202 -> SubtitleAnswer.Preparing(answer.retryAfter)
+            else -> {
+                val error = httpError(answer.status, answer.body.toString(Charsets.UTF_8), json)
+                if (error is ApiException.Unauthorized) onUnauthorized()
+                throw error
+            }
+        }
+    }
+
+    /**
+     * Downloads [bytes] from the speed test route and discards them. Returns the bytes
+     * read and the milliseconds from the request to the last byte.
+     */
+    suspend fun speedTest(bytes: Long): Pair<Long, Long> {
+        val request = Request.Builder().url(url("/api/v1/speedtest").newBuilder().setQueryParameter("bytes", bytes.toString()).build()).build()
+        return try {
+            withContext(Dispatchers.IO) {
+                val started = System.nanoTime()
+                client.newCall(request).await().use { response ->
+                    if (!response.isSuccessful) {
+                        val error = httpError(response.code, response.body.string(), json)
+                        if (error is ApiException.Unauthorized) onUnauthorized()
+                        throw error
+                    }
+                    val source = response.body.source()
+                    val buffer = Buffer()
+                    var total = 0L
+                    while (true) {
+                        val read = source.read(buffer, 64 * 1024)
+                        if (read < 0) break
+                        total += read
+                        buffer.clear()
+                    }
+                    total to (System.nanoTime() - started) / 1_000_000
+                }
+            }
+        } catch (e: IOException) {
+            throw ApiException.Unreachable(e)
+        }
+    }
+
     /** Absolute artwork URL; the server answers 404 when there is none and the card draws a placeholder. */
     fun artworkUrl(itemId: Long, kind: String, width: Int): String? =
         baseUrl()?.let { ServerAddress.resolve(it, "/api/v1/items/$itemId/artwork/$kind?width=$width")?.toString() }
@@ -120,6 +170,19 @@ class ServerApi(
 
     internal fun <B> post(path: String, body: B, serializer: KSerializer<B>): Request =
         Request.Builder().url(url(path)).post(json.encodeToString(serializer, body).toRequestBody(JSON)).build()
+
+    private class Exchange(val status: Int, val body: ByteArray, val retryAfter: Int?)
+
+    /** Runs the call and returns the raw answer, for the routes that are not JSON. */
+    private suspend fun exchange(request: Request): Exchange = try {
+        withContext(Dispatchers.IO) {
+            client.newCall(request).await().use { response ->
+                Exchange(response.code, response.body.bytes(), response.header("Retry-After")?.trim()?.toIntOrNull())
+            }
+        }
+    } catch (e: IOException) {
+        throw ApiException.Unreachable(e)
+    }
 
     /**
      * Runs the call and decodes the body with [serializer], or ignores it when null.
@@ -156,6 +219,14 @@ class ServerApi(
         val JSON = "application/json; charset=utf-8".toMediaType()
         val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody(null)
     }
+}
+
+/** One answer from a subtitle URL. */
+sealed interface SubtitleAnswer {
+    class Ready(val bytes: ByteArray) : SubtitleAnswer
+
+    /** 202: still reading the track out of the file; ask again after [retryAfterSeconds]. */
+    data class Preparing(val retryAfterSeconds: Int?) : SubtitleAnswer
 }
 
 /** Suspends until the call completes, cancelling it if the coroutine is cancelled. */

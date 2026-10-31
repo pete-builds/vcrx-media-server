@@ -26,7 +26,7 @@ class PlayerActivity : ComponentActivity() {
             activity = this,
             itemId = intent.getLongExtra(EXTRA_ITEM_ID, -1),
             versionId = intent.getLongExtra(EXTRA_VERSION_ID, -1).takeIf { it > 0 },
-            fromStart = intent.getBooleanExtra(EXTRA_FROM_START, false),
+            request = intent.getStringExtra(EXTRA_START)?.let { runCatching { StartRequest.valueOf(it) }.getOrNull() } ?: StartRequest.Default,
             title = intent.getStringExtra(EXTRA_TITLE).orEmpty(),
         )
         onBackPressedDispatcher.addCallback(this) { exit() }
@@ -64,14 +64,14 @@ class PlayerActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_ITEM_ID = "item_id"
         private const val EXTRA_VERSION_ID = "version_id"
-        private const val EXTRA_FROM_START = "from_start"
+        private const val EXTRA_START = "start"
         private const val EXTRA_TITLE = "title"
 
-        fun intent(context: Context, itemId: Long, versionId: Long?, fromStart: Boolean, title: String): Intent =
+        fun intent(context: Context, itemId: Long, versionId: Long?, start: StartRequest, title: String): Intent =
             Intent(context, PlayerActivity::class.java)
                 .putExtra(EXTRA_ITEM_ID, itemId)
                 .putExtra(EXTRA_VERSION_ID, versionId ?: -1L)
-                .putExtra(EXTRA_FROM_START, fromStart)
+                .putExtra(EXTRA_START, start.name)
                 .putExtra(EXTRA_TITLE, title)
     }
 }

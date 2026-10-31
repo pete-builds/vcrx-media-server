@@ -14,7 +14,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/admin"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
 	"github.com/pete-builds/vcrx-media-server/server/internal/music"
-	"github.com/pete-builds/vcrx-media-server/server/internal/probe"
+	mediaprobe "github.com/pete-builds/vcrx-media-server/server/internal/probe"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
 )
 
@@ -64,7 +64,7 @@ func withMusic(t *testing.T, f *fixture) musicIDs {
 	}
 	var ids musicIDs
 	ids.library, _ = res.LastInsertId()
-	sc := &library.Scanner{DB: f.db, Prober: &probe.FFprobe{}}
+	sc := &library.Scanner{DB: f.db, Prober: &mediaprobe.FFprobe{}}
 	if _, err := sc.Scan(context.Background(), library.Library{ID: ids.library, Name: "Music", Kind: library.KindMusic, RootPath: root}, library.Options{Trigger: "cli"}); err != nil {
 		t.Fatal(err)
 	}
@@ -78,9 +78,12 @@ func withMusic(t *testing.T, f *fixture) musicIDs {
 	q(`SELECT artist_id FROM music_albums WHERE title = 'Signal Fires'`, &ids.artist)
 	q(`SELECT id FROM music_tracks WHERE title = 'Low Tide'`, &ids.flac)
 	q(`SELECT id FROM music_tracks WHERE title = 'Apogee'`, &ids.alac)
-	rmx := remux.New("ffmpeg", "ffprobe", 2, nil)
+	rmx := f.srv.Remux
+	if rmx == nil {
+		rmx = remux.New("ffmpeg", "ffprobe", 2, nil)
+		f.srv.Remux = rmx
+	}
 	_ = rmx.DetectAudio(context.Background())
-	f.srv.Remux = rmx
 	mcat := &music.Catalog{DB: f.db}
 	f.srv.Music = &Music{Catalog: mcat, Player: &music.Player{DB: f.db, Catalog: mcat, Remux: rmx},
 		Covers: &music.Covers{Catalog: mcat, FFmpeg: ff, CacheDir: filepath.Join(t.TempDir(), "covers")}}
