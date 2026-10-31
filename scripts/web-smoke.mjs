@@ -4,6 +4,7 @@
 // missing its main content, a details panel without its writers, release date
 // or votes, a video that does not play, search as you type that
 // lists nothing, a C key or CC button that does not toggle captions, a
+// pre-roll that does not play before a movie or whose Skip does not start it, a
 // Continue Watching Remove control that does not remove, a
 // keyboard shortcuts list that does not open, a Home feature whose Play does
 // not play, season tabs that do not switch, a phone menu that does not open,
@@ -692,6 +693,38 @@ async function main() {
       if (res.reset !== res.before || res.label !== "0 ms") fail("subtitles", `Reset left ${res.reset} (${res.label})`);
     }
     if (exceptions.length) fail("subtitles", `threw: ${exceptions[0]}`);
+
+    // Before a movie: with the pre-roll on, a movie started from the
+    // beginning plays the dev server's clip first, Skip goes straight to the
+    // movie, and Back to the setting's default leaves Play as it was.
+    console.log(`before a movie: pre-roll, then the movie (#/play/${ids.direct}?start=0)`);
+    const prerollSetting = (on) => evaluate(`await fetch("/api/v1/me/playback-settings", { method: "PUT",
+      headers: { "Content-Type": "application/json", "X-VCRX-Client": "web" }, body: JSON.stringify({ before_movie_preroll: ${on} }) });`);
+    await prerollSetting(true);
+    let pre;
+    try {
+    await s("Page.navigate", { url: `${base}/#/` });
+    await sleep(500);
+    await s("Page.navigate", { url: `${base}/#/play/${ids.direct}?start=0` });
+    pre = await evaluate(`
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const wait = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = await fn(); if (v) return v; await sleep(150); } return null; };
+      const skip = await wait(() => document.querySelector(".player.preroll .preroll-skip"));
+      if (!skip) return { why: "no pre-roll before the movie" };
+      const v = document.querySelector(".player.preroll video");
+      if (new URL(v.src).searchParams.get("name") !== "Dev Countdown.mp4") return { why: "the clip is not the dev pre-roll: " + v.src };
+      if (!(await wait(() => v.currentTime > 0.3))) return { why: "the pre-roll did not play" };
+      skip.click();
+      const movie = await wait(() => !document.querySelector(".player.preroll") && document.querySelector(".player video") && location.hash.includes("before=done"));
+      if (!movie) return { why: "Skip did not start the movie: " + location.hash };
+      const mv = document.querySelector(".player video");
+      if (!(await wait(() => mv.currentTime > 0.3))) return { why: "the movie did not play after the pre-roll" };
+      return { ok: true };`);
+    } finally {
+      // Off again whatever happened: every other check plays movies too.
+      await prerollSetting(false);
+    }
+    if (!pre || !pre.ok) fail("before a movie", pre ? pre.why : "the check did not finish");
 
     // CC: C turns the track just downloaded on in one press (it is the only
     // one, and this profile chose its language last), and off with the next.

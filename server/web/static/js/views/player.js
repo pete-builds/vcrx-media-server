@@ -37,6 +37,19 @@ export async function playerView({ match, params }) {
   const backBtn = h("button", { class: "btn btn-small", type: "button", onclick: back, "aria-label": "Back" }, icon("back"), "Back");
   const shell = h("div", { class: "player" });
 
+  // Before a movie (Settings, Playback): trailers for other titles, then a
+  // pre-roll, when a movie on this server starts from the beginning. The
+  // movie itself opens once they end or Skip is pressed, so nothing played
+  // first touches watch state.
+  if (!peerId && !body.extra_id && params.get("start") === "0" && params.get("before") !== "done") {
+    const before = await api(`/items/${itemId}/before`).catch(() => ({ clips: [] }));
+    if ((before.clips || []).length) {
+      const next = new URLSearchParams(params);
+      next.set("before", "done");
+      return beforeView(before.clips, shell, backBtn, () => location.replace(`#/play/${itemId}?${next}`));
+    }
+  }
+
   let session, item;
   try {
     [session, item] = await Promise.all([api(`${base}/playback/sessions`, { method: "POST", body }), api(`${base}/items/${itemId}`)]);
@@ -404,6 +417,51 @@ export async function playerView({ match, params }) {
       video.removeAttribute("src");
       video.load();
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    },
+  };
+}
+
+// beforeView plays the clips Before a movie lists, one after another, with
+// one Skip for each (Enter or S too), then calls done to start the movie.
+function beforeView(clips, shell, backBtn, done) {
+  let i = 0;
+  let finished = false;
+  const video = h("video", { autoplay: true, playsinline: true, preload: "auto" });
+  const label = h("div", { class: "ptitle" });
+  const skip = h("button", { class: "btn btn-primary preroll-skip", type: "button" });
+  const show = () => {
+    const c = clips[i];
+    label.textContent = c.kind === "trailer" ? `Trailer · ${c.title}` : "Your movie is next";
+    skip.textContent = i < clips.length - 1 ? "Skip" : "Skip to the movie";
+    video.src = c.url;
+    video.play().catch(() => {});
+  };
+  const next = () => {
+    if (finished) return;
+    if (++i < clips.length) return show();
+    finished = true;
+    done();
+  };
+  video.addEventListener("ended", next);
+  // A clip that will not play is skipped, never a dead end before the movie.
+  video.addEventListener("error", next);
+  skip.addEventListener("click", next);
+  const onKey = (e) => {
+    if (e.key === "Enter" || e.key === "s") { e.preventDefault(); next(); }
+  };
+  document.addEventListener("keydown", onKey);
+  shell.classList.add("preroll");
+  shell.append(video, h("div", { class: "top" }, backBtn, label), h("div", { class: "preroll-bar" }, skip));
+  show();
+  return {
+    el: shell,
+    title: "Before the movie",
+    cleanup() {
+      finished = true;
+      document.removeEventListener("keydown", onKey);
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
     },
   };
 }
