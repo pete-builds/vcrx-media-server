@@ -85,6 +85,11 @@ class AppActions(private val nav: NavController, private val activity: Activity)
     /** Pairing on top of Connect or Login; Back returns to it. */
     fun openPair() = nav.navigate(PairRoute) { launchSingleTop = true }
 
+    /** Plays one of an item's extras, such as its trailer, in the app's player. */
+    fun playExtra(itemId: Long, extraId: Long, title: String) {
+        activity.startActivity(PlayerActivity.extraIntent(activity, itemId, extraId, title))
+    }
+
     fun toLogin() = nav.navigate(LoginRoute) {
         popUpTo(nav.graph.id) { inclusive = true }
         launchSingleTop = true

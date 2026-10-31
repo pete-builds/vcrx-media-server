@@ -61,7 +61,23 @@ var publicRoutes = map[string]string{
 var noItemRoutes = map[string]string{
 	"POST /api/v1/auth/logout": "ends the caller's own session",
 	"GET /api/v1/me":           "the caller's own account",
-	"GET /api/v1/speedtest":    "random filler bytes for timing the connection; reads nothing from the library",
+	// Skip Intro: the caller's own choice of button, auto or off.
+	"GET /api/v1/me/playback-settings": "the caller's own playback settings",
+	"PUT /api/v1/me/playback-settings": "the caller's own playback settings",
+	"GET /api/v1/speedtest":            "random filler bytes for timing the connection; reads nothing from the library",
+	// The Home layout is the caller's own list of row kinds ("trending",
+	// "seasonal") with fixed names and descriptions; it names no titles.
+	"GET /api/v1/layout/home":    "the caller's own Home row order, row kinds only",
+	"PUT /api/v1/layout/home":    "saves the caller's own Home row order, row kinds only",
+	"DELETE /api/v1/layout/home": "resets the caller's own Home row order, row kinds only",
+}
+
+// listParamRoutes take a path parameter that is not an item, version, session
+// or other id the policy can hide, so a list probe (hides) may cover them
+// instead of a 404. Keep this narrow: a route whose parameter names a title,
+// file or stream must prove it answers 404 for a hidden one.
+var listParamRoutes = map[string]string{
+	"GET /api/v1/rows/{row_id}": "a Home row id (trending, genre:Drama); the row lists titles under the caller's policy",
 }
 
 type probe struct {
@@ -120,6 +136,8 @@ type walkFixture struct {
 	hiddenVersions                          []int64 // one per hidden playable, plus the film's 4K
 	hiddenSubs                              []int64
 	posters                                 []int64
+	// Extras hidden with their film (a denied label) or by the ceiling (4K).
+	hiddenExtras []int64
 }
 
 func newWalkFixture(t *testing.T) *walkFixture {
@@ -260,6 +278,26 @@ func newWalkFixture(t *testing.T) *walkFixture {
 		}
 		return id
 	}
+	// A trailer of the labelled film, and a 4K featurette of the visible one:
+	// extras follow their film's visibility and the resolution ceiling.
+	extra := func(item, lib int64, dir, name, kind, res string) int64 {
+		t.Helper()
+		p := filepath.Join(dir, name+".mkv")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, content(10_000), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return exec(`INSERT INTO item_extras (item_id, library_id, kind, title, path, rel_path, size, mtime, container, duration_ms,
+				video_codec, video_profile, bit_depth, width, height, resolution, audio_streams, probe_status, added_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, 10000, 0, 'mkv', 90000, 'hevc', 'main 10', 10, 1920, 1080, ?,
+				'[{"index":1,"codec":"eac3","channels":6,"default":true}]', 'ok', ?, ?)`,
+			item, lib, kind, name, p, filepath.Base(p), res, now, now)
+	}
+	w.hiddenExtras = append(w.hiddenExtras,
+		extra(w.horrorMovie, w.movies, filepath.Join(f.root, "Zebra Night", "Trailers"), "Zebra Teaser", "trailer", "1080p"),
+		extra(f.movieID, w.movies, filepath.Join(f.root, "Film 2001 2160p", "Featurettes"), "Making Of 4K", "featurette", "4K"))
 	w.hiddenCollection = coll("Zebra Collection", w.horrorMovie, w.ratedMovie)
 	w.mixedCollection = coll("Mixed Collection", f.movieID, w.horrorMovie)
 	return w
@@ -322,6 +360,21 @@ func (w *walkFixture) startSession(tok string, item int64, version *int64) strin
 	return out.SessionID
 }
 
+// startExtraSession opens a converted-stream session on an extra.
+func (w *walkFixture) startExtraSession(tok string, extra int64) string {
+	w.t.Helper()
+	r := w.do("POST", "/api/v1/playback/sessions", tok, map[string]any{"extra_id": extra, "capabilities": browserCaps(true)})
+	var out struct {
+		SessionID string `json:"session_id"`
+		Stream    struct{ Protocol string }
+	}
+	r.json(w.t, &out)
+	if r.code != 201 || out.Stream.Protocol != "fmp4" {
+		w.t.Fatalf("session on extra %d: %d %s", extra, r.code, r.body)
+	}
+	return out.SessionID
+}
+
 // probes lists every call the walk makes. sessions are the friend's, opened
 // while the friend could still play the hidden things; adminSession is not the
 // friend's at all.
@@ -352,7 +405,7 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 	for _, v := range w.hiddenVersions {
 		// Direct play inside the principal's own playback session, the only
 		// way an invited device reaches a file (TestNoTokenRouteServesAWholeFile)...
-		sid := w.sessionFor(sessions, v)
+		sid := w.sessionOn(sessions, "version_id", v)
 		ps = append(ps, at("GET /api/v1/versions/{version_id}/file", v).query("session="+sid),
 			at("HEAD /api/v1/versions/{version_id}/file", v).query("session="+sid))
 		// ...and, for the household's own devices, by the bare URL as well.
@@ -369,6 +422,17 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 	}
 	for _, s := range w.hiddenSubs {
 		ps = append(ps, at("GET /api/v1/subtitles/{stream_id}", s))
+	}
+	for _, x := range w.hiddenExtras {
+		// As for versions: inside the principal's own session, and bare for
+		// the household's own devices.
+		sid := w.sessionOn(sessions, "extra_id", x)
+		ps = append(ps, at("GET /api/v1/extras/{extra_id}/file", x).query("session="+sid),
+			at("HEAD /api/v1/extras/{extra_id}/file", x).query("session="+sid),
+			at("POST /api/v1/playback/sessions").with(map[string]any{"extra_id": x, "capabilities": tclCaps()}))
+		if w.kind != "token" {
+			ps = append(ps, at("GET /api/v1/extras/{extra_id}/file", x), at("HEAD /api/v1/extras/{extra_id}/file", x))
+		}
 	}
 	sessionProbes := func(id, owner string) {
 		ps = append(ps,
@@ -408,6 +472,12 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 		at("GET /api/v1/items/{item_id}", f.movieID).hides("film.2160p", `"4K"`),
 		at("GET /api/v1/items/{item_id}", f.showID).hides(`"child_count":2`),
 		at("GET /api/v1/items/{item_id}/children", f.showID).hides("Season 2"),
+		// Home's See all: a library's row lists only what the friend may see,
+		// a row in a library they lose is gone, and a row named after a
+		// hidden title does not exist for them.
+		at("GET /api/v1/rows/{row_id}", fmt.Sprintf("recently_added_movies:%d", w.movies)).hides("Zebra Night", "Zebra Rated"),
+		at("GET /api/v1/rows/{row_id}", fmt.Sprintf("recently_added_movies:%d", w.vault)),
+		at("GET /api/v1/rows/{row_id}", fmt.Sprintf("because_you_watched:%d", w.horrorMovie)),
 	)
 	return ps
 }
@@ -453,6 +523,8 @@ func checkCoverage(t *testing.T, routes []route, ps []probe) {
 			continue
 		}
 		switch {
+		case strings.Contains(rt.Path, "{") && listParamRoutes[key] != "" && listed[key]:
+			// Covered by a list probe; see listParamRoutes.
 		case strings.Contains(rt.Path, "{") && !hidden[key]:
 			t.Errorf("%s is not in the access walk: add a probe that calls it as the friend for something their policy hides (want 404), and make the handler apply info(r).Policy", key)
 		case !hidden[key] && !listed[key]:
@@ -461,19 +533,19 @@ func checkCoverage(t *testing.T, routes []route, ps []probe) {
 	}
 }
 
-// sessionFor is the one of sessions that plays version v.
-func (w *walkFixture) sessionFor(sessions []string, v int64) string {
+// sessionOn is the one of sessions whose column (version_id or extra_id) is v.
+func (w *walkFixture) sessionOn(sessions []string, column string, v int64) string {
 	w.t.Helper()
 	for _, id := range sessions {
-		var vid int64
-		if err := w.db.QueryRow(`SELECT version_id FROM playback_sessions WHERE id = ?`, id).Scan(&vid); err != nil {
+		var got int64
+		if err := w.db.QueryRow(`SELECT COALESCE(`+column+`, 0) FROM playback_sessions WHERE id = ?`, id).Scan(&got); err != nil {
 			w.t.Fatal(err)
 		}
-		if vid == v {
+		if got == v {
 			return id
 		}
 	}
-	w.t.Fatalf("no walk session plays version %d", v)
+	w.t.Fatalf("no walk session has %s %d", column, v)
 	return ""
 }
 
@@ -521,6 +593,11 @@ func accessWalk(t *testing.T, kind string) {
 		sessions = append(sessions, w.startSession(w.friendTok, id, nil))
 	}
 	sessions = append(sessions, w.startSession(w.friendTok, w.movieID, &w.v4k))
+	// And on the extras about to be hidden: a trailer session has no version,
+	// so its events and streams must check the extra itself.
+	for _, x := range w.hiddenExtras {
+		sessions = append(sessions, w.startExtraSession(w.friendTok, x))
+	}
 	adminSession := w.startSession(w.adminTok, w.movieID, &w.v1080)
 	ps := w.probes(sessions, adminSession)
 	checkCoverage(t, w.srv.Routes(), ps)

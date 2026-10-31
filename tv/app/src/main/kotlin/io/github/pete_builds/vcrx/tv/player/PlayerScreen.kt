@@ -92,6 +92,7 @@ fun PlayerScreen(controller: PlaybackController, onExit: () -> Unit) {
             }
             Phase.Playing -> if (controller.overlay != Overlay.Hidden) Chrome(controller)
         }
+        if (controller.phase == Phase.Playing && controller.dialog == null) SkipButton(controller)
         // What a subtitle press did, or that subtitles are being prepared; above the controls.
         controller.notice?.let { Notice(it) }
         controller.dialog?.let { TrackDialog(controller, it) }

@@ -75,6 +75,29 @@ class ServerApi(
 
     suspend fun home(): List<HomeRow> = get("/api/v1/home", HomeResponse.serializer()).rows
 
+    /** A Home row's See all: the same row with up to 100 titles. */
+    suspend fun homeRow(rowId: String): HomeRow {
+        val url = url("/api/v1/rows").newBuilder().addPathSegment(rowId).build()
+        return send(Request.Builder().url(url).build(), HomeRow.serializer())
+    }
+
+    /**
+     * The Home layout the web's Customize Home edits too, so a TV Settings
+     * "Home rows" screen and the browser stay in step: read it, then save the
+     * whole order with [saveHomeLayout] or go back to the default with
+     * [resetHomeLayout]. Both answer with the layout now in effect.
+     */
+    suspend fun homeLayout(): HomeLayout = get("/api/v1/layout/home", HomeLayout.serializer())
+
+    suspend fun saveHomeLayout(rows: List<HomeLayoutRow>): HomeLayout {
+        val input = HomeLayoutInput(rows.map { HomeLayoutEntry(it.key, it.enabled) })
+        val body = json.encodeToString(HomeLayoutInput.serializer(), input).toRequestBody(JSON)
+        return send(Request.Builder().url(url("/api/v1/layout/home")).put(body).build(), HomeLayout.serializer())
+    }
+
+    suspend fun resetHomeLayout(): HomeLayout =
+        send(Request.Builder().url(url("/api/v1/layout/home")).delete().build(), HomeLayout.serializer())
+
     suspend fun libraries(): List<Library> = get("/api/v1/libraries", LibrariesResponse.serializer()).libraries
 
     suspend fun libraryItems(libraryId: Long, sort: String, order: String, limit: Int, offset: Int): ItemPage {
@@ -114,6 +137,14 @@ class ServerApi(
     suspend fun setWatched(itemId: Long, played: Boolean) {
         val body = json.encodeToString(SetWatchedRequest.serializer(), SetWatchedRequest(played)).toRequestBody(JSON)
         send<Unit>(Request.Builder().url(url("/api/v1/items/$itemId/watched")).put(body).build(), null)
+    }
+
+    /** The user's Skip intro choice, for the Settings screen. */
+    suspend fun playbackSettings(): PlaybackSettings = get("/api/v1/me/playback-settings", PlaybackSettings.serializer())
+
+    suspend fun setPlaybackSettings(settings: PlaybackSettings): PlaybackSettings {
+        val body = json.encodeToString(PlaybackSettings.serializer(), settings).toRequestBody(JSON)
+        return send(Request.Builder().url(url("/api/v1/me/playback-settings")).put(body).build(), PlaybackSettings.serializer())
     }
 
     suspend fun startPlayback(request: PlaybackRequest): PlaybackSession =

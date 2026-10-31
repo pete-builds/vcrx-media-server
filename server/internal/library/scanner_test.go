@@ -119,7 +119,8 @@ func TestGroupingModeChangeMovesVersions(t *testing.T) {
 	if before != 5 || after != 4 {
 		t.Fatalf("movies %d then %d, want 5 then 4", before, after)
 	}
-	if run.Changed == 0 || run.Added != 0 || e.pr.total() != 8 {
+	// Eight videos and His Girl Friday's two extras, each probed once.
+	if run.Changed == 0 || run.Added != 0 || e.pr.total() != 10 {
 		t.Fatalf("run = %+v, probes = %d: a grouping change must not re-probe", run, e.pr.total())
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
 	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
+	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
@@ -62,6 +63,10 @@ type Server struct {
 	Webhooks *notify.Webhooks
 	Admin    *admin.Admin
 	Scans    ScanStarter
+	// Markers re-runs and copies intro and credits detection; nil when it
+	// is off. MarkerHours is its window, for the admin status page.
+	Markers     MarkerJob
+	MarkerHours markers.Hours
 	// LibraryRoots lists roots for the readiness check.
 	LibraryRoots func(ctx context.Context) (map[string]string, error)
 
@@ -101,6 +106,11 @@ type Server struct {
 	// into the binary. For development only.
 	WebDir string
 
+	// TrailersYouTube is the trailers_youtube setting with a TMDb key present:
+	// details may offer a YouTube trailer, and the web app's CSP allows that
+	// one embed. Off, the CSP allows no frames at all.
+	TrailersYouTube bool
+
 	streams streamRegistry
 }
 
@@ -139,7 +149,13 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/pair/poll", public, s.pairPoll},
 		{"POST", "/api/v1/auth/logout", signedIn, s.logout},
 		{"GET", "/api/v1/me", signedIn, s.me},
+		{"GET", "/api/v1/me/playback-settings", signedIn, s.playbackSettings},
+		{"PUT", "/api/v1/me/playback-settings", signedIn, s.setPlaybackSettings},
 		{"GET", "/api/v1/home", signedIn, s.home},
+		{"GET", "/api/v1/rows/{row_id}", signedIn, s.homeRow},
+		{"GET", "/api/v1/layout/home", signedIn, s.homeLayout},
+		{"PUT", "/api/v1/layout/home", signedIn, s.setHomeLayout},
+		{"DELETE", "/api/v1/layout/home", signedIn, s.resetHomeLayout},
 		{"GET", "/api/v1/libraries", signedIn, s.libraries},
 		{"GET", "/api/v1/libraries/{library_id}/items", signedIn, s.libraryItems},
 		{"GET", "/api/v1/libraries/{library_id}/collections", signedIn, s.libraryCollections},
@@ -161,6 +177,8 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/playback/sessions/{session_id}/hls/{run}/{segment}", signedIn, s.hlsSegment},
 		{"GET", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"HEAD", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
+		{"GET", "/api/v1/extras/{extra_id}/file", signedIn, s.streamExtra},
+		{"HEAD", "/api/v1/extras/{extra_id}/file", signedIn, s.streamExtra},
 		{"GET", "/api/v1/subtitles/{stream_id}", signedIn, s.subtitle},
 		{"GET", "/api/v1/admin/profiles", adminOnly, s.adminProfiles},
 		{"POST", "/api/v1/admin/profiles", adminOnly, s.adminCreateProfile},
@@ -189,6 +207,9 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/admin/users", adminOnly, s.adminCreateUser},
 		{"PUT", "/api/v1/admin/users/{user_id}/grants", adminOnly, s.adminSetGrants},
 		{"PUT", "/api/v1/admin/users/{user_id}/policy", adminOnly, s.adminSetPolicy},
+		{"GET", "/api/v1/admin/layout/home", adminOnly, s.adminHomeLayout},
+		{"PUT", "/api/v1/admin/layout/home", adminOnly, s.adminSetHomeLayout},
+		{"DELETE", "/api/v1/admin/layout/home", adminOnly, s.adminResetHomeLayout},
 		{"GET", "/api/v1/admin/labels", adminOnly, s.adminLabels},
 		{"GET", "/api/v1/admin/activity/sessions", adminOnly, s.adminSessions},
 		{"GET", "/api/v1/admin/metadata/unmatched", adminOnly, s.unmatched},
@@ -198,6 +219,11 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/admin/watch/export", adminOnly, s.watchExport},
 		{"POST", "/api/v1/admin/items/{item_id}/merge", adminOnly, s.adminMergeItems},
 		{"POST", "/api/v1/admin/versions/{version_id}/split", adminOnly, s.adminSplitVersion},
+		{"GET", "/api/v1/admin/markers", adminOnly, s.adminMarkerStatus},
+		{"POST", "/api/v1/admin/items/{item_id}/markers/detect", adminOnly, s.adminDetectMarkers},
+		{"PUT", "/api/v1/admin/items/{item_id}/markers/{kind}", adminOnly, s.adminSetMarker},
+		{"DELETE", "/api/v1/admin/items/{item_id}/markers/{kind}", adminOnly, s.adminClearMarker},
+		{"POST", "/api/v1/admin/items/{item_id}/markers/{kind}/apply-to-season", adminOnly, s.adminApplyMarkerToSeason},
 		{"GET", "/api/v1/admin/activity/now", adminOnly, s.activityNow},
 		{"GET", "/api/v1/admin/activity/history", adminOnly, s.activityHistory},
 		{"GET", "/api/v1/admin/activity/stats", adminOnly, s.activityStats},

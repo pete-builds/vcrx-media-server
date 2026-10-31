@@ -2,6 +2,8 @@ import { api, artUrl } from "../api.js";
 import { h, icon, runtime, clock, size, bitrate, episodeCode, toast, fadeImg, placeholderArt, cardArt, when, hours } from "../dom.js";
 import { go, state } from "../app.js";
 import { versionTools } from "./versions.js";
+import { markerEditor } from "./markers.js";
+import { extraActions, extrasSection } from "./extras.js";
 import { downloadedSubtitles } from "./subtitle-admin.js";
 
 // The details page for a movie, show, season or episode.
@@ -18,7 +20,8 @@ export async function itemView({ match, params }) {
   const fix = admin ? fixMatch(item, params && params.get("fix") === "1") : null;
   const subs = playable && state.me && state.me.is_admin ? downloadedSubtitles(item) : null;
   const tools = admin && item.kind === "movie" ? versionTools(item) : null;
-  const el = h("div", {}, hero(item), fix, tools, castSection(item), playable ? techFacts(item) : null, subs, children ? childrenSection(item, children.items || []) : null,
+  const markers = state.me && state.me.is_admin && item.kind === "episode" ? markerEditor(item) : null;
+  const el = h("div", {}, hero(item), fix, tools, markers, extrasSection(item), castSection(item), playable ? techFacts(item) : null, subs, children ? childrenSection(item, children.items || []) : null,
     history ? historySection(item, history) : null);
   return { el, title: item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)}`.trim() : item.title, hero: true };
 }
@@ -141,6 +144,7 @@ function actions(item) {
     row.append(h("button", { class: "btn btn-primary btn-large", type: "button", onclick: () => go(`/play/${n.id}`) }, icon("play"),
       `${n.watch && n.watch.position_ms > 0 ? "Resume" : "Play"} ${episodeCode(n)}`));
   }
+  row.append(...extraActions(item));
   const played = item.kind === "show" || item.kind === "season" ? w.played && !w.unplayed_count : w.played;
   const toggle = h("button", { class: "btn btn-glass" + (played ? " is-on" : ""), type: "button", "aria-pressed": played ? "true" : "false" },
     icon("check"), played ? "Mark unwatched" : "Mark watched");
