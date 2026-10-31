@@ -27,9 +27,11 @@ import androidx.media3.extractor.DefaultExtractorsFactory
 import io.github.pete_builds.vcrx.tv.caps.CapabilityProbe
 import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.ApiException
+import io.github.pete_builds.vcrx.tv.net.Item
 import io.github.pete_builds.vcrx.tv.net.PlaybackRequest
 import io.github.pete_builds.vcrx.tv.net.PlaybackSession
 import io.github.pete_builds.vcrx.tv.net.streamRefusal
+import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -43,6 +45,8 @@ sealed interface Phase {
     /** 403 or 422 from the server: policy or a file this device cannot play yet. */
     data class Refused(val message: String) : Phase
     data class Failed(val message: String, val unreachable: Boolean) : Phase
+    /** An episode ended and the next one starts when [secondsLeft] reaches zero. */
+    data class UpNext(val next: Item, val secondsLeft: Int) : Phase
 }
 
 enum class Overlay { Hidden, Info, Controls }
@@ -89,6 +93,10 @@ class PlaybackController(
     private var heartbeat: Job? = null
     private var ticker: Job? = null
     private var autoHide: Job? = null
+    private var countdown: Job? = null
+
+    /** For an episode, the one after it, from the item's details; null for a movie or the last episode. */
+    private var nextEpisode: Item? = null
 
     init {
         val http = OkHttpDataSource.Factory(graph.httpClient)
@@ -114,6 +122,11 @@ class PlaybackController(
         phase = Phase.Starting
         activity.lifecycleScope.launch {
             try {
+                // Details are only for Up Next, so a failure here never blocks playback.
+                launch {
+                    nextEpisode = runCatching { graph.api.item(itemId) }.getOrNull()
+                        ?.takeIf { it.kind == "episode" }?.nextEpisode
+                }
                 val capabilities = withContext(Dispatchers.Default) { CapabilityProbe.probe(activity) }
                 val start = startAtMs ?: if (fromStart) 0L else null
                 val created = graph.api.startPlayback(PlaybackRequest(itemId, versionId, start, capabilities))
@@ -194,6 +207,7 @@ class PlaybackController(
         heartbeat?.cancel()
         ticker?.cancel()
         autoHide?.cancel()
+        countdown?.cancel()
         player.release()
     }
 
@@ -219,7 +233,8 @@ class PlaybackController(
                 Player.STATE_BUFFERING -> if (player.playWhenReady) reporter?.onBuffering(player.currentPosition, duration())
                 Player.STATE_ENDED -> {
                     reporter?.stop(duration() ?: player.currentPosition, duration())
-                    activity.finish()
+                    val next = nextEpisode
+                    if (next != null) upNext(next) else activity.finish()
                 }
                 else -> Unit
             }
@@ -245,6 +260,26 @@ class PlaybackController(
                 "Lost the connection to the server."
             else -> "Playback failed: ${error.errorCodeName}. ${error.message.orEmpty()}".trim()
         }
+    }
+
+    private fun upNext(next: Item) {
+        countdown?.cancel()
+        countdown = activity.lifecycleScope.launch {
+            for (left in UP_NEXT_SECONDS downTo 1) {
+                phase = Phase.UpNext(next, left)
+                delay(1_000)
+            }
+            playNext()
+        }
+    }
+
+    /** Plays the Up Next episode now, in a fresh player so its session starts clean. */
+    fun playNext() {
+        val next = (phase as? Phase.UpNext)?.next ?: return
+        countdown?.cancel()
+        val title = listOfNotNull(next.showTitle, episodeCode(next), next.title).joinToString("  ")
+        activity.startActivity(PlayerActivity.intent(activity, next.id, null, false, title))
+        activity.finish()
     }
 
     fun togglePlayPause() {
@@ -393,6 +428,7 @@ class PlaybackController(
     }
 
     private companion object {
+        const val UP_NEXT_SECONDS = 10
         const val INFO_MS = 3_000L
         const val CONTROLS_MS = 6_000L
     }

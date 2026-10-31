@@ -42,6 +42,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
 import io.github.pete_builds.vcrx.tv.ui.components.Mark
 import io.github.pete_builds.vcrx.tv.ui.components.MessageView
+import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import io.github.pete_builds.vcrx.tv.ui.details.formatTime
 import io.github.pete_builds.vcrx.tv.ui.theme.Black
 import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
@@ -61,6 +62,16 @@ fun PlayerScreen(controller: PlaybackController, onExit: () -> Unit) {
                     if (phase.unreachable) "Server unreachable" else "Playback stopped",
                     phase.message,
                     primary = "Retry" to controller::retry,
+                    secondary = "Back" to onExit,
+                )
+            }
+            is Phase.UpNext -> BlackField {
+                val next = phase.next
+                val name = listOfNotNull(episodeCode(next), next.title).joinToString("  ")
+                MessageView(
+                    "Up next",
+                    "$name starts in ${phase.secondsLeft} s.",
+                    primary = "Play now" to controller::playNext,
                     secondary = "Back" to onExit,
                 )
             }
