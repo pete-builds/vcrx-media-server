@@ -24,6 +24,7 @@ import (
 	_ "golang.org/x/image/webp" // decode local WebP artwork
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/fsafe"
+	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 )
 
 var ErrNoArtwork = errors.New("no artwork")
@@ -58,8 +59,10 @@ type Service struct {
 
 // Overlayer draws badges onto a poster. sig is "" when the item gets none; it
 // goes into the cache key, so a changed rating or a new 4K version redraws.
+// Badges describe only the versions pol may play: a friend capped at 1080p
+// never sees a 4K badge.
 type Overlayer interface {
-	Poster(ctx context.Context, itemID int64) (sig string, paint func(*image.RGBA) error, err error)
+	Poster(ctx context.Context, itemID int64, pol policy.Policy) (sig string, paint func(*image.RGBA) error, err error)
 }
 
 func New(conn *sql.DB, cacheDir, ffmpeg string) *Service {
@@ -74,14 +77,11 @@ type source struct {
 }
 
 // Get returns the path of a cached JPEG for the item's artwork at a width bucket,
-// rendering it first if needed. The caller has already checked access.
-func (s *Service) Get(ctx context.Context, itemID int64, kind string, width int) (string, error) {
-	return s.GetWith(ctx, itemID, kind, width, true)
-}
-
-// GetWith is Get with a choice of overlays on posters; false returns the clean image.
-func (s *Service) GetWith(ctx context.Context, itemID int64, kind string, width int, overlays bool) (string, error) {
-	src, err := s.lookup(ctx, itemID, kind)
+// rendering it first if needed, with overlays on posters (false returns the
+// clean image). The caller has already checked that pol may see the item; pol
+// still decides which versions a frame or a badge may come from.
+func (s *Service) Get(ctx context.Context, pol policy.Policy, itemID int64, kind string, width int, overlays bool) (string, error) {
+	src, err := s.lookup(ctx, pol, itemID, kind)
 	if err != nil {
 		return "", err
 	}
@@ -93,7 +93,7 @@ func (s *Service) GetWith(ctx context.Context, itemID int64, kind string, width 
 	var sig string
 	var paint func(*image.RGBA) error
 	if overlays && kind == "poster" && !src.extract && s.Overlays != nil {
-		if sig, paint, err = s.Overlays.Poster(ctx, itemID); err != nil {
+		if sig, paint, err = s.Overlays.Poster(ctx, itemID, pol); err != nil {
 			return "", err
 		}
 	}
@@ -132,7 +132,7 @@ func (s *Service) GetWith(ctx context.Context, itemID int64, kind string, width 
 	return out, nil
 }
 
-func (s *Service) lookup(ctx context.Context, itemID int64, kind string) (source, error) {
+func (s *Service) lookup(ctx context.Context, pol policy.Policy, itemID int64, kind string) (source, error) {
 	var itemKind string
 	var parent sql.NullInt64
 	var libRoot string
@@ -154,13 +154,16 @@ func (s *Service) lookup(ctx context.Context, itemID int64, kind string) (source
 	}
 	switch {
 	case itemKind == "season" && kind == "poster" && parent.Valid:
-		return s.lookup(ctx, parent.Int64, "poster")
+		return s.lookup(ctx, pol, parent.Int64, "poster")
 	case kind == "thumb" && (itemKind == "episode" || itemKind == "movie"):
-		// A frame from the best version, a fifth of the way in, avoids most cold opens.
+		// A frame from the best version the caller may play, a fifth of the way
+		// in, avoids most cold opens. The path is in the cache key, so a friend
+		// capped at 1080p gets a frame from the 1080p file, never the 4K one.
 		var vpath string
 		var dur sql.NullInt64
-		err := s.DB.QueryRowContext(ctx, `SELECT path, duration_ms FROM media_versions WHERE item_id = ? AND missing_since IS NULL
-			ORDER BY CASE WHEN probe_status = 'ok' THEN 0 ELSE 1 END, height DESC LIMIT 1`, itemID).Scan(&vpath, &dur)
+		vc, vargs := pol.VersionCond("v")
+		err := s.DB.QueryRowContext(ctx, `SELECT v.path, v.duration_ms FROM media_versions v WHERE v.item_id = ? AND `+vc+`
+			ORDER BY CASE WHEN v.probe_status = 'ok' THEN 0 ELSE 1 END, v.height DESC LIMIT 1`, append([]any{itemID}, vargs...)...).Scan(&vpath, &dur)
 		if err != nil {
 			return source{}, ErrNoArtwork
 		}

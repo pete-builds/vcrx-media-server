@@ -177,7 +177,7 @@ async function main() {
     ["/profiles", ".picker .profile"],
     ["/settings", ".settings h1"],
     ["/settings/libraries", "table.list"],
-    ["/settings/users", ".add-user"],
+    ["/settings/users", ".user-summary"],
     ["/settings/newsletter", ".newsletter-form"],
   ];
   for (const [path, selector] of pages) {
