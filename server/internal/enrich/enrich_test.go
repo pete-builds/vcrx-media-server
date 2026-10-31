@@ -455,3 +455,22 @@ func TestTieSettledByPopularity(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// Run calls AfterPass after a pass, which is where copies of one film that
+// now share a TMDb id are merged.
+func TestRunCallsAfterPass(t *testing.T) {
+	v := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	called := make(chan struct{})
+	v.e.AfterPass = func(context.Context) {
+		close(called)
+		cancel()
+	}
+	go v.e.Run(ctx, 0, time.Hour)
+	select {
+	case <-called:
+	case <-time.After(10 * time.Second):
+		t.Fatal("AfterPass was not called after a pass")
+	}
+}

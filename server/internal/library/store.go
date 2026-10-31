@@ -53,6 +53,8 @@ type state struct {
 	// moved holds items that lost a version to another item this run, so
 	// reconcile can prune them if they are now empty.
 	moved map[int64]bool
+	// alias maps keys merged into a movie (regroup.go) to that movie.
+	alias map[string]*itemRow
 }
 
 func identity(kind string, parent int64, key string) string {
@@ -60,7 +62,8 @@ func identity(kind string, parent int64, key string) string {
 }
 
 func loadState(ctx context.Context, db *sql.DB, lib Library) (*state, error) {
-	st := &state{versions: map[string]*verRow{}, items: map[int64]*itemRow{}, byKey: map[string]*itemRow{}, moved: map[int64]bool{}}
+	st := &state{versions: map[string]*verRow{}, items: map[int64]*itemRow{}, byKey: map[string]*itemRow{}, moved: map[int64]bool{},
+		alias: map[string]*itemRow{}}
 	byID := map[int64]*verRow{}
 	err := query(ctx, db, `SELECT id, item_id, path, rel_path, size, mtime, IFNULL(label, ''), probe_status,
 		IFNULL(probed_at, 0), IFNULL(missing_since, 0) FROM media_versions WHERE library_id = ?`, lib.ID, func(rows *sql.Rows) error {
@@ -107,6 +110,11 @@ func loadState(ctx context.Context, db *sql.DB, lib Library) (*state, error) {
 		}
 		st.items[it.id] = it
 		st.byKey[identity(it.kind, it.parent, it.key)] = it
+		if it.kind == "movie" {
+			for _, k := range mergedKeys(it.extra) {
+				st.alias[k] = it
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -377,7 +385,7 @@ func (wr *writer) apply(ctx context.Context, p *plan, res *probe.Result, perr er
 		if season != nil {
 			item = st.byKey[identity("episode", season.id, p.epKey)]
 		}
-	} else {
+	} else if item = st.routed(p); item == nil {
 		item = st.byKey[identity("movie", 0, p.movieKey)]
 	}
 	sc := wr.gather(p, item, show)
@@ -439,9 +447,13 @@ func (wr *writer) apply(ctx context.Context, p *plan, res *probe.Result, perr er
 		}
 		wr.showsDone[sh.id] = true
 	} else {
-		mv, err := t.ensure("movie", 0, p.movieKey, p.movieRep.itemFields("movie"))
-		if err != nil {
-			return err
+		// A split or merged file goes where the admin or the TMDb merge put it,
+		// and does not rename that movie after itself.
+		mv := st.routed(p)
+		if mv == nil {
+			if mv, err = t.ensure("movie", 0, p.movieKey, p.movieRep.itemFields("movie")); err != nil {
+				return err
+			}
 		}
 		itemID, touched = mv.id, []*itemRow{mv}
 	}
@@ -528,7 +540,7 @@ func (wr *writer) dirty(p *plan, v *verRow, item, season, show *itemRow, sc side
 // titleDrift catches a filename-sourced item whose representative now parses
 // differently, for example after the grouping mode changed.
 func (wr *writer) titleDrift(p *plan, item *itemRow) bool {
-	if item.source != "filename" || item.locked["title"] {
+	if item.source != "filename" || item.locked["title"] || (!p.episode && item.key != p.movieKey) {
 		return false
 	}
 	f := p.movieRep

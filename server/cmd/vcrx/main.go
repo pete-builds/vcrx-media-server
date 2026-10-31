@@ -290,6 +290,13 @@ func serve() error {
 	if cfg.TMDbAPIKey != "" {
 		enr := newEnricher(a)
 		enr.Busy = scans.Running
+		enr.AfterPass = func(ctx context.Context) {
+			if n, err := library.MergeByTMDb(ctx, a.db, 0); err != nil {
+				log.Warn("merging copies with the same TMDb id", "err", err)
+			} else if n > 0 {
+				log.Info("merged copies with the same TMDb id", "merged", n)
+			}
+		}
 		srv.Metadata = enr
 		go enr.Run(ctx, 2*time.Minute, 15*time.Minute)
 	} else {
@@ -651,6 +658,13 @@ func metadataCmd(args []string) error {
 		fmt.Printf("tmdb: %d matched, %d unmatched, %d errors, %d episodes filled\n", st.Matched, st.Unmatched, st.Errors, st.Episodes)
 		if st.Unmatched > 0 {
 			fmt.Println("run `vcrx metadata status` to see what was skipped and why")
+		}
+		if err != nil {
+			return err
+		}
+		n, err := library.MergeByTMDb(ctx, a.db, 0)
+		if n > 0 {
+			fmt.Printf("merged %d copies into movies with the same TMDb id\n", n)
 		}
 		return err
 	case "status":

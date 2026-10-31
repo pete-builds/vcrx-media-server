@@ -643,6 +643,62 @@ paths:
         "422": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
 
+  /api/v1/admin/items/{item_id}/merge:
+    post:
+      operationId: adminMergeItems
+      summary: >-
+        Merge other movies of the same library into this one. Their files become its versions; watch state is combined per
+        user, playback history, labels and collections move over, and this movie keeps its own title and match. Rescans
+        keep the merge. One transaction: on any error nothing changes. 409 scan_running while the library is being scanned.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [item_ids]
+              properties:
+                item_ids: { type: array, items: { type: integer }, description: The movies to fold into this one. }
+      responses:
+        "200":
+          description: Merged
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item_id]
+                properties:
+                  item_id: { type: integer, description: The merged movie, the one in the path. }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/versions/{version_id}/split:
+    post:
+      operationId: adminSplitVersion
+      summary: >-
+        Move one version out of its movie into a movie of its own, a copy of the old one's metadata and match. The split
+        is kept by rescans and by the automatic merge of copies with the same TMDb id. One transaction: on any error
+        nothing changes. 422 only_version for a movie's only file; 409 scan_running while the library is being scanned.
+      parameters:
+        - { name: version_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Split
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item_id]
+                properties:
+                  item_id: { type: integer, description: The new movie holding the version. }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
   /api/v1/admin/activity/now:
     get:
       operationId: adminActivityNow

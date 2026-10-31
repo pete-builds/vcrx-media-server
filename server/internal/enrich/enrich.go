@@ -45,9 +45,12 @@ type Enricher struct {
 	Country string
 	Log     *slog.Logger
 	// Busy reports a library being scanned; its items wait for the next pass.
-	Busy  func(libraryID int64) bool
-	Batch int
-	Now   func() time.Time
+	Busy func(libraryID int64) bool
+	// AfterPass, when set, runs after every pass (a Fix Match may have made a
+	// pair since), e.g. to merge copies of a film that share a TMDb id.
+	AfterPass func(ctx context.Context)
+	Batch     int
+	Now       func() time.Time
 }
 
 type Stats struct {
@@ -100,6 +103,9 @@ func (e *Enricher) Run(ctx context.Context, initial, interval time.Duration) {
 		}
 		if err != nil && ctx.Err() == nil {
 			e.log().Warn("tmdb enrichment pass did not complete", "err", err)
+		}
+		if e.AfterPass != nil && ctx.Err() == nil {
+			e.AfterPass(ctx)
 		}
 	}
 }

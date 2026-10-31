@@ -127,6 +127,8 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/admin/metadata/unmatched", adminOnly, s.unmatched},
 		{"GET", "/api/v1/admin/items/{item_id}/match", adminOnly, s.matchSearch},
 		{"PUT", "/api/v1/admin/items/{item_id}/match", adminOnly, s.matchSet},
+		{"POST", "/api/v1/admin/items/{item_id}/merge", adminOnly, s.adminMergeItems},
+		{"POST", "/api/v1/admin/versions/{version_id}/split", adminOnly, s.adminSplitVersion},
 		{"GET", "/api/v1/admin/activity/now", adminOnly, s.activityNow},
 		{"GET", "/api/v1/admin/activity/history", adminOnly, s.activityHistory},
 		{"GET", "/api/v1/admin/activity/stats", adminOnly, s.activityStats},

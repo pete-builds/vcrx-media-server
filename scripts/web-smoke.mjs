@@ -111,7 +111,7 @@ async function main() {
     ["/", ".row .card"],
     ...ids.libs.map((id) => [`/library/${id}`, ".grid .card"]),
     ...ids.libs.map((id) => [`/library/${id}/collections`, ".toolbar h1"]),
-    [`/item/${ids.movie}`, ".hero h1"],
+    [`/item/${ids.movie}`, ".versions-admin"], // the admin version tools render too
     [`/item/${ids.show}`, ".hero h1"],
     ["/search?q=a", ".toolbar h1"],
     ["/activity/now", ".tiles"],
