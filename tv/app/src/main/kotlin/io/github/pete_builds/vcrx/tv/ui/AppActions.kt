@@ -28,6 +28,10 @@ object AboutRoute
 /** "Who's watching?", the household profile picker. */
 @Serializable
 object ProfilesRoute
+
+/** Pair with a phone, or type an invite: signs in as an invited device. */
+@Serializable
+object PairRoute
 /** One page of Settings; [page] is a [io.github.pete_builds.vcrx.tv.ui.settings.SettingsPage] name. */
 @Serializable
 data class SettingsRoute(val page: String)
@@ -77,6 +81,9 @@ class AppActions(private val nav: NavController, private val activity: Activity)
     fun leaveProfiles() {
         if (!nav.popBackStack()) activity.finish()
     }
+
+    /** Pairing on top of Connect or Login; Back returns to it. */
+    fun openPair() = nav.navigate(PairRoute) { launchSingleTop = true }
 
     /** Plays one of an item's extras, such as its trailer, in the app's player. */
     fun playExtra(itemId: Long, extraId: Long, title: String) {

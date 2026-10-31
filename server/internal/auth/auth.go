@@ -89,6 +89,8 @@ type User struct {
 	IsAdmin     bool
 	Disabled    bool
 	CreatedAt   int64
+	// Managed is a household profile with no password of its own.
+	Managed bool
 }
 
 type Device struct {
@@ -101,6 +103,37 @@ type Session struct {
 	User      User
 	Device    Device
 	ExpiresAt int64
+	// TokenID is the invited device this session belongs to, or 0 for an
+	// account or a household profile. Such a session is its own principal.
+	TokenID int64
+}
+
+// Principal kinds, as Activity records them.
+const (
+	KindUser    = "user"
+	KindProfile = "profile"
+	KindToken   = "token"
+)
+
+// Kind is who is asking: an account, a household profile, or an invited device.
+func (s Session) Kind() string {
+	switch {
+	case s.TokenID != 0:
+		return KindToken
+	case s.User.Managed:
+		return KindProfile
+	default:
+		return KindUser
+	}
+}
+
+// Name is how history and Activity name the principal: an invited device by
+// the name the admin gave it, anyone else by their username.
+func (s Session) Name() string {
+	if s.TokenID != 0 && s.User.DisplayName != "" {
+		return s.User.DisplayName
+	}
+	return s.User.Username
 }
 
 type Store struct {
@@ -236,6 +269,38 @@ func (s *Store) SignInAs(ctx context.Context, username string, dev Device, ip st
 	return s.issue(ctx, u, dev, ip)
 }
 
+// SignInDevice starts a session for an invited device's principal, after the
+// invites package has redeemed its invite or collected its approved pairing.
+// The session never outlives the token: expiresAt caps it.
+func (s *Store) SignInDevice(ctx context.Context, userID, tokenID, expiresAt int64, dev Device, ip string) (string, Session, error) {
+	var u User
+	var dn sql.NullString
+	var isToken bool
+	err := s.DB.QueryRowContext(ctx, `SELECT id, username, display_name, is_admin, disabled, created_at, device_token
+		FROM users WHERE id = ?`, userID).Scan(&u.ID, &u.Username, &dn, &u.IsAdmin, &u.Disabled, &u.CreatedAt, &isToken)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && (!isToken || u.IsAdmin || u.Disabled)) {
+		return "", Session{}, ErrInvalidToken
+	}
+	if err != nil {
+		return "", Session{}, err
+	}
+	u.DisplayName = dn.String
+	tok, sess, err := s.issue(ctx, u, dev, ip)
+	if err != nil {
+		return "", Session{}, err
+	}
+	if expiresAt < sess.ExpiresAt {
+		if _, err := s.DB.ExecContext(ctx, `UPDATE auth_sessions SET expires_at = ? WHERE id = ?`, expiresAt, sess.ID); err != nil {
+			return "", Session{}, err
+		}
+		sess.ExpiresAt = expiresAt
+	}
+	sess.TokenID = tokenID
+	// Devices lists it as seen from the moment it signs in.
+	_, _ = s.DB.ExecContext(ctx, `UPDATE device_tokens SET last_seen_at = ?, last_ip = ? WHERE id = ?`, time.Now().UnixMilli(), ip, tokenID)
+	return tok, sess, nil
+}
+
 func (s *Store) issue(ctx context.Context, u User, dev Device, ip string) (string, Session, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -266,11 +331,18 @@ func (s *Store) Authenticate(ctx context.Context, token, ip string) (Session, er
 	var sess Session
 	var dn, devID, devName, devModel, platform, client, clientVer sql.NullString
 	var lastSeen int64
+	var isToken bool
+	var tokenID, tokenExpires, tokenRevoked sql.NullInt64
+	// An invited device's session is checked against its token on every
+	// request: revoked or expired, it stops here, whatever the session says.
 	err := s.DB.QueryRowContext(ctx, `SELECT s.id, s.expires_at, s.last_seen_at, s.device_id, s.device_name, s.device_model, s.platform,
-			s.client, s.client_version, u.id, u.username, u.display_name, u.is_admin, u.disabled, u.created_at
-		FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`, sum[:]).Scan(
+			s.client, s.client_version, u.id, u.username, u.display_name, u.is_admin, u.disabled, u.created_at, u.managed,
+			u.device_token, dt.id, dt.expires_at, dt.revoked_at
+		FROM auth_sessions s JOIN users u ON u.id = s.user_id LEFT JOIN device_tokens dt ON dt.user_id = u.id
+		WHERE s.token_hash = ?`, sum[:]).Scan(
 		&sess.ID, &sess.ExpiresAt, &lastSeen, &devID, &devName, &devModel, &platform, &client, &clientVer,
-		&sess.User.ID, &sess.User.Username, &dn, &sess.User.IsAdmin, &sess.User.Disabled, &sess.User.CreatedAt)
+		&sess.User.ID, &sess.User.Username, &dn, &sess.User.IsAdmin, &sess.User.Disabled, &sess.User.CreatedAt, &sess.User.Managed,
+		&isToken, &tokenID, &tokenExpires, &tokenRevoked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrInvalidToken
 	}
@@ -281,6 +353,14 @@ func (s *Store) Authenticate(ctx context.Context, token, ip string) (Session, er
 	if sess.User.Disabled || now.UnixMilli() >= sess.ExpiresAt {
 		return Session{}, ErrInvalidToken
 	}
+	if isToken {
+		// A device principal with no token row, a revoked token or an expired
+		// one has no access at all.
+		if !tokenID.Valid || tokenRevoked.Valid || !tokenExpires.Valid || now.UnixMilli() >= tokenExpires.Int64 {
+			return Session{}, ErrInvalidToken
+		}
+		sess.TokenID = tokenID.Int64
+	}
 	sess.User.DisplayName = dn.String
 	sess.Device = Device{ID: devID.String, Name: devName.String, Model: devModel.String, Platform: platform.String,
 		Client: client.String, ClientVersion: clientVer.String}
@@ -288,6 +368,11 @@ func (s *Store) Authenticate(ctx context.Context, token, ip string) (Session, er
 		exp := sess.ExpiresAt
 		if time.Until(time.UnixMilli(exp)) < s.TTL/2 {
 			exp = now.Add(s.TTL).UnixMilli()
+		}
+		if sess.TokenID != 0 {
+			// Sliding expiry never carries a device past its token.
+			exp = min(exp, tokenExpires.Int64)
+			_, _ = s.DB.ExecContext(ctx, `UPDATE device_tokens SET last_seen_at = ?, last_ip = ? WHERE id = ?`, now.UnixMilli(), ip, sess.TokenID)
 		}
 		_, _ = s.DB.ExecContext(ctx, `UPDATE auth_sessions SET last_seen_at = ?, expires_at = ?, ip = ? WHERE id = ?`,
 			now.UnixMilli(), exp, ip, sess.ID)

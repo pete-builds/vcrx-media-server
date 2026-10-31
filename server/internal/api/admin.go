@@ -128,7 +128,7 @@ func (s *Server) adminSetGrants(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		LibraryIDs []int64 `json:"library_ids"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(w, r, &req) || !s.notDevice(w, r, id) {
 		return
 	}
 	if err := s.Admin.SetGrants(r.Context(), id, req.LibraryIDs); err != nil {
@@ -148,7 +148,7 @@ func (s *Server) adminSetPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := admin.UserPolicy{AllowTranscode: true}
-	if !readJSON(w, r, &p) {
+	if !readJSON(w, r, &p) || !s.notDevice(w, r, id) {
 		return
 	}
 	if err := s.Admin.SetPolicy(r.Context(), id, p); err != nil {
@@ -181,4 +181,17 @@ func (s *Server) adminSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
+}
+
+// notDevice refuses to edit an invited device's grants or policy here: its
+// scope is fixed when it is minted or approved, so it can never be widened
+// afterwards. Revoke it and invite it again instead.
+func (s *Server) notDevice(w http.ResponseWriter, r *http.Request, userID int64) bool {
+	var device bool
+	err := s.DB.QueryRowContext(r.Context(), `SELECT device_token FROM users WHERE id = ?`, userID).Scan(&device)
+	if err == nil && device {
+		writeError(w, http.StatusNotFound, "not_found", "No such user. Invited devices keep the scope they were given; revoke and invite again to change it.")
+		return false
+	}
+	return true
 }

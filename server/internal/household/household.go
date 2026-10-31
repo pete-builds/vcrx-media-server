@@ -84,11 +84,14 @@ func scanProfile(row interface{ Scan(...any) error }) (Profile, error) {
 // Members lists the household's enabled profiles for the picker: admins first,
 // then by name.
 func (s *Store) Members(ctx context.Context) ([]Profile, error) {
-	return s.list(ctx, ` WHERE u.household = 1 AND u.disabled = 0`)
+	return s.list(ctx, ` WHERE u.household = 1 AND u.disabled = 0 AND u.device_token = 0`)
 }
 
-// All lists every user with their household settings, for admins.
-func (s *Store) All(ctx context.Context) ([]Profile, error) { return s.list(ctx, "") }
+// All lists every user with their household settings, for admins. Invited
+// devices are not people and never household profiles, so they are left out.
+func (s *Store) All(ctx context.Context) ([]Profile, error) {
+	return s.list(ctx, ` WHERE u.device_token = 0`)
+}
 
 func (s *Store) list(ctx context.Context, where string) ([]Profile, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+profileCols+profileFrom+where+
@@ -108,9 +111,10 @@ func (s *Store) list(ctx context.Context, where string) ([]Profile, error) {
 	return out, rows.Err()
 }
 
-// Get reads one user, household member or not.
+// Get reads one user, household member or not. An invited device is not
+// found, so it can never be added to the household or switched to.
 func (s *Store) Get(ctx context.Context, id int64) (Profile, error) {
-	p, err := scanProfile(s.DB.QueryRowContext(ctx, `SELECT `+profileCols+profileFrom+` WHERE u.id = ?`, id))
+	p, err := scanProfile(s.DB.QueryRowContext(ctx, `SELECT `+profileCols+profileFrom+` WHERE u.id = ? AND u.device_token = 0`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Profile{}, ErrNotFound
 	}

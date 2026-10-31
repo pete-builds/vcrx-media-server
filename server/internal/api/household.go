@@ -49,6 +49,12 @@ func (s *Server) caller(w http.ResponseWriter, r *http.Request) (*household.Prof
 	if !ri.Authed {
 		return nil, true
 	}
+	if ri.Session.TokenID != 0 {
+		// The gate refuses invited devices before any household route; this
+		// keeps the rule if a route ever reaches here another way.
+		writeError(w, http.StatusForbidden, "not_household", "An invited device cannot switch profiles.")
+		return nil, false
+	}
 	p, err := s.Household.Get(r.Context(), ri.Session.User.ID)
 	if err != nil {
 		s.internal(w, r, err)

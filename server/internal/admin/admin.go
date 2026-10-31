@@ -303,7 +303,8 @@ type User struct {
 }
 
 func (a *Admin) Users(ctx context.Context) ([]User, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT id, username, display_name, is_admin, disabled, created_at FROM users ORDER BY username COLLATE NOCASE`)
+	rows, err := a.DB.QueryContext(ctx, `SELECT id, username, display_name, is_admin, disabled, created_at FROM users
+		WHERE device_token = 0 ORDER BY username COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
 	}

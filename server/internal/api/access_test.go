@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -13,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pete-builds/vcrx-media-server/server/internal/admin"
 	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
 )
@@ -33,6 +36,11 @@ import (
 // probe that calls it for something hidden (or, if it reads no items at all,
 // list it in noItemRoutes with the reason) and make the handler apply the
 // caller's policy until the probe passes.
+//
+// The whole walk runs once for each kind of principal: an account ("user"), a
+// household profile ("profile") and an invited device ("token"). Policy has
+// one enforcement path for all three, and this proves every route takes it,
+// so a new route fails until it is probed as each of them.
 
 // publicRoutes answer without a session and carry no titles.
 var publicRoutes = map[string]string{
@@ -43,6 +51,10 @@ var publicRoutes = map[string]string{
 	"POST /api/v1/auth/login":  "sign-in",
 	"POST /api/v1/auth/auto":   "trusted-network sign-in",
 	"POST /api/v1/hooks/arr":   "Radarr and Sonarr webhooks, token-guarded, start scans and return no titles",
+	// Invited devices: TestInvite* and TestPairing* cover each.
+	"POST /api/v1/invites/redeem": "spends an invite and signs the device in; returns its scope, no titles",
+	"POST /api/v1/pair":           "a TV asks to pair and gets a code to show; no titles",
+	"POST /api/v1/pair/poll":      "a TV asks whether it was approved; returns its session, no titles",
 }
 
 // noItemRoutes are signed-in routes that read nothing about titles.
@@ -114,6 +126,8 @@ type walkFixture struct {
 	*fixture
 	movies, tv, vault int64
 	friendID          int64
+	// kind is the principal the walk runs as: "user", "profile" or "token".
+	kind string
 	// Hidden from the restricted friend, each for a different reason.
 	vaultMovie, horrorMovie, ratedMovie     int64 // ungranted library, denied label, rated R
 	horrorShow, horrorSeason, horrorEpisode int64 // denied label on the show
@@ -128,8 +142,10 @@ type walkFixture struct {
 
 func newWalkFixture(t *testing.T) *walkFixture {
 	t.Helper()
-	w := &walkFixture{fixture: newFixture(t)}
+	w := &walkFixture{fixture: newFixture(t), kind: "user"}
 	f := w.fixture
+	f.srv.Household = &household.Store{DB: f.db, AvatarDir: filepath.Join(t.TempDir(), "avatars")}
+	f.srv.PINs = household.NewLimiter(household.PINWindow)
 	withHLS(t, f, remux.New("ffmpeg", "ffprobe", 2, nil))
 	now := time.Now().UnixMilli()
 	exec := func(q string, args ...any) int64 {
@@ -299,6 +315,24 @@ func (w *walkFixture) restrict() {
 
 func (w *walkFixture) setAccess(libs []int64, pol map[string]any) {
 	w.t.Helper()
+	if w.kind == "token" {
+		// An invited device's scope is fixed at mint: the admin routes refuse
+		// to widen it (TestInviteScopeCannotBeWidened). The walk sets the same
+		// two tables they write, through the same store, because the point is
+		// that one policy path enforces whatever they hold.
+		var up admin.UserPolicy
+		b, _ := json.Marshal(pol)
+		if err := json.Unmarshal(b, &up); err != nil {
+			w.t.Fatal(err)
+		}
+		if err := w.srv.Admin.SetGrants(context.Background(), w.friendID, libs); err != nil {
+			w.t.Fatal(err)
+		}
+		if err := w.srv.Admin.SetPolicy(context.Background(), w.friendID, up); err != nil {
+			w.t.Fatal(err)
+		}
+		return
+	}
 	if r := w.do("PUT", fmt.Sprintf("/api/v1/admin/users/%d/grants", w.friendID), w.adminTok, map[string]any{"library_ids": libs}); r.code != 204 {
 		w.t.Fatalf("grants: %d %s", r.code, r.body)
 	}
@@ -369,7 +403,15 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 	}
 	ps = append(ps, at("POST /api/v1/playback/sessions").with(map[string]any{"item_id": f.movieID, "version_id": f.v4k, "capabilities": tclCaps()}))
 	for _, v := range w.hiddenVersions {
-		ps = append(ps, at("GET /api/v1/versions/{version_id}/file", v), at("HEAD /api/v1/versions/{version_id}/file", v))
+		// Direct play inside the principal's own playback session, the only
+		// way an invited device reaches a file (TestNoTokenRouteServesAWholeFile)...
+		sid := w.sessionOn(sessions, "version_id", v)
+		ps = append(ps, at("GET /api/v1/versions/{version_id}/file", v).query("session="+sid),
+			at("HEAD /api/v1/versions/{version_id}/file", v).query("session="+sid))
+		// ...and, for the household's own devices, by the bare URL as well.
+		if w.kind != "token" {
+			ps = append(ps, at("GET /api/v1/versions/{version_id}/file", v), at("HEAD /api/v1/versions/{version_id}/file", v))
+		}
 		// Subtitle search is off in the fixture, so even the open friend gets a
 		// 404, but only one written after the version passed the policy.
 		const off = "Subtitle search is not set up"
@@ -382,8 +424,15 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 		ps = append(ps, at("GET /api/v1/subtitles/{stream_id}", s))
 	}
 	for _, x := range w.hiddenExtras {
-		ps = append(ps, at("GET /api/v1/extras/{extra_id}/file", x), at("HEAD /api/v1/extras/{extra_id}/file", x),
+		// As for versions: inside the principal's own session, and bare for
+		// the household's own devices.
+		sid := w.sessionOn(sessions, "extra_id", x)
+		ps = append(ps, at("GET /api/v1/extras/{extra_id}/file", x).query("session="+sid),
+			at("HEAD /api/v1/extras/{extra_id}/file", x).query("session="+sid),
 			at("POST /api/v1/playback/sessions").with(map[string]any{"extra_id": x, "capabilities": tclCaps()}))
+		if w.kind != "token" {
+			ps = append(ps, at("GET /api/v1/extras/{extra_id}/file", x), at("HEAD /api/v1/extras/{extra_id}/file", x))
+		}
 	}
 	sessionProbes := func(id, owner string) {
 		ps = append(ps,
@@ -484,8 +533,58 @@ func checkCoverage(t *testing.T, routes []route, ps []probe) {
 	}
 }
 
+// sessionOn is the one of sessions whose column (version_id or extra_id) is v.
+func (w *walkFixture) sessionOn(sessions []string, column string, v int64) string {
+	w.t.Helper()
+	for _, id := range sessions {
+		var got int64
+		if err := w.db.QueryRow(`SELECT COALESCE(`+column+`, 0) FROM playback_sessions WHERE id = ?`, id).Scan(&got); err != nil {
+			w.t.Fatal(err)
+		}
+		if got == v {
+			return id
+		}
+	}
+	w.t.Fatalf("no walk session has %s %d", column, v)
+	return ""
+}
+
+// become makes the walk's friend a principal of the given kind: the account
+// "friend", a household profile with no password, or an invited device.
+func (w *walkFixture) become(kind string) {
+	w.t.Helper()
+	w.kind = kind
+	switch kind {
+	case "profile":
+		r := w.do("POST", "/api/v1/admin/profiles", w.adminTok, map[string]any{"name": "Walker"})
+		if r.code != 201 {
+			w.t.Fatalf("create profile: %d %s", r.code, r.body)
+		}
+		var p struct{ ID int64 }
+		r.json(w.t, &p)
+		// A switch ends the session it starts from, so it gets its own.
+		r = w.do("POST", "/api/v1/auth/switch", w.login("pete", "adminpass1"), map[string]any{"user_id": p.ID})
+		var out struct{ Token string }
+		r.json(w.t, &out)
+		if r.code != 200 || out.Token == "" {
+			w.t.Fatalf("switch to the profile: %d %s", r.code, r.body)
+		}
+		w.friendID, w.friendTok = p.ID, out.Token
+	case "token":
+		d := w.invite(map[string]any{"name": "Walker's TV", "library_ids": []int64{w.movies, w.tv, w.vault}, "allow_transcode": true})
+		w.friendID, w.friendTok = d.userID, d.token
+	}
+}
+
 func TestAccessWalkEveryRouteAppliesThePolicy(t *testing.T) {
+	for _, kind := range []string{"user", "profile", "token"} {
+		t.Run(kind, func(t *testing.T) { accessWalk(t, kind) })
+	}
+}
+
+func accessWalk(t *testing.T, kind string) {
 	w := newWalkFixture(t)
+	w.become(kind)
 	w.open()
 	// The friend's own sessions on everything about to be hidden, opened while
 	// allowed: a policy tightened mid-play must cut them off.
@@ -589,18 +688,25 @@ func TestAccessWalkEveryRouteAppliesThePolicy(t *testing.T) {
 			t.Errorf("%s %s: the admin from the internet got %d, want 403 lan_only", rt.Method, rt.Path, r.code)
 		}
 	}
-	// Every household route (the profile picker, its avatars, switching)
-	// refuses the friend, who is not in the household: no profile list, no
-	// pictures, no way into a household member's session.
-	w.srv.Household = &household.Store{DB: w.db, AvatarDir: t.TempDir()}
-	w.srv.PINs = household.NewLimiter(household.PINWindow)
+	// The profile picker's routes. The friend's account (not in the
+	// household) and an invited device are refused every one, whatever their
+	// scope; a household profile reaches them, which shows the refusal is
+	// about who is asking and not a broken route.
 	for _, rt := range w.srv.Routes() {
 		if rt.access != householdOnly {
 			continue
 		}
-		path := routeParam.ReplaceAllString(rt.Path, "1")
-		if r := w.do(rt.Method, path, w.friendTok, map[string]any{"user_id": 1}); r.code != http.StatusForbidden || !strings.Contains(string(r.body), "not_household") {
-			t.Errorf("%s %s: the friend got %d %.120s, want 403 not_household", rt.Method, rt.Path, r.code, r.body)
+		path := routeParam.ReplaceAllString(rt.Path, fmt.Sprint(w.friendID))
+		r := w.do(rt.Method, path, w.friendTok, map[string]any{"user_id": w.friendID})
+		switch kind {
+		case "user", "token":
+			if r.code != http.StatusForbidden || !strings.Contains(string(r.body), "not_household") {
+				t.Errorf("%s %s: the %s got %d %.120s, want 403 not_household", rt.Method, rt.Path, kind, r.code, r.body)
+			}
+		case "profile":
+			if rt.Method == "GET" && rt.Path == "/api/v1/profiles" && r.code != 200 {
+				t.Errorf("%s %s: the household profile got %d %.120s", rt.Method, rt.Path, r.code, r.body)
+			}
 		}
 	}
 }

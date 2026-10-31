@@ -175,7 +175,8 @@ export async function drawProfileButton() {
   const btn = document.getElementById("nav-profile");
   if (!btn) return;
   btn.hidden = true;
-  if (!state.me) return;
+  // An invited device is its own principal: no profiles to switch to.
+  if (!state.me || state.me.kind === "token") return;
   let data;
   try {
     data = await api("/profiles");

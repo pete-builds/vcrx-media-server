@@ -264,6 +264,14 @@ func clip(s string, n int) string {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if sess := info(r).Session; sess.TokenID != 0 {
+		// An invited device has no password to sign back in with: signing
+		// out gives its invite up, and Devices shows it as revoked.
+		if _, err := s.revokeDevice(r.Context(), sess.TokenID, "the device itself"); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
 	if err := s.Auth.Logout(r.Context(), info(r).Session.ID); err != nil {
 		s.internal(w, r, err)
 		return
@@ -273,7 +281,20 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, toUserJSON(info(r).Session.User))
+	sess := info(r).Session
+	out := struct {
+		userJSON
+		// Kind is "user", "profile" or "token": an invited device, which
+		// clients never offer the profile picker.
+		Kind      string `json:"kind"`
+		ExpiresAt *int64 `json:"device_expires_at,omitempty"`
+	}{userJSON: toUserJSON(sess.User), Kind: sess.Kind()}
+	if sess.TokenID != 0 {
+		if d, err := s.Invites.Get(r.Context(), sess.TokenID); err == nil {
+			out.ExpiresAt = &d.Scope.ExpiresAt
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) libraries(w http.ResponseWriter, r *http.Request) {
@@ -435,9 +456,10 @@ func (s *Server) startPlayback(w http.ResponseWriter, r *http.Request) {
 	}
 	ri := info(r)
 	sess := ri.Session
-	client := playback.Client{UserID: sess.User.ID, Username: sess.User.Username, IsAdmin: sess.User.IsAdmin, AuthSessionID: sess.ID,
+	client := playback.Client{UserID: sess.User.ID, Username: sess.Name(), IsAdmin: sess.User.IsAdmin, AuthSessionID: sess.ID,
 		DeviceID: sess.Device.ID, DeviceName: sess.Device.Name, DeviceModel: sess.Device.Model, Platform: sess.Device.Platform,
-		ClientName: sess.Device.Client, ClientVersion: sess.Device.ClientVersion, IP: ri.IP}
+		ClientName: sess.Device.Client, ClientVersion: sess.Device.ClientVersion, IP: ri.IP,
+		PrincipalKind: sess.Kind(), TokenID: sess.TokenID}
 	out, refusal, err := s.Playback.Start(r.Context(), ri.Policy, client, req)
 	if err != nil {
 		s.notFoundOr(w, r, err)
@@ -519,6 +541,9 @@ func (s *Server) streamVersion(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusGone, "session_terminated", msg)
 			return
 		}
+	}
+	if !s.streamOnly(w, r, session, func(ss playback.StreamSession) bool { return ss.ExtraID == 0 && ss.VersionID == id }) {
+		return
 	}
 	v, root, err := s.Catalog.VersionForPlayback(r.Context(), info(r).Policy, id)
 	if err != nil {

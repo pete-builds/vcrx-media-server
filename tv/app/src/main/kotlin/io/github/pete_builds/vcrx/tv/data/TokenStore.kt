@@ -50,13 +50,24 @@ class TokenStore(context: Context) {
         get() = activeSlot().removePrefix(PROFILE_PREFIX).toLongOrNull()
 
     /**
+     * True when this device signed in by an invite or by pairing with a phone. It
+     * is then its own principal: the app never offers it the profile picker.
+     */
+    val isInvitedDevice: Boolean
+        get() = activeSlot() == DEVICE_SLOT
+
+    /** Saves an invited device's session, in its own slot. */
+    fun saveInvited(token: String) = saveSlot(token, DEVICE_SLOT)
+
+    /**
      * Saves [token] as the active session: for household profile [profileId], or
      * the unnamed slot for a password or automatic sign-in. The slot it replaces
      * is dropped.
      */
+    fun save(token: String, profileId: Long? = null) = saveSlot(token, profileId?.let { "$PROFILE_PREFIX$it" } ?: "")
+
     @Synchronized
-    fun save(token: String, profileId: Long? = null) {
-        val slot = profileId?.let { "$PROFILE_PREFIX$it" } ?: ""
+    private fun saveSlot(token: String, slot: String) {
         val previous = activeSlot()
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key())
@@ -121,6 +132,7 @@ class TokenStore(context: Context) {
         const val KEY_TOKEN = "token"
         const val KEY_ACTIVE = "active_slot"
         const val PROFILE_PREFIX = "profile:"
+        const val DEVICE_SLOT = "device"
 
         // The unnamed slot keeps the original key names, so an existing sign-in survives the update.
         fun ivKey(slot: String) = if (slot.isEmpty()) KEY_IV else "$KEY_IV.$slot"

@@ -20,6 +20,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
 	"github.com/pete-builds/vcrx-media-server/server/internal/household"
+	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
 	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
@@ -91,6 +92,12 @@ type Server struct {
 	// switchLocks serializes password checks per profile (*sync.Mutex by id),
 	// so the sign-in limiter's check and its count cannot be raced.
 	switchLocks sync.Map
+	// Invites are invited devices (the invite is the account); Pairings are
+	// TVs waiting for a phone to approve them. PairLimiter counts pairing
+	// starts, polls with unknown codes, and wrong codes typed by an admin.
+	Invites     *invites.Store
+	Pairings    *invites.Pairings
+	PairLimiter *auth.Limiter
 	// AllowedHosts are names, besides IP addresses and localhost, that a
 	// request's Host may carry. Anything else is refused (DNS rebinding).
 	AllowedHosts []string
@@ -137,6 +144,9 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/profiles/{user_id}/avatar", householdOnly, s.profileAvatar},
 		{"POST", "/api/v1/auth/switch", householdOnly, s.switchProfile},
 		{"POST", "/api/v1/hooks/arr", public, s.arrHook},
+		{"POST", "/api/v1/invites/redeem", public, s.redeemInvite},
+		{"POST", "/api/v1/pair", public, s.pairStart},
+		{"POST", "/api/v1/pair/poll", public, s.pairPoll},
 		{"POST", "/api/v1/auth/logout", signedIn, s.logout},
 		{"GET", "/api/v1/me", signedIn, s.me},
 		{"GET", "/api/v1/me/playback-settings", signedIn, s.playbackSettings},
@@ -177,6 +187,13 @@ func (s *Server) Routes() []route {
 		{"DELETE", "/api/v1/admin/profiles/{user_id}/pin", adminOnly, s.adminClearPIN},
 		{"PUT", "/api/v1/admin/profiles/{user_id}/avatar", adminOnly, s.adminSetAvatar},
 		{"DELETE", "/api/v1/admin/profiles/{user_id}/avatar", adminOnly, s.adminDeleteAvatar},
+		// Invited devices: mint, list, revoke, and approve a TV's pairing code.
+		{"GET", "/api/v1/admin/devices", adminOnly, s.adminDevices},
+		{"POST", "/api/v1/admin/devices", adminOnly, s.adminMintInvite},
+		{"DELETE", "/api/v1/admin/devices/{device_id}", adminOnly, s.adminRevokeDevice},
+		{"GET", "/api/v1/admin/pairings/{code}", adminOnly, s.adminPairing},
+		{"POST", "/api/v1/admin/pairings/{code}/approve", adminOnly, s.adminApprovePairing},
+		{"DELETE", "/api/v1/admin/pairings/{code}", adminOnly, s.adminDenyPairing},
 		{"GET", "/api/v1/versions/{version_id}/subtitles/search", signedIn, s.searchSubtitles},
 		{"POST", "/api/v1/versions/{version_id}/subtitles/download", signedIn, s.downloadSubtitle},
 		{"PUT", "/api/v1/versions/{version_id}/subtitle-offset", signedIn, s.setSubtitleOffset},

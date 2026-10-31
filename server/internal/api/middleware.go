@@ -210,6 +210,12 @@ func (s *Server) gate(rt route) http.Handler {
 			writeError(w, http.StatusForbidden, "forbidden", "Only an admin can do that.")
 			return
 		}
+		if rt.access == householdOnly && sess.TokenID != 0 {
+			// An invited device is its own principal: the profile picker and
+			// profile switching are never its to see.
+			writeError(w, http.StatusForbidden, "not_household", "An invited device cannot switch profiles.")
+			return
+		}
 		pol, err := policy.Load(r.Context(), s.DB, sess.User.ID, sess.User.IsAdmin)
 		if err != nil {
 			s.internal(w, r, err)

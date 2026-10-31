@@ -41,6 +41,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/homelists"
 	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
+	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
 	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
@@ -392,6 +393,22 @@ func serve() error {
 	// Profiles: PIN attempts have their own, stricter limiter (household.PIN*).
 	srv.Household = &household.Store{DB: a.db, AvatarDir: cfg.AvatarDir()}
 	srv.PINs, srv.ProfilePicker = household.NewLimiter(household.PINWindow), cfg.AutoSignInPicker
+	// Invited devices, and TVs pairing by QR code: ten pairing codes, ten
+	// polls with an unknown code, and ten wrong codes typed by an admin, per
+	// address per window.
+	srv.Invites, srv.Pairings, srv.PairLimiter = &invites.Store{DB: a.db}, &invites.Pairings{}, auth.NewLimiter(10, 15*time.Minute)
+	go func() {
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				srv.CutExpiredDevices(ctx)
+			}
+		}
+	}()
 	if users, err := authStore.CountUsers(ctx); err == nil && users == 0 {
 		log.Warn("no users yet: create the admin with `docker compose exec vcrx vcrx user add -username <name> -admin`")
 	}

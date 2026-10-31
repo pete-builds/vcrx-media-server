@@ -489,34 +489,61 @@ private fun AccountSettings() {
     val actions = LocalAppActions.current
     val scope = rememberCoroutineScope()
     var signingOut by remember { mutableStateOf(false) }
+    // An invited device (an invite, or a TV a phone approved) is its own
+    // principal: no profiles to switch to, and no password to come back with.
+    val invited = graph.tokens.isInvitedDevice
+    // Signs out here; [then] decides where the TV goes next.
+    val signOut = { then: () -> Unit ->
+        if (!signingOut) {
+            signingOut = true
+            scope.launch {
+                // Revoke the token on the server if it answers quickly; sign out locally regardless.
+                withTimeoutOrNull(3_000) { runCatching { graph.api.logout() } }
+                graph.tokens.clear()
+                graph.settings.skipAutoSignIn = true
+                then()
+            }
+        }
+    }
     SettingsPageFrame("Account and server") { first ->
-        item(key = "user") { FactRow("Signed in as", graph.settings.username ?: "Unknown user", first) }
+        item(key = "user") {
+            FactRow("Signed in as", (graph.settings.username ?: "Unknown user") + if (invited) " (invited device)" else "", first)
+        }
         item(key = "server") {
             FactRow("Server", listOfNotNull(graph.settings.serverName, graph.settings.serverUrl).joinToString("  ").ifEmpty { "None" })
         }
-        item(key = "profile") {
-            SettingRow(
-                "Switch profile",
-                null,
-                "Who's watching? Pick another household profile, with its PIN if it has one.",
-                onClick = { actions.openProfiles() },
-            )
+        // An invited device is its own principal: no profiles to switch to.
+        if (!invited) {
+            item(key = "profile") {
+                SettingRow(
+                    "Switch profile",
+                    null,
+                    "Who's watching? Pick another household profile, with its PIN if it has one.",
+                    onClick = { actions.openProfiles() },
+                )
+            }
         }
         item(key = "switch") {
             SettingRow(
-                if (signingOut) "Signing out" else "Switch user or sign out",
+                if (signingOut) "Signing out" else if (invited) "Sign out (needs a new invite)" else "Switch user or sign out",
                 null,
-                "Signs out of this TV and shows the sign-in form. Settings stay with each user.",
+                if (invited) {
+                    "This TV was invited, so signing out gives the invite up. Coming back needs a new invite or pairing."
+                } else {
+                    "Signs out of this TV and shows the sign-in form. Settings stay with each user."
+                },
+                onClick = { signOut { actions.toLogin() } },
+            )
+        }
+        item(key = "pair") {
+            SettingRow(
+                "Pair with a phone",
+                null,
+                "Signs out here, then shows a code an admin's phone approves: this TV becomes an invited device with the scope the phone chooses.",
                 onClick = {
-                    if (!signingOut) {
-                        signingOut = true
-                        scope.launch {
-                            // Revoke the token on the server if it answers quickly; sign out locally regardless.
-                            withTimeoutOrNull(3_000) { runCatching { graph.api.logout() } }
-                            graph.tokens.clear()
-                            graph.settings.skipAutoSignIn = true
-                            actions.toLogin()
-                        }
+                    signOut {
+                        actions.toLogin()
+                        actions.openPair()
                     }
                 },
             )

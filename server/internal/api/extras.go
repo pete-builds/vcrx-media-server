@@ -42,6 +42,9 @@ func (s *Server) streamExtra(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !s.streamOnly(w, r, session, func(ss playback.StreamSession) bool { return ss.ExtraID == id }) {
+		return
+	}
 	x, err := s.Catalog.ExtraForPlayback(r.Context(), info(r).Policy, id)
 	if err != nil {
 		s.notFoundOr(w, r, err)

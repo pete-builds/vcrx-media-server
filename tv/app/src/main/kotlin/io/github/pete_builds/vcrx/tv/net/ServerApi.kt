@@ -55,6 +55,18 @@ class ServerApi(
         return send(call, LoginResponse.serializer(), authRoute = false)
     }
 
+    /** A TV asks to pair with a phone: a code to show, and a device code to poll with. */
+    suspend fun pairStart(request: PairStartRequest): PairStartResponse =
+        send(post("/api/v1/pair", request, PairStartRequest.serializer()), PairStartResponse.serializer(), authRoute = false)
+
+    /** Whether a phone approved this TV yet; approved, the answer carries its session once. */
+    suspend fun pairPoll(request: PairPollRequest): PairPollResponse =
+        send(post("/api/v1/pair/poll", request, PairPollRequest.serializer()), PairPollResponse.serializer(), authRoute = false)
+
+    /** Spends an invite and signs in as the invited device. A 401 is an invite that is not valid, not a lost session. */
+    suspend fun redeemInvite(request: RedeemRequest): LoginResponse =
+        send(post("/api/v1/invites/redeem", request, RedeemRequest.serializer()), LoginResponse.serializer(), authRoute = false)
+
     suspend fun logout() {
         send<Unit>(Request.Builder().url(url("/api/v1/auth/logout")).post(EMPTY_BODY).build(), null, authRoute = true)
     }

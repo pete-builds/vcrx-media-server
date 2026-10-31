@@ -46,12 +46,12 @@ func (s *Service) startExtra(ctx context.Context, pol policy.Policy, c Client, r
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO playback_sessions (id, user_id, auth_session_id, extra_id, username, item_title,
 			item_kind, version_summary, device_id, device_name, device_model, platform, client, client_version, ip, decision,
 			decision_reason, video_decision, audio_decision, bitrate, capabilities, state, start_position_ms, last_position_ms,
-			duration_ms, started_at, last_event_at, ended_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'extra', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			duration_ms, started_at, last_event_at, ended_at, principal_kind, token_id)
+		VALUES (?, ?, ?, ?, ?, ?, 'extra', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, c.UserID, nullID(c.AuthSessionID), v.ID, c.Username, title, summarize(v),
 		c.DeviceID, c.DeviceName, c.DeviceModel, c.Platform, c.ClientName, c.ClientVersion, c.IP,
 		decision, reason, d.VideoDecision, d.AudioDecision, v.Bitrate, string(capsJSON), state, start, start,
-		v.DurationMs, now, now, endedAt)
+		v.DurationMs, now, now, endedAt, principalKind(c.PrincipalKind), nullID(c.TokenID))
 	if err != nil {
 		return nil, nil, err
 	}

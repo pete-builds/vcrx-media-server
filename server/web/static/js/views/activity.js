@@ -45,6 +45,27 @@ async function nowTab(body) {
   return () => clearInterval(timer);
 }
 
+// who names the principal; an invited device gets a tag and, while its
+// invite still works, a Revoke button, so a friend's device can be cut off
+// from the stream it is playing.
+function who(x, redraw) {
+  if (x.principal_kind !== "token") return x.username || "";
+  const revoke = x.token_active && x.token_id ? h("button", { class: "btn btn-small btn-danger revoke-device", type: "button" }, "Revoke device") : null;
+  if (revoke) {
+    revoke.addEventListener("click", async () => {
+      if (!confirm(`Revoke ${x.username || "this device"}? Its invite stops working and any stream it is playing stops now.`)) return;
+      try {
+        await api(`/admin/devices/${x.token_id}`, { method: "DELETE" });
+        toast(`Revoked ${x.username || "the device"}`);
+      } catch (e) {
+        toast(e.message);
+      }
+      redraw();
+    });
+  }
+  return h("span", { class: "who" }, x.username || "Invited device", " ", h("span", { class: "pill" }, "invited"), revoke ? " " : null, revoke);
+}
+
 function tile(k, v) {
   return h("div", { class: "tile" }, h("div", { class: "k" }, k), h("div", { class: "v" }, v));
 }
@@ -82,7 +103,8 @@ function sessionCard(x, redraw, setEditing) {
     h("a", { class: "card", href: x.item_id ? `#/item/${x.item_id}` : "#/activity" }, art),
     h("div", {},
       h("div", { class: "s-title" }, x.item_title || "Unknown title"),
-      h("div", { class: "s-line" }, [x.username, x.device_name || x.client, address(x.ip, x.location)].filter(Boolean).join(" · ")),
+      h("div", { class: "s-line" }, x.principal_kind === "token" ? [who(x, redraw), " · "] : null,
+        [x.principal_kind === "token" ? null : x.username, x.device_name || x.client, address(x.ip, x.location)].filter(Boolean).join(" · ")),
       h("div", { class: "s-line" }, [x.version_summary, bitrate(x.bitrate)].filter(Boolean).join(" · ")),
       h("div", { class: "bar", role: "progressbar", "aria-valuenow": pct ?? 0, "aria-valuemin": 0, "aria-valuemax": 100 },
         h("i", { style: { width: `${pct ?? 0}%` } })),
@@ -110,7 +132,7 @@ async function historyTab(body, params) {
   };
   const rows = data.sessions.map((x) => h("tr", {},
     h("td", {}, when(x.started_at)),
-    h("td", {}, x.username || ""),
+    h("td", {}, who(x, () => historyTab(body, params))),
     h("td", {}, x.item_id ? h("a", { href: `#/item/${x.item_id}` }, x.item_title || "") : x.item_title || ""),
     h("td", {}, x.device_name || x.client || ""),
     h("td", {}, x.terminated_message ? h("span", { title: x.terminated_message }, "stopped by admin")

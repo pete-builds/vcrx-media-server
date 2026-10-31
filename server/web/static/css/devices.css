@@ -1,0 +1,30 @@
+/* Settings > Devices and Invites, and the invite and pairing pages. */
+.scope-form { display: grid; gap: 14px; }
+.scope-form .field input { max-width: 24em; }
+.invite-card { display: grid; gap: 12px; justify-items: start; margin-top: 16px; border-color: var(--orange); }
+.invite-card p { margin: 0; }
+/* The QR code is drawn at 6 px a module; keep the modules sharp and on white. */
+.qr { width: min(220px, 70vw); height: auto; background: #fff; border-radius: 8px; image-rendering: pixelated; }
+.invite-row { display: flex; gap: 8px; width: 100%; max-width: 640px; }
+.invite-link {
+  flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 5px 8px; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.device-rows { display: grid; gap: 12px; }
+.device-row { display: grid; gap: 4px; }
+.device-row p { margin: 0; }
+.device-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.device-head .btn { margin-left: auto; }
+.device-state.active { color: var(--good); border-color: var(--good); }
+.device-state.revoked, .device-state.expired { color: var(--faint); }
+.pair-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.pair-code-input {
+  width: 9em; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 8px;
+  text-transform: uppercase; letter-spacing: .08em;
+}
+.pair-page { display: grid; gap: 16px; }
+.pair-who p { margin: 4px 0; }
+.pair-code { font: 700 clamp(28px, 8vw, 40px)/1.1 Rajdhani, Inter, sans-serif; letter-spacing: .12em; color: var(--orange); }
+.invite-page h1 { margin: 0; }
+.invite-page p { max-width: 34em; margin: 0; }
+.who .btn { padding: 0 8px; }
