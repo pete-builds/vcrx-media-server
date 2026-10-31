@@ -245,6 +245,56 @@ paths:
         "204": { description: Recorded }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+  /api/v1/playback/sessions/{session_id}/seek:
+    get:
+      operationId: seekConvertedStream
+      summary: >-
+        For a session with protocol fmp4: where a stream asked for at position_ms starts (the keyframe at or before
+        it, since copied video starts only on one) and the URL to play. The player's position is start_ms plus the
+        media element's own time.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+        - { name: position_ms, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [start_ms, url]
+                properties:
+                  start_ms: { type: integer }
+                  url: { type: string, description: Path relative to the server base URL. }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+  /api/v1/playback/sessions/{session_id}/stream.mp4:
+    get:
+      operationId: getConvertedStream
+      summary: >-
+        The file as fragmented MP4 from start_ms: video copied, audio copied when the device decodes a track MP4 can
+        carry, otherwise the default track converted to stereo AAC. Not seekable by byte range; seek by asking the seek
+        endpoint for a new stream. audio picks a track by its stream index.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+        - { name: start_ms, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: audio, in: query, schema: { type: integer } }
+      responses:
+        "200": { description: Fragmented MP4, content: { video/mp4: {} } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    head:
+      operationId: headConvertedStream
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The stream exists }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
   /api/v1/versions/{version_id}/file:
     get:
       operationId: streamVersion
@@ -749,6 +799,8 @@ components:
         max_width: { type: integer }
         max_height: { type: integer }
         max_bitrate: { type: integer }
+        fmp4_stream: { type: boolean, description: "The client plays a fragmented MP4 stream that seeks by asking for a new one. Only then are files it cannot play directly converted (video copied, audio converted)." }
+        default_audio_only: { type: boolean, description: "The client plays only the default audio track (a browser), so that track is the one that has to decode." }
     PlaybackRequest:
       type: object
       required: [item_id, capabilities]
@@ -783,8 +835,9 @@ components:
           required: [url, protocol]
           properties:
             url: { type: string, description: Path relative to the server base URL; send the bearer header. }
-            protocol: { type: string, enum: [progressive, hls] }
+            protocol: { type: string, enum: [progressive, hls, fmp4], description: "fmp4: a converted stream; see seek_url." }
             mime_type: { type: [string, "null"], description: "video/x-matroska, video/mp4, ..." }
+            seek_url: { type: string, description: For fmp4, the seek endpoint to call with position_ms before playing. }
         subtitles: { type: array, items: { $ref: "#/components/schemas/SubtitleSource" }, description: Sidecar files to add as side-loaded tracks. Embedded tracks come from the container. }
         webvtt_subtitles:
           type: array

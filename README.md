@@ -18,7 +18,7 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 |---|---|
 | Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays | Collections, manual match fixes |
 | Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
-| Direct play over HTTP with Range, sidecar and embedded text subtitles (also as WebVTT for browsers) | Remux and HLS transcoding, picture subtitle burn-in, VA-API hardware acceleration |
+| Direct play over HTTP with Range; converted streams for clients that ask for them (video copied, audio converted to AAC, fragmented MP4); sidecar and embedded text subtitles (also as WebVTT for browsers) | Video transcoding, picture subtitle burn-in, VA-API hardware acceleration |
 | Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, stats, per-user totals, stop a stream, webhooks | Activity screens in a client |
 | Web app at `/`: browse, details, search, play in the browser with subtitles, Activity screens. REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Browser playback of files the browser cannot decode, other TV platforms |
 
@@ -97,7 +97,7 @@ This product uses the TMDB API but is not endorsed or certified by TMDB.
 Open `http://<server>:3750/` in a browser. It is part of the server: no separate install, no build step, nothing loaded from the internet.
 
 - **Browse** Home (Continue Watching, recently added), each library with sort and filters, search, and details pages for movies, shows, seasons and episodes. Mark things watched or unwatched.
-- **Play** in the browser, resuming where any device left off. The browser tells the server what it can decode; a file it cannot play directly (often HEVC with AC-3 or DTS audio in Firefox, or anything in a container the browser does not read) is refused with the reason until conversion lands, and the TV app still plays it. Subtitles: pick any text track, sidecar or inside the file.
+- **Play** in the browser, resuming where any device left off. The browser tells the server what it can decode. A file it cannot play directly because of its container or its audio (most often E-AC-3, AC-3 or DTS, which browsers do not decode) plays as a converted stream: the video is copied untouched and only the audio is converted to AAC, a fraction of one CPU core, with VCRX's own seek bar. Video the browser cannot decode at all is refused with the reason until full transcoding lands; the TV app still plays it. Subtitles: pick any text track, sidecar or inside the file.
 - **Activity** for admins: now playing with a Stop button, history, stats and users.
 - **Sign-in:** with `auto_sign_in_user` set, a browser on a trusted network is signed straight in; otherwise it shows a sign-in form. The session is an HttpOnly cookie, and every change the page makes carries a header a cross-site page cannot send.
 

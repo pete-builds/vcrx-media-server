@@ -41,6 +41,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/probe"
+	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 	"github.com/pete-builds/vcrx-media-server/server/internal/tmdb"
 	"github.com/pete-builds/vcrx-media-server/server/web"
@@ -222,7 +223,10 @@ func serve() error {
 	scans := library.NewManager(scanner, log.With("component", "scans"))
 	cat := &catalog.Catalog{DB: a.db}
 	authStore := &auth.Store{DB: a.db, TTL: cfg.SessionTTL}
-	pb := &playback.Service{DB: a.db, Catalog: cat}
+	// Converted streams copy the video and convert at most the audio, a small
+	// fraction of a core each; four at once is well within nix1's budget.
+	rmx := remux.New(cfg.FFmpegPath, cfg.FFprobePath, 4, log.With("component", "remux"))
+	pb := &playback.Service{DB: a.db, Catalog: cat, CanRemux: true}
 	hooks := notify.New(cfg.WebhookURLs, cfg.WebhookEvents, cfg.ServerName, log.With("component", "webhooks"))
 	if len(cfg.WebhookURLs) > 0 {
 		pb.Notify = hooks.Send
@@ -256,7 +260,7 @@ func serve() error {
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
 		Artwork: art, Admin: adm, Scans: scanAdapter{scans},
-		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, WebDir: os.Getenv("VCRX_WEB_DIR"),
+		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, Remux: rmx, WebDir: os.Getenv("VCRX_WEB_DIR"),
 		Subtitles:        subtitles.New(cfg.SubtitleCacheDir(), cfg.FFmpegPath, log.With("component", "subtitles")),
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,

@@ -234,3 +234,15 @@ table.list td.num, table.list th.num { text-align: right; font-variant-numeric: 
   .sessions { grid-template-columns: 1fr; }
 }
 .chart-box { width: 100%; min-height: 40px; }
+
+/* Controls for converted streams, which the native bar cannot seek. */
+.player .pc {
+  position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 14px; padding: 16px 20px;
+  background: linear-gradient(transparent, rgba(0,0,0,.85)); transition: opacity .3s; z-index: 2;
+}
+.player.idle .pc { opacity: 0; pointer-events: none; }
+.pc-btn { background: rgba(30,30,36,.9); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 12px; cursor: pointer; font-size: 14px; }
+.pc-btn:hover { border-color: var(--orange); }
+.pc-time { font-variant-numeric: tabular-nums; font-size: 14px; color: var(--muted); white-space: nowrap; }
+.pc-bar { flex: 1; accent-color: var(--orange); }
+.player .top .pill { color: var(--orange); border-color: var(--orange); }

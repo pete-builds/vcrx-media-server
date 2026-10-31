@@ -44,5 +44,8 @@ export function capabilities() {
   return {
     containers, video_codecs: video, audio_codecs: audio, hdr_types: hdr, subtitle_codecs: ["webvtt"],
     max_width: 3840, max_height: 2160, max_bitrate: 0,
+    // The player handles converted streams, and a <video> plays only the
+    // file's default audio track.
+    fmp4_stream: true, default_audio_only: true,
   };
 }

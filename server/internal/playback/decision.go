@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
+	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
 )
 
 // Capabilities is what the client reports it can decode, built on the device.
@@ -19,6 +20,13 @@ type Capabilities struct {
 	MaxWidth       int             `json:"max_width"`
 	MaxHeight      int             `json:"max_height"`
 	MaxBitrate     int64           `json:"max_bitrate"`
+	// FMP4Stream: the client plays a fragmented MP4 stream that cannot be
+	// seeked by byte range and seeks by asking for a new one. Only then are
+	// files it cannot play directly converted (video copied, audio converted).
+	FMP4Stream bool `json:"fmp4_stream"`
+	// DefaultAudioOnly: the client plays only the file's default audio track
+	// (a browser <video>), so that is the one that has to decode.
+	DefaultAudioOnly bool `json:"default_audio_only"`
 }
 
 type VideoCodecCap struct {
@@ -180,7 +188,11 @@ func audioOK(v catalog.Version, caps Capabilities) (ok bool, chosen string) {
 	if len(v.AudioTracks) == 0 {
 		return true, ""
 	}
-	for _, t := range v.AudioTracks {
+	tracks := v.AudioTracks
+	if caps.DefaultAudioOnly {
+		tracks = []catalog.Track{DefaultAudio(v)}
+	}
+	for _, t := range tracks {
 		codec := strings.ToLower(s(t.Codec))
 		for _, c := range caps.AudioCodecs {
 			if strings.EqualFold(c.Codec, codec) {
@@ -189,6 +201,42 @@ func audioOK(v catalog.Version, caps Capabilities) (ok bool, chosen string) {
 		}
 	}
 	return false, ""
+}
+
+// DefaultAudio is the track a player without track selection plays: the one
+// flagged default, else the first. The caller checks there is one.
+func DefaultAudio(v catalog.Version) catalog.Track {
+	for _, t := range v.AudioTracks {
+		if t.IsDefault {
+			return t
+		}
+	}
+	return v.AudioTracks[0]
+}
+
+// ChooseAudio picks the audio for a converted stream: the first track the
+// device decodes that MP4 can carry, copied; else the default track,
+// converted to AAC. index is -1 when the file has no audio.
+func ChooseAudio(v catalog.Version, caps Capabilities) (index int, transcode bool) {
+	if len(v.AudioTracks) == 0 {
+		return -1, false
+	}
+	for _, t := range v.AudioTracks {
+		codec := strings.ToLower(s(t.Codec))
+		if t.Index == nil || !remux.MP4Audio(codec) {
+			continue
+		}
+		for _, c := range caps.AudioCodecs {
+			if strings.EqualFold(c.Codec, codec) && (c.MaxChannels == 0 || t.Channels == nil || *t.Channels <= int64(c.MaxChannels)) {
+				return int(*t.Index), false
+			}
+		}
+	}
+	d := DefaultAudio(v)
+	if d.Index == nil {
+		return -1, false
+	}
+	return int(*d.Index), true
 }
 
 // Decide walks the ladder for one version: direct play, remux, audio transcode,

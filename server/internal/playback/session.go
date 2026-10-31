@@ -16,6 +16,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
+	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 )
 
@@ -64,6 +65,9 @@ type Stream struct {
 	URL      string  `json:"url"`
 	Protocol string  `json:"protocol"`
 	MimeType *string `json:"mime_type"`
+	// SeekURL, for protocol fmp4: GET it with position_ms to learn where a
+	// stream from there starts and the URL to play.
+	SeekURL string `json:"seek_url,omitempty"`
 }
 
 type SubtitleSource struct {
@@ -115,7 +119,10 @@ type Service struct {
 	// CanTranscode is false until the HLS job manager lands; non-direct decisions
 	// are then refused with a clear message instead of failing on the TV.
 	CanTranscode bool
-	Now          func() time.Time
+	// CanRemux turns on converted streams (video copied, audio copied or
+	// converted) for clients that report fmp4_stream.
+	CanRemux bool
+	Now      func() time.Time
 	// Notify, when set, receives play, stop and refused events for webhooks.
 	Notify func(notify.Notice)
 }
@@ -184,6 +191,8 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 		return nil, nil, err
 	}
 
+	converted := s.CanRemux && req.Capabilities.FMP4Stream && (d.Kind == Remux || d.Kind == AudioTranscode) &&
+		remux.MP4Video(s2(v.VideoCodec))
 	var refusal *Refusal
 	if d.Kind != DirectPlay {
 		switch {
@@ -191,7 +200,7 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 			refusal = &Refusal{Status: 403, Code: "playback_refused", Message: "This needs converting on the server, and your account is not allowed to do that. Reason: " + d.Reason + "."}
 		case !pol.IsAdmin && !pol.Allow4KTranscode && policy.ResolutionRank(s2(v.Resolution)) >= policy.ResolutionRank("4K"):
 			refusal = &Refusal{Status: 403, Code: "playback_refused", Message: "4K files cannot be converted for your account. Ask for a 1080p version. Reason: " + d.Reason + "."}
-		case !s.CanTranscode:
+		case !s.CanTranscode && !converted:
 			refusal = &Refusal{Status: 422, Code: "transcode_unavailable", Message: "This file needs " + describeKind(d.Kind) + " for this device, which VCRX cannot do yet. Reason: " + d.Reason + "."}
 		}
 	}
@@ -242,9 +251,15 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 	}
 
 	mime := mimeForContainer(s2(v.Container))
+	stream := Stream{URL: fmt.Sprintf("/api/v1/versions/%d/file?session=%s", v.ID, id), Protocol: "progressive", MimeType: mime}
+	if converted {
+		mp4 := "video/mp4"
+		stream = Stream{URL: "/api/v1/playback/sessions/" + id + "/stream.mp4", Protocol: "fmp4", MimeType: &mp4,
+			SeekURL: "/api/v1/playback/sessions/" + id + "/seek"}
+	}
 	out := &Session{
 		SessionID: id, Decision: d.Kind, Reason: d.Reason, ItemID: req.ItemID, Version: v,
-		Stream:              Stream{URL: fmt.Sprintf("/api/v1/versions/%d/file?session=%s", v.ID, id), Protocol: "progressive", MimeType: mime},
+		Stream:              stream,
 		Subtitles:           sidecars(v),
 		WebVTTSubtitles:     webvtt(v),
 		ResumePositionMs:    resume,
@@ -522,6 +537,36 @@ func (s *Service) SweepStale(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// StreamSession is what the converted-stream endpoints need from a session.
+type StreamSession struct {
+	VersionID  int64
+	Decision   string
+	Caps       Capabilities
+	Ended      bool
+	Terminated *string
+}
+
+// ForStream loads a session the user owns for its converted stream.
+func (s *Service) ForStream(ctx context.Context, userID int64, sessionID string) (StreamSession, error) {
+	var out StreamSession
+	var vid sql.NullInt64
+	var caps sql.NullString
+	var ended sql.NullInt64
+	err := s.DB.QueryRowContext(ctx, `SELECT version_id, decision, capabilities, ended_at, terminated_message FROM playback_sessions
+		WHERE id = ? AND user_id = ?`, sessionID, userID).Scan(&vid, &out.Decision, &caps, &ended, &out.Terminated)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !vid.Valid) {
+		return out, ErrSessionNotFound
+	}
+	if err != nil {
+		return out, err
+	}
+	out.VersionID, out.Ended = vid.Int64, ended.Valid
+	if caps.Valid {
+		_ = json.Unmarshal([]byte(caps.String), &out.Caps)
+	}
+	return out, nil
 }
 
 // Terminated returns the admin's message when a session was stopped from Activity.

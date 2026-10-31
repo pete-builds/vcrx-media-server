@@ -1,10 +1,17 @@
 import { api, ApiError } from "../api.js";
-import { h, icon, errorBox, episodeCode, toast } from "../dom.js";
+import { h, icon, errorBox, episodeCode, clock, toast } from "../dom.js";
 import { capabilities } from "../caps.js";
 
 // The player: asks the server for a session with this browser's capabilities,
-// plays the stream in a <video>, and reports start, pause, seek, progress and
-// stop so resume points and Activity stay right.
+// plays it, and reports start, pause, seek, progress and stop so resume points
+// and Activity stay right.
+//
+// Two kinds of stream:
+// - progressive: the file itself, seekable by range; native controls.
+// - fmp4: a converted stream (video copied, audio converted) that cannot be
+//   seeked by range. Seeking asks the server for a new stream; the server says
+//   where it starts (a keyframe), and the position is that start plus the
+//   element's own time. These get VCRX controls.
 export async function playerView({ match, params }) {
   const itemId = Number(match[1]);
   const body = { item_id: itemId, capabilities: capabilities() };
@@ -21,59 +28,86 @@ export async function playerView({ match, params }) {
   } catch (err) {
     const why = err instanceof ApiError ? err.message : "The server could not start playback.";
     shell.append(h("div", { class: "top" }, backBtn), h("div", { class: "overlay" },
-      errorBox("This cannot play in the browser", why, h("p", { class: "faint" }, "Files the browser cannot decode will play here once VCRX can convert them. The TV app plays them now."))));
+      errorBox("This cannot play in the browser", why, h("p", { class: "faint" }, "The TV app may still play it."))));
     return { el: shell, title: "Cannot play" };
   }
 
+  const converted = session.stream.protocol === "fmp4";
+  const totalMs = session.version.duration_ms || 0;
   const title = item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)} · ${item.title}` : item.title;
-  const video = h("video", { controls: true, autoplay: true, playsinline: true, preload: "auto" });
-  video.src = session.stream.url;
+  const video = h("video", { autoplay: true, playsinline: true, preload: "auto" });
+  video.controls = !converted;
   const status = h("div", { class: "status", hidden: true });
   const overlay = h("div", { class: "overlay", hidden: true });
-
-  // Subtitles: fetched only when chosen, so an embedded track is not read out
-  // of a large file unless someone wants it.
-  const subs = session.webvtt_subtitles || [];
-  const subSel = subs.length ? h("select", { "aria-label": "Subtitles" },
-    h("option", { value: "" }, "Subtitles off"),
-    subs.map((t, i) => h("option", { value: String(i) }, subLabel(t)))) : null;
-  const loadedTracks = new Map();
-  let subToken = 0;
-  if (subSel) subSel.addEventListener("change", async () => {
-    const token = ++subToken;
-    for (const tt of video.textTracks) tt.mode = "disabled";
-    if (subSel.value === "") return;
-    const t = subs[Number(subSel.value)];
-    try {
-      let track = loadedTracks.get(t.track_id);
-      if (!track) {
-        const text = await fetchVTT(t.url, (msg) => { if (token === subToken) showStatus(msg); });
-        if (token !== subToken) return;
-        const url = URL.createObjectURL(new Blob([text], { type: "text/vtt" }));
-        const el = h("track", { kind: "subtitles", label: subLabel(t), srclang: t.language || "und", src: url });
-        video.append(el);
-        track = el.track;
-        loadedTracks.set(t.track_id, track);
-      }
-      track.mode = "showing";
-      showStatus("");
-    } catch (e) {
-      if (token === subToken) { showStatus(""); toast(e.message || "Subtitles could not be loaded."); subSel.value = ""; }
-    }
-  });
+  let offsetMs = 0; // where the current converted stream starts in the file
+  const pos = () => offsetMs + Math.round((video.currentTime || 0) * 1000);
+  const dur = () => (converted ? totalMs || null : Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null);
 
   function showStatus(msg) {
     status.textContent = msg;
     status.hidden = !msg;
   }
 
-  shell.append(video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title), subSel), status, overlay);
+  // Subtitles: fetched only when chosen, so an embedded track is not read out
+  // of a large file unless someone wants it. Cues are kept and re-timed when a
+  // converted stream restarts somewhere else.
+  const subs = session.webvtt_subtitles || [];
+  const subSel = subs.length ? h("select", { "aria-label": "Subtitles" },
+    h("option", { value: "" }, "Subtitles off"),
+    subs.map((t, i) => h("option", { value: String(i) }, subLabel(t)))) : null;
+  const cueCache = new Map();
+  let shownCues = null;
+  let textTrack = null;
+  let subToken = 0;
+  function applyCues() {
+    if (!textTrack) {
+      textTrack = video.addTextTrack("subtitles", "Subtitles", "und");
+    }
+    for (const c of [...(textTrack.cues || [])]) textTrack.removeCue(c);
+    textTrack.mode = shownCues ? "showing" : "hidden";
+    if (!shownCues) return;
+    const shift = offsetMs / 1000;
+    for (const c of shownCues) {
+      if (c.end - shift <= 0) continue;
+      textTrack.addCue(new VTTCue(Math.max(0, c.start - shift), c.end - shift, c.text));
+    }
+  }
+  if (subSel) subSel.addEventListener("change", async () => {
+    const token = ++subToken;
+    if (subSel.value === "") { shownCues = null; applyCues(); return; }
+    const t = subs[Number(subSel.value)];
+    try {
+      let cues = cueCache.get(t.track_id);
+      if (!cues) {
+        const text = await fetchVTT(t.url, (msg) => { if (token === subToken) showStatus(msg); });
+        cues = await parseVTT(text);
+        cueCache.set(t.track_id, cues);
+      }
+      if (token !== subToken) return;
+      shownCues = cues;
+      applyCues();
+      showStatus("");
+    } catch (e) {
+      if (token === subToken) { showStatus(""); toast(e.message || "Subtitles could not be loaded."); subSel.value = ""; }
+    }
+  });
 
-  // Reporting.
+  // Converted streams: start or restart at a position.
+  let loadSeq = 0;
+  async function loadAt(ms) {
+    const seq = ++loadSeq;
+    showStatus("Loading");
+    const target = Math.max(0, Math.min(ms, totalMs ? totalMs - 1000 : ms));
+    const at = await api(`/playback/sessions/${session.session_id}/seek?position_ms=${target}`);
+    if (seq !== loadSeq) return;
+    offsetMs = at.start_ms;
+    video.src = at.url;
+    applyCues();
+    video.play().catch(() => {});
+  }
+
   const sid = session.session_id;
   let started = false, ended = false, paused = false, lastPos = 0, seekFrom = null;
-  const pos = () => Math.round((video.currentTime || 0) * 1000);
-  const dur = () => (Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null);
   const report = (type, extra = {}, keepalive = false) =>
     api(`/playback/sessions/${sid}/events`, { method: "POST", body: { type, position_ms: pos(), duration_ms: dur(), ...extra }, keepalive })
       .catch((err) => {
@@ -90,28 +124,74 @@ export async function playerView({ match, params }) {
     overlay.hidden = false;
   }
 
+  // Converted-stream controls.
+  let controls = null;
+  let seekTo = null;
+  if (converted) {
+    const playBtn = h("button", { class: "pc-btn", type: "button", "aria-label": "Play or pause" });
+    const timeLbl = h("span", { class: "pc-time" });
+    const bar = h("input", { class: "pc-bar", type: "range", min: "0", max: String(totalMs || 1), step: "1000", value: "0", "aria-label": "Position" });
+    const muteBtn = h("button", { class: "pc-btn", type: "button", "aria-label": "Mute" }, "Mute");
+    const fsBtn = h("button", { class: "pc-btn", type: "button", "aria-label": "Full screen" }, "Full screen");
+    let dragging = false;
+    const draw = () => {
+      playBtn.textContent = video.paused ? "Play" : "Pause";
+      if (!dragging) bar.value = String(pos());
+      timeLbl.textContent = `${clock(dragging ? Number(bar.value) : pos())} / ${clock(totalMs)}`;
+      muteBtn.textContent = video.muted ? "Unmute" : "Mute";
+    };
+    playBtn.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
+    muteBtn.addEventListener("click", () => { video.muted = !video.muted; draw(); });
+    fsBtn.addEventListener("click", () => (document.fullscreenElement ? document.exitFullscreen() : shell.requestFullscreen().catch(() => {})));
+    bar.addEventListener("input", () => { dragging = true; draw(); });
+    bar.addEventListener("change", () => { dragging = false; seekTo(Number(bar.value)); });
+    for (const ev of ["timeupdate", "play", "pause", "volumechange"]) video.addEventListener(ev, draw);
+    video.addEventListener("dblclick", () => fsBtn.click());
+    video.addEventListener("click", () => playBtn.click());
+    controls = h("div", { class: "pc" }, playBtn, timeLbl, bar, muteBtn, fsBtn);
+    draw();
+  }
+
+  seekTo = (ms) => {
+    const from = pos();
+    if (converted) {
+      if (started) report("seek", { from_position_ms: from });
+      loadAt(ms).catch((e) => toast(e.message));
+    } else {
+      video.currentTime = ms / 1000;
+    }
+  };
+
+  shell.append(video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title),
+    converted ? h("span", { class: "pill", title: session.reason }, session.decision === "audio_transcode" ? "Audio converted" : "Repackaged") : null,
+    subSel), controls, status, overlay);
+
   video.addEventListener("loadedmetadata", () => {
-    if (session.resume_position_ms > 0 && video.currentTime < 1) video.currentTime = session.resume_position_ms / 1000;
+    if (!converted && session.resume_position_ms > 0 && video.currentTime < 1) video.currentTime = session.resume_position_ms / 1000;
   }, { once: true });
   video.addEventListener("playing", () => {
+    showStatus("");
     if (!started) { started = true; report("start"); }
     else if (paused) { paused = false; report("resume"); }
   });
+  video.addEventListener("waiting", () => { if (converted) showStatus("Loading"); });
   video.addEventListener("pause", () => {
     if (started && !video.ended && !ended) { paused = true; report("pause"); }
   });
-  video.addEventListener("seeking", () => { if (seekFrom === null) seekFrom = lastPos; });
-  video.addEventListener("seeked", () => {
-    if (started && seekFrom !== null) report("seek", { from_position_ms: seekFrom });
-    seekFrom = null;
-  });
+  if (!converted) {
+    video.addEventListener("seeking", () => { if (seekFrom === null) seekFrom = lastPos; });
+    video.addEventListener("seeked", () => {
+      if (started && seekFrom !== null) report("seek", { from_position_ms: seekFrom });
+      seekFrom = null;
+    });
+  }
   video.addEventListener("timeupdate", () => { if (!video.seeking) lastPos = pos(); });
   video.addEventListener("ended", () => { if (!ended) { ended = true; report("stop"); } });
   video.addEventListener("error", async () => {
-    if (ended) return;
+    if (ended || !video.getAttribute("src")) return;
     // A 410 on the stream means it was stopped from Activity.
     try {
-      const r = await fetch(session.stream.url, { method: "HEAD", credentials: "same-origin" });
+      const r = await fetch(video.currentSrc, { method: "HEAD", credentials: "same-origin" });
       if (r.status === 410) return terminated();
     } catch { /* fall through */ }
     const code = video.error ? video.error.code : 0;
@@ -122,11 +202,20 @@ export async function playerView({ match, params }) {
     overlay.hidden = false;
   });
 
+  if (converted) {
+    loadAt(session.resume_position_ms || 0).catch((e) => {
+      overlay.replaceChildren(errorBox("Playback failed", e.message, h("button", { class: "btn", type: "button", onclick: back }, "Back")));
+      overlay.hidden = false;
+    });
+  } else {
+    video.src = session.stream.url;
+  }
+
   const beat = setInterval(() => {
     if (started && !ended && !video.paused) report("progress");
   }, Math.max(5000, session.heartbeat_interval_ms || 10000));
 
-  // Hide the top bar while playing and the mouse is still.
+  // Hide the top bar and controls while playing and the mouse is still.
   let idleTimer;
   const wake = () => {
     shell.classList.remove("idle");
@@ -140,9 +229,10 @@ export async function playerView({ match, params }) {
   const onKey = (e) => {
     if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
     if (e.key === " " || e.key === "k") { e.preventDefault(); video.paused ? video.play() : video.pause(); }
-    else if (e.key === "ArrowRight") video.currentTime += 10;
-    else if (e.key === "ArrowLeft") video.currentTime = Math.max(0, video.currentTime - 10);
+    else if (e.key === "ArrowRight") seekTo(pos() + (converted ? 30000 : 10000));
+    else if (e.key === "ArrowLeft") seekTo(Math.max(0, pos() - (converted ? 30000 : 10000)));
     else if (e.key === "f") document.fullscreenElement ? document.exitFullscreen() : shell.requestFullscreen().catch(() => {});
+    else if (e.key === "m") video.muted = !video.muted;
     else if (e.key === "Escape" && !document.fullscreenElement) back();
   };
   document.addEventListener("keydown", onKey);
@@ -157,6 +247,7 @@ export async function playerView({ match, params }) {
     title,
     cleanup() {
       stop();
+      loadSeq++;
       clearInterval(beat);
       clearTimeout(idleTimer);
       document.removeEventListener("keydown", onKey);
@@ -164,7 +255,6 @@ export async function playerView({ match, params }) {
       video.pause();
       video.removeAttribute("src");
       video.load();
-      for (const t of video.querySelectorAll("track")) URL.revokeObjectURL(t.src);
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     },
   };
@@ -181,6 +271,24 @@ function languageName(code) {
   } catch {
     return code;
   }
+}
+
+// parseVTT lets the browser parse the file, then keeps plain cue data so the
+// cues can be re-timed for a converted stream that starts mid-file.
+function parseVTT(text) {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement("video");
+    const url = URL.createObjectURL(new Blob([text], { type: "text/vtt" }));
+    const el = document.createElement("track");
+    el.kind = "subtitles";
+    el.src = url;
+    el.default = true;
+    v.append(el);
+    el.track.mode = "hidden";
+    const done = (fn) => { URL.revokeObjectURL(url); fn(); };
+    el.addEventListener("load", () => done(() => resolve([...(el.track.cues || [])].map((c) => ({ start: c.startTime, end: c.endTime, text: c.text })))));
+    el.addEventListener("error", () => done(() => reject(new Error("The subtitle file could not be read."))));
+  });
 }
 
 // fetchVTT waits out the server's 202 while it reads an embedded track out of
@@ -203,4 +311,3 @@ async function fetchVTT(url, onWait) {
     throw new Error(msg);
   }
 }
-
