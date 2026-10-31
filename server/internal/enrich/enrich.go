@@ -45,12 +45,17 @@ type Enricher struct {
 	Country string
 	Log     *slog.Logger
 	// Busy reports a library being scanned; its items wait for the next pass.
-	Busy func(libraryID int64) bool
+	Busy  func(libraryID int64) bool
+	Batch int
+	Now   func() time.Time
 	// AfterPass, when set, runs after every pass (a Fix Match may have made a
-	// pair since), e.g. to merge copies of a film that share a TMDb id.
+	// pair since), e.g. to merge copies of a film that share a TMDb id. It
+	// runs before Changed, so smart collections stamp the merged movie.
 	AfterPass func(ctx context.Context)
-	Batch     int
-	Now       func() time.Time
+	// Changed, when set, is called after a pass that matched anything and
+	// after a Fix Match: genres and ratings just changed, so smart collections
+	// and the labels they stamp rebuild at once instead of on their timer.
+	Changed func()
 }
 
 type Stats struct {
@@ -93,6 +98,14 @@ func (e *Enricher) Run(ctx context.Context, initial, interval time.Duration) {
 		}
 		wait = interval
 		st, err := e.Drain(ctx)
+		// AfterPass merges copies before Changed rebuilds smart collections,
+		// so the rebuild sees the merged movies.
+		if e.AfterPass != nil && ctx.Err() == nil {
+			e.AfterPass(ctx)
+		}
+		if e.Changed != nil && st.Matched+st.Episodes > 0 {
+			e.Changed()
+		}
 		if st.Matched+st.Unmatched+st.Errors > 0 {
 			e.log().Info("tmdb enrichment pass", "matched", st.Matched, "unmatched", st.Unmatched, "errors", st.Errors,
 				"episodes", st.Episodes)
@@ -103,9 +116,6 @@ func (e *Enricher) Run(ctx context.Context, initial, interval time.Duration) {
 		}
 		if err != nil && ctx.Err() == nil {
 			e.log().Warn("tmdb enrichment pass did not complete", "err", err)
-		}
-		if e.AfterPass != nil && ctx.Err() == nil {
-			e.AfterPass(ctx)
 		}
 	}
 }

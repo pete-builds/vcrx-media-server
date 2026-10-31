@@ -93,7 +93,10 @@ type Scanner struct {
 	// with the highest item id from before the scan: every item above it is
 	// new. Used for "recently added" notifications.
 	OnAdded func(ctx context.Context, lib Library, run Run, idsAbove int64)
-	Now     func() time.Time
+	// OnFinished, when set, is called after every successful scan. Smart
+	// collections rebuild from it, so labels follow new metadata at once.
+	OnFinished func(lib Library, run Run)
+	Now        func() time.Time
 }
 
 func (s *Scanner) now() time.Time {
@@ -210,6 +213,9 @@ func (s *Scanner) execute(ctx context.Context, lib Library, opt Options, run Run
 		"error", run.Error)
 	if s.OnAdded != nil && run.Status == StatusOK && run.Added > 0 {
 		s.OnAdded(context.WithoutCancel(ctx), lib, run, before)
+	}
+	if s.OnFinished != nil && run.Status == StatusOK {
+		s.OnFinished(lib, run)
 	}
 	return run, err
 }

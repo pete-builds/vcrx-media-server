@@ -986,8 +986,11 @@ func (t *txw) applyNFO(it *itemRow, f *nfoFile) error {
 			if err := t.exec(`INSERT INTO labels (name) VALUES (?) ON CONFLICT (name) DO NOTHING`, tag); err != nil {
 				return err
 			}
-			if err := t.exec(`INSERT OR IGNORE INTO item_labels (item_id, label_id, source)
-				SELECT ?, id, 'nfo' FROM labels WHERE name = ?`, it.id, tag); err != nil {
+			// An NFO label takes over the same label stamped by a smart
+			// collection, so the collection never clears what the NFO set.
+			if err := t.exec(`INSERT INTO item_labels (item_id, label_id, source)
+				SELECT ?, id, 'nfo' FROM labels WHERE name = ?
+				ON CONFLICT (item_id, label_id) DO UPDATE SET source = 'nfo' WHERE item_labels.source = 'collection'`, it.id, tag); err != nil {
 				return err
 			}
 		}

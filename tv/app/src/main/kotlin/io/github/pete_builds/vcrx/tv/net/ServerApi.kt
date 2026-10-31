@@ -96,6 +96,12 @@ class ServerApi(
         send<Unit>(post("/api/v1/playback/sessions/$sessionId/events", event, PlaybackEvent.serializer()), null)
     }
 
+    /** For a converted session: where a stream asked for at [positionMs] starts, and its URL. */
+    suspend fun convertedStart(seekPath: String, positionMs: Long): ConvertedStart {
+        val url = url(seekPath).newBuilder().setQueryParameter("position_ms", positionMs.coerceAtLeast(0).toString()).build()
+        return send(Request.Builder().url(url).build(), ConvertedStart.serializer())
+    }
+
     /** Absolute artwork URL; the server answers 404 when there is none and the card draws a placeholder. */
     fun artworkUrl(itemId: Long, kind: String, width: Int): String? =
         baseUrl()?.let { ServerAddress.resolve(it, "/api/v1/items/$itemId/artwork/$kind?width=$width")?.toString() }

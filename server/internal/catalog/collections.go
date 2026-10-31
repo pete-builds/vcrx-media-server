@@ -39,7 +39,8 @@ type Filters struct {
 }
 
 // LibraryCollections lists a library's collections with the members the
-// caller may see; a collection with none visible is left out.
+// caller may see; a collection with none visible is left out, and so is one
+// whose definition hides it from the library (a label-only smart collection).
 func (c *Catalog) LibraryCollections(ctx context.Context, pol policy.Policy, libraryID int64) ([]Collection, error) {
 	if !pol.CanSeeLibrary(libraryID) {
 		return nil, ErrNotFound
@@ -47,7 +48,7 @@ func (c *Catalog) LibraryCollections(ctx context.Context, pol policy.Policy, lib
 	cond, args := pol.ItemCond("i")
 	rows, err := c.DB.QueryContext(ctx, `SELECT col.id, col.name, ci.item_id FROM collections col
 		JOIN collection_items ci ON ci.collection_id = col.id JOIN items i ON i.id = ci.item_id
-		WHERE col.library_id = ? AND `+cond+` ORDER BY col.sort_title COLLATE NOCASE, col.id, ci.position`,
+		WHERE col.library_id = ? AND col.visible_library = 1 AND `+cond+` ORDER BY col.sort_title COLLATE NOCASE, col.id, ci.position`,
 		append([]any{libraryID}, args...)...)
 	if err != nil {
 		return nil, err
@@ -75,10 +76,12 @@ func (c *Catalog) LibraryCollections(ctx context.Context, pol policy.Policy, lib
 	return out, err
 }
 
-// CollectionItems returns a collection and its visible members in order.
+// CollectionItems returns a collection and its visible members in order. A
+// collection hidden from the library is not found, for admins too: it exists
+// only to stamp a label.
 func (c *Catalog) CollectionItems(ctx context.Context, pol policy.Policy, userID, id int64) (Collection, []ItemSummary, error) {
 	var col Collection
-	err := c.DB.QueryRowContext(ctx, `SELECT id, library_id, name FROM collections WHERE id = ?`, id).Scan(&col.ID, &col.LibraryID, &col.Name)
+	err := c.DB.QueryRowContext(ctx, `SELECT id, library_id, name FROM collections WHERE id = ? AND visible_library = 1`, id).Scan(&col.ID, &col.LibraryID, &col.Name)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !pol.CanSeeLibrary(col.LibraryID)) {
 		return col, nil, ErrNotFound
 	}
@@ -100,10 +103,11 @@ func (c *Catalog) CollectionItems(ctx context.Context, pol policy.Policy, userID
 	return col, items, err
 }
 
-// ItemCollections lists the collections an item is in.
+// ItemCollections lists the collections an item is in, leaving out hidden ones
+// so a label-only collection's name never shows on a title.
 func (c *Catalog) ItemCollections(ctx context.Context, itemID int64) ([]CollectionRef, error) {
 	rows, err := c.DB.QueryContext(ctx, `SELECT col.id, col.name FROM collection_items ci JOIN collections col ON col.id = ci.collection_id
-		WHERE ci.item_id = ? ORDER BY col.sort_title COLLATE NOCASE`, itemID)
+		WHERE ci.item_id = ? AND col.visible_library = 1 ORDER BY col.sort_title COLLATE NOCASE`, itemID)
 	if err != nil {
 		return nil, err
 	}

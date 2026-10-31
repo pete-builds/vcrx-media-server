@@ -76,6 +76,17 @@ if [ ! -f "$twin" ]; then
     -metadata:s:a:0 language=eng -metadata:s:a:1 language=ger "$twin"
 fi
 
+# MPEG-4 Part 2 video in AVI with MP3 audio, the old Xvid shape: no browser
+# decodes the video, so it plays as a transcoded stream (H.264 made on the
+# fly, MP3 copied). Keyframes only every 10 s, so a seek that started on one
+# would land visibly early.
+kettle="$media/Movies/Tin Kettle Road (1994)/Tin Kettle Road (1994).avi"
+if [ ! -f "$kettle" ]; then
+  mkdir -p "$(dirname "$kettle")"
+  ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=640x360:rate=24:duration=60" -f lavfi -i "sine=frequency=660:duration=60" \
+    -c:v mpeg4 -q:v 4 -g 240 -c:a libmp3lame -ac 2 "$kettle"
+fi
+
 # NFO ratings let the poster overlays show without network access; the optional
 # fifth argument is more NFO XML, such as an invented cast.
 nfo() { # dir file rating votes [extra-xml]
