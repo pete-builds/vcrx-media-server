@@ -113,6 +113,14 @@ class ServerApi(
         send<Unit>(Request.Builder().url(url("/api/v1/items/$itemId/watched")).put(body).build(), null)
     }
 
+    /** The user's Skip intro choice, for the Settings screen. */
+    suspend fun playbackSettings(): PlaybackSettings = get("/api/v1/me/playback-settings", PlaybackSettings.serializer())
+
+    suspend fun setPlaybackSettings(settings: PlaybackSettings): PlaybackSettings {
+        val body = json.encodeToString(PlaybackSettings.serializer(), settings).toRequestBody(JSON)
+        return send(Request.Builder().url(url("/api/v1/me/playback-settings")).put(body).build(), PlaybackSettings.serializer())
+    }
+
     suspend fun startPlayback(request: PlaybackRequest): PlaybackSession =
         send(post("/api/v1/playback/sessions", request, PlaybackRequest.serializer()), PlaybackSession.serializer())
 

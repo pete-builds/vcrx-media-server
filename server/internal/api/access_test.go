@@ -48,7 +48,10 @@ var publicRoutes = map[string]string{
 var noItemRoutes = map[string]string{
 	"POST /api/v1/auth/logout": "ends the caller's own session",
 	"GET /api/v1/me":           "the caller's own account",
-	"GET /api/v1/speedtest":    "random filler bytes for timing the connection; reads nothing from the library",
+	// Skip Intro: the caller's own choice of button, auto or off.
+	"GET /api/v1/me/playback-settings": "the caller's own playback settings",
+	"PUT /api/v1/me/playback-settings": "the caller's own playback settings",
+	"GET /api/v1/speedtest":            "random filler bytes for timing the connection; reads nothing from the library",
 	// The Home layout is the caller's own list of row kinds ("trending",
 	// "seasonal") with fixed names and descriptions; it names no titles.
 	"GET /api/v1/layout/home":    "the caller's own Home row order, row kinds only",

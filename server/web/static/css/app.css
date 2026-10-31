@@ -595,6 +595,14 @@ kbd {
 .version-row .btn { flex-shrink: 0; white-space: nowrap; }
 .merge { margin-top: 16px; }
 
+/* Skip Intro and Skip Credits (views/skip.js), and the admin marker editor. */
+.player .skip-btn { position: absolute; right: 32px; bottom: 96px; z-index: 2; background: rgba(0,0,0,.85); border: 2px solid var(--orange); color: #fff; font-size: 16px; font-weight: 600; padding: 10px 20px; }
+.player .skip-btn:hover, .player .skip-btn:focus-visible { background: var(--orange); color: #000; }
+.markers-edit .marker-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.markers-edit .marker-row strong { min-width: 70px; }
+.markers-edit input { width: 84px; }
+.markers-edit .faint { width: 100%; }
+
 /* Extras (views/extras.js): trailers and featurettes as play tiles, wrapping into as many columns as fit. */
 .extras-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 10px; }
 .extra {

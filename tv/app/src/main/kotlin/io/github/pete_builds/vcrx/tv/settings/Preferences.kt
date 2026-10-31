@@ -22,7 +22,7 @@ data class Preferences(
     val trailers: TrailerMode = TrailerMode.LocalAndYouTube,
     /** A show's theme.mp3 plays quietly on its details screen. */
     val themeMusic: Boolean = true,
-    /** Hook for the skip-intro feature: read it there; Settings shows the row once [FeatureHooks.SKIP_INTRO] is on. */
+    /** Mirrors the server's skip_markers (player/SkipMarkers.kt rememberServerSkipIntro), which the player reads from each session. */
     val skipIntro: SkipIntroMode = SkipIntroMode.ShowButton,
 ) {
     companion object {
@@ -57,7 +57,7 @@ data class Preferences(
  */
 object FeatureHooks {
     const val TRAILERS = true
-    const val SKIP_INTRO = false
+    const val SKIP_INTRO = true
 }
 
 @Serializable

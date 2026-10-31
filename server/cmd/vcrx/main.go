@@ -41,6 +41,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/homelists"
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
+	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/opensubtitles"
@@ -82,6 +83,8 @@ Usage:
                                        who watched it when, one JSON object per line;
                                        -unplayed-days keeps titles nobody played in
                                        N days, never-played ones included
+  vcrx markers detect -dry-run DIR     detect intros and credits in every season
+                                       folder under DIR and print them; stores nothing
 
 Settings come from VCRX_* environment variables and /config/vcrx.yaml; see
 deploy/.env.example.
@@ -109,6 +112,8 @@ func main() {
 		err = libraryCmd(args)
 	case "metadata":
 		err = metadataCmd(args)
+	case "markers":
+		err = markersCmd(args)
 	case "watch":
 		err = watchCmd(args)
 	case "help", "-h", "--help":
@@ -338,6 +343,28 @@ func serve() error {
 	smart := smartBuilder(a)
 	scanner.OnFinished = func(library.Library, library.Run) { smart.Trigger() }
 	go smart.Run(ctx, 15*time.Minute)
+	markerHours, _ := markers.ParseHours(cfg.MarkerHours) // validated by config.Load
+	var markerJob *markers.Job
+	if cfg.DetectMarkers {
+		markerJob = &markers.Job{DB: a.db, Decoder: markers.Decoder{FFmpeg: cfg.FFmpegPath, FFprobe: cfg.FFprobePath},
+			CacheDir: cfg.CacheDir, Log: log.With("component", "markers"), Hours: markerHours,
+			IntroWindow: time.Duration(cfg.MarkerIntroMinutes) * time.Minute, CreditsWindow: time.Duration(cfg.MarkerCreditsMinutes) * time.Minute,
+			Busy: scans.Running, InitialDelay: time.Minute}
+		// A scan that adds episodes starts a pass at once (still only inside the hours).
+		added := scanner.OnAdded
+		scanner.OnAdded = func(ctx context.Context, lib library.Library, run library.Run, idsAbove int64) {
+			if added != nil {
+				added(ctx, lib, run, idsAbove)
+			}
+			if lib.Kind == "show" {
+				markerJob.Wake()
+			}
+		}
+		go markerJob.Run(ctx)
+		log.Info("intro and credits detection on", "hours", markerHours.String())
+	} else {
+		log.Info("intro and credits detection is off (detect_markers: false)")
+	}
 	srv := &api.Server{
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
@@ -355,6 +382,10 @@ func serve() error {
 	// does nothing until switched on in Settings.
 	srv.Newsletter = &newsletter.Service{DB: a.db, Hooks: hooks, Log: log.With("component", "newsletter")}
 	go srv.Newsletter.Run(ctx)
+	srv.MarkerHours = markerHours
+	if markerJob != nil {
+		srv.Markers = markerJob
+	}
 	if users, err := authStore.CountUsers(ctx); err == nil && users == 0 {
 		log.Warn("no users yet: create the admin with `docker compose exec vcrx vcrx user add -username <name> -admin`")
 	}
@@ -993,4 +1024,29 @@ func printSmart(ctx context.Context, b *collections.SmartBuilder) error {
 	fmt.Printf("smart collections: %d from %d files, %d failed, labels +%d -%d, %d removed\n",
 		len(rep.Collections), len(rep.Files), failed, rep.LabelsAdded, rep.LabelsRemoved, rep.Removed)
 	return nil
+}
+
+// markersCmd checks detection against a real library without touching the
+// database: `vcrx markers detect -dry-run /media/TV/Some Show`.
+func markersCmd(args []string) error {
+	if len(args) == 0 || args[0] != "detect" {
+		return errors.New("usage: vcrx markers detect -dry-run DIR")
+	}
+	fs := flag.NewFlagSet("markers detect", flag.ContinueOnError)
+	dry := fs.Bool("dry-run", false, "print what detection finds; store nothing (required)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if !*dry || fs.NArg() != 1 {
+		return errors.New("usage: vcrx markers detect -dry-run DIR (the server stores markers itself; this only prints)")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	j := &markers.Job{Decoder: markers.Decoder{FFmpeg: cfg.FFmpegPath, FFprobe: cfg.FFprobePath}, Log: cfg.Logger(),
+		IntroWindow: time.Duration(cfg.MarkerIntroMinutes) * time.Minute, CreditsWindow: time.Duration(cfg.MarkerCreditsMinutes) * time.Minute}
+	return j.DryRun(ctx, fs.Arg(0), os.Stdout)
 }

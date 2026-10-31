@@ -333,6 +333,10 @@ data class PlaybackSession(
     @SerialName("webvtt_subtitles") val webVttSubtitles: List<SubtitleSource> = emptyList(),
     @SerialName("resume_position_ms") val resumePositionMs: Long = 0,
     @SerialName("heartbeat_interval_ms") val heartbeatIntervalMs: Long = 10_000,
+    /** Intro and credits, for Skip Intro and Skip Credits (player/SkipMarkers.kt). */
+    val markers: List<Marker> = emptyList(),
+    /** This user's choice: button, auto or off. Set with [ServerApi.setPlaybackSettings]. */
+    @SerialName("skip_markers") val skipMarkers: String = PlaybackSettings.BUTTON,
 )
 
 @Serializable
@@ -367,3 +371,32 @@ data class NowPlaying(
 
 @Serializable
 data class TerminateRequest(val message: String)
+
+/** A stretch of an episode a player may offer to skip. */
+@Serializable
+data class Marker(
+    /** intro or credits */
+    val kind: String,
+    @SerialName("start_ms") val startMs: Long,
+    @SerialName("end_ms") val endMs: Long,
+    val confidence: Double = 1.0,
+    val source: String = "",
+    /** The server says to skip this one without asking (a confident intro, with skip_markers auto). */
+    @SerialName("auto_skip") val autoSkip: Boolean = false,
+)
+
+/**
+ * The signed-in user's own playback choices, stored on the server and shared with
+ * the web app: GET and PUT /api/v1/me/playback-settings.
+ */
+@Serializable
+data class PlaybackSettings(
+    /** Intros: [BUTTON] (the default), [AUTO] (confident intros only) or [OFF]. */
+    @SerialName("skip_markers") val skipMarkers: String = BUTTON,
+) {
+    companion object {
+        const val BUTTON = "button"
+        const val AUTO = "auto"
+        const val OFF = "off"
+    }
+}

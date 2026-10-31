@@ -29,7 +29,7 @@ const routes = [
   [/^\/search$/, () => searchView],
   [/^\/play\/(\d+)$/, () => playerView],
   [/^\/activity(?:\/(now|history|stats|users))?$/, () => activityView],
-  [/^\/settings(?:\/(account|home|libraries|users|newsletter))?$/, () => settingsView],
+  [/^\/settings(?:\/(account|home|libraries|users|newsletter|markers))?$/, () => settingsView],
   [/^\/login$/, () => loginView],
 ];
 

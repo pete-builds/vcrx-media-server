@@ -45,6 +45,7 @@ import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.HomeRow
 import io.github.pete_builds.vcrx.tv.player.CaptionStyles
+import io.github.pete_builds.vcrx.tv.player.rememberServerSkipIntro
 import io.github.pete_builds.vcrx.tv.settings.Choices
 import io.github.pete_builds.vcrx.tv.settings.Describe
 import io.github.pete_builds.vcrx.tv.settings.FeatureHooks
@@ -337,7 +338,15 @@ private fun PlaybackSettings() {
         }
         if (FeatureHooks.SKIP_INTRO) {
             item(key = "intro") {
-                ChoiceRow("Skip intro", prefs.skipIntro, SkipIntroMode.entries, Describe::skipIntro, "What happens when an intro starts.", { v -> update { it.copy(skipIntro = v) } })
+                val pickSkipIntro = rememberServerSkipIntro(prefs.skipIntro) { v -> update { it.copy(skipIntro = v) } }
+                ChoiceRow(
+                    "Skip intro",
+                    prefs.skipIntro,
+                    SkipIntroMode.entries,
+                    Describe::skipIntro,
+                    "What happens when an intro starts. Skipping automatically acts only when the server is sure; credits always wait for you. Shared with the web app.",
+                    pickSkipIntro,
+                )
             }
         }
         if (FeatureHooks.TRAILERS) {

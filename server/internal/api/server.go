@@ -18,6 +18,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
+	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
@@ -59,6 +60,10 @@ type Server struct {
 	Webhooks *notify.Webhooks
 	Admin    *admin.Admin
 	Scans    ScanStarter
+	// Markers re-runs and copies intro and credits detection; nil when it
+	// is off. MarkerHours is its window, for the admin status page.
+	Markers     MarkerJob
+	MarkerHours markers.Hours
 	// LibraryRoots lists roots for the readiness check.
 	LibraryRoots func(ctx context.Context) (map[string]string, error)
 
@@ -116,6 +121,8 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/hooks/arr", public, s.arrHook},
 		{"POST", "/api/v1/auth/logout", signedIn, s.logout},
 		{"GET", "/api/v1/me", signedIn, s.me},
+		{"GET", "/api/v1/me/playback-settings", signedIn, s.playbackSettings},
+		{"PUT", "/api/v1/me/playback-settings", signedIn, s.setPlaybackSettings},
 		{"GET", "/api/v1/home", signedIn, s.home},
 		{"GET", "/api/v1/rows/{row_id}", signedIn, s.homeRow},
 		{"GET", "/api/v1/layout/home", signedIn, s.homeLayout},
@@ -170,6 +177,11 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/admin/watch/export", adminOnly, s.watchExport},
 		{"POST", "/api/v1/admin/items/{item_id}/merge", adminOnly, s.adminMergeItems},
 		{"POST", "/api/v1/admin/versions/{version_id}/split", adminOnly, s.adminSplitVersion},
+		{"GET", "/api/v1/admin/markers", adminOnly, s.adminMarkerStatus},
+		{"POST", "/api/v1/admin/items/{item_id}/markers/detect", adminOnly, s.adminDetectMarkers},
+		{"PUT", "/api/v1/admin/items/{item_id}/markers/{kind}", adminOnly, s.adminSetMarker},
+		{"DELETE", "/api/v1/admin/items/{item_id}/markers/{kind}", adminOnly, s.adminClearMarker},
+		{"POST", "/api/v1/admin/items/{item_id}/markers/{kind}/apply-to-season", adminOnly, s.adminApplyMarkerToSeason},
 		{"GET", "/api/v1/admin/activity/now", adminOnly, s.activityNow},
 		{"GET", "/api/v1/admin/activity/history", adminOnly, s.activityHistory},
 		{"GET", "/api/v1/admin/activity/stats", adminOnly, s.activityStats},
