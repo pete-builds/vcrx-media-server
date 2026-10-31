@@ -13,6 +13,18 @@ unless it reads process-wide state.
 > google tv app. the posters/tiles on the android tv are a bit too big, make it
 > look similar to plex."
 
+## Status: built 2026-10-31, all merged
+
+| Item | PRs | Notes |
+|---|---|---|
+| 1. Trailer button + details panel | #59, #61 | 366 of 384 movies had a YouTube trailer on nix1; #59 passes over ones YouTube no longer embeds (oEmbed). Details panel on both clients. |
+| 2. Captions while playing | #63 | TV: Down opens the controls on Subtitles (Down, OK); the captions or menu key still toggles. Web: CC button and C. |
+| 3. Trailers and pre-roll before a movie | #65 server, #67 web, #68 TV | Per profile, off by default. nix1 has no local trailer files, so there it is the pre-roll alone. |
+| 4. Loading bar | #69 | The TV spinner was Media3's buffering wheel; NoSpinnerTest keeps it out. |
+| 5. TV Home hero, smaller tiles | #66 | Plex-style: the day's featured title (same pick as the web), then the focused card. Built before item 4 at Pete's ask. |
+
+Also: #60 (Music `item_count` counts albums), #64 (TV Connect: no look-alike address in the empty box). Live TV is planned in `2026-10-31-live-tv.md` and on hold (Pete: "hold off on the iptv builds").
+
 ## 1. YouTube trailer button (config first, then the page)
 
 **Exists:** `trailers_youtube` (config.go:116) plus a TMDb key turns on a
