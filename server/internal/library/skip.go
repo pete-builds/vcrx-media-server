@@ -30,17 +30,46 @@ var junkDirs = map[string]bool{
 	"bdmv": true, "video_ts": true, "audio_ts": true, "certificate": true,
 }
 
-// extrasDirs hold bonus material that is not a title of its own. "Specials" is
-// an extras folder for movies but season 0 for shows.
-var extrasDirs = map[string]bool{
-	"extras": true, "featurettes": true, "behind the scenes": true, "deleted scenes": true,
-	"interviews": true, "trailers": true, "shorts": true,
+// Kinds of extra, matching the item_extras.kind column. A show's theme.mp3 is
+// ExtraTheme; it plays behind the details screen rather than in the Extras row.
+const (
+	ExtraTrailer         = "trailer"
+	ExtraFeaturette      = "featurette"
+	ExtraBehindTheScenes = "behind_the_scenes"
+	ExtraDeletedScene    = "deleted_scene"
+	ExtraInterview       = "interview"
+	ExtraScene           = "scene"
+	ExtraShort           = "short"
+	ExtraOther           = "other"
+	ExtraTheme           = "theme"
+)
+
+// extrasDirs hold bonus material that is not a title of its own, by the kind of
+// extra their files are. "Specials" is an extras folder for movies but season 0
+// for shows.
+var extrasDirs = map[string]string{
+	"extras": ExtraOther, "featurettes": ExtraFeaturette, "behind the scenes": ExtraBehindTheScenes,
+	"deleted scenes": ExtraDeletedScene, "interviews": ExtraInterview, "trailers": ExtraTrailer, "shorts": ExtraShort,
 }
 
-// SkipDir reports why a folder is not walked, or "" to walk it.
-func SkipDir(name, kind string) string {
+// nestedExtrasDirs are extras folders only inside a title's folder: at the top
+// of a library, "Other" or "Scenes" could as well be a folder of films.
+var nestedExtrasDirs = map[string]string{"scenes": ExtraScene, "other": ExtraOther}
+
+func normDir(name string) string {
 	l := strings.ToLower(strings.TrimSpace(name))
-	norm := strings.Join(strings.FieldsFunc(l, func(r rune) bool { return r == '.' || r == '_' || r == ' ' || r == '-' }), " ")
+	return strings.Join(strings.FieldsFunc(l, func(r rune) bool { return r == '.' || r == '_' || r == ' ' || r == '-' }), " ")
+}
+
+// SkipDir reports why a folder at the top of a library is not walked, or "" to
+// walk it.
+func SkipDir(name, kind string) string { return skipDirAt(name, kind, false) }
+
+// skipDirAt is SkipDir for a folder that is nested (inside another folder of
+// the library) or not.
+func skipDirAt(name, kind string, nested bool) string {
+	l := strings.ToLower(strings.TrimSpace(name))
+	norm := normDir(name)
 	switch {
 	case strings.HasPrefix(name, "."):
 		return "hidden"
@@ -48,10 +77,24 @@ func SkipDir(name, kind string) string {
 		return "system"
 	case norm == "sample" || norm == "samples":
 		return "sample"
-	case extrasDirs[norm]:
+	case ExtrasDirKind(name, kind, nested) != "":
 		return "extras"
-	case kind == KindMovie && (norm == "specials" || norm == "special features"):
-		return "extras"
+	}
+	return ""
+}
+
+// ExtrasDirKind is the kind of extra a folder's files are, or "" when it is not
+// an extras folder.
+func ExtrasDirKind(name, kind string, nested bool) string {
+	norm := normDir(name)
+	if k := extrasDirs[norm]; k != "" {
+		return k
+	}
+	if k := nestedExtrasDirs[norm]; k != "" && nested {
+		return k
+	}
+	if kind == KindMovie && (norm == "specials" || norm == "special features") {
+		return ExtraFeaturette
 	}
 	return ""
 }
@@ -59,10 +102,31 @@ func SkipDir(name, kind string) string {
 // extraSuffixes mark bonus files by name, the Plex and Kodi convention.
 var extraSuffixes = []string{"-trailer", "-featurette", "-behindthescenes", "-deleted", "-deletedscene", "-interview"}
 
+var suffixKinds = map[string]string{
+	"-trailer": ExtraTrailer, "-featurette": ExtraFeaturette, "-behindthescenes": ExtraBehindTheScenes,
+	"-deleted": ExtraDeletedScene, "-deletedscene": ExtraDeletedScene, "-interview": ExtraInterview,
+}
+
+// ExtraFileKind reports the kind of extra a file's name marks it as, and the
+// name before the marker ("Some Film (2009)" for "Some Film (2009)-trailer.mkv",
+// "" for a bare trailer.mp4). ok is false for anything else.
+func ExtraFileKind(name string) (kind, owner string, ok bool) {
+	base := stripExt(name)
+	l := strings.ToLower(base)
+	if l == "trailer" {
+		return ExtraTrailer, "", true
+	}
+	for _, s := range extraSuffixes {
+		if strings.HasSuffix(l, s) {
+			return suffixKinds[s], strings.TrimSpace(base[:len(base)-len(s)]), true
+		}
+	}
+	return "", "", false
+}
+
 // SkipFile reports why a file is not indexed, or "" to index it. size is the
 // file size in bytes; it settles whether "sample" is a marker or a title word.
 func SkipFile(name string, size int64) string {
-	l := strings.ToLower(name)
 	switch {
 	case strings.HasPrefix(name, "._"):
 		return "appledouble"
@@ -73,13 +137,7 @@ func SkipFile(name string, size int64) string {
 	case IsSample(name, size):
 		return "sample"
 	}
-	base := stripExt(l)
-	for _, s := range extraSuffixes {
-		if strings.HasSuffix(base, s) {
-			return "extras"
-		}
-	}
-	if base == "trailer" {
+	if _, _, ok := ExtraFileKind(name); ok {
 		return "extras"
 	}
 	return ""

@@ -307,8 +307,8 @@ func skippedPath(rel, kind string, isFile bool) bool {
 	if isFile {
 		parts = parts[:len(parts)-1]
 	}
-	for _, p := range parts {
-		if p != "" && SkipDir(p, kind) != "" {
+	for i, p := range parts {
+		if p != "" && skipDirAt(p, kind, i > 0) != "" {
 			return true
 		}
 	}
@@ -395,6 +395,13 @@ func (s *Scanner) scan(ctx context.Context, lib Library, opt Options, run *Run) 
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
+	}
+	// Extras before reconcile: an item that lost its versions to another (a
+	// grouping change) is deleted there, and its extras must have moved first.
+	if !skippedPath(sub, lib.Kind, isFile) {
+		if err := s.scanExtras(ctx, lib, opt, st, w, seen, sub, isFile, log); err != nil {
+			return "", err
+		}
 	}
 	if err := s.reconcile(ctx, st, w, seen, sub, isFile, run); err != nil {
 		return "", err

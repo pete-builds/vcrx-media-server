@@ -78,6 +78,11 @@ class AppActions(private val nav: NavController, private val activity: Activity)
         if (!nav.popBackStack()) activity.finish()
     }
 
+    /** Plays one of an item's extras, such as its trailer, in the app's player. */
+    fun playExtra(itemId: Long, extraId: Long, title: String) {
+        activity.startActivity(PlayerActivity.extraIntent(activity, itemId, extraId, title))
+    }
+
     fun toLogin() = nav.navigate(LoginRoute) {
         popUpTo(nav.graph.id) { inclusive = true }
         launchSingleTop = true

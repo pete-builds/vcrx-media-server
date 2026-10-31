@@ -45,6 +45,7 @@ import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.HomeRow
 import io.github.pete_builds.vcrx.tv.player.CaptionStyles
+import io.github.pete_builds.vcrx.tv.player.rememberServerSkipIntro
 import io.github.pete_builds.vcrx.tv.settings.Choices
 import io.github.pete_builds.vcrx.tv.settings.Describe
 import io.github.pete_builds.vcrx.tv.settings.FeatureHooks
@@ -337,12 +338,30 @@ private fun PlaybackSettings() {
         }
         if (FeatureHooks.SKIP_INTRO) {
             item(key = "intro") {
-                ChoiceRow("Skip intro", prefs.skipIntro, SkipIntroMode.entries, Describe::skipIntro, "What happens when an intro starts.", { v -> update { it.copy(skipIntro = v) } })
+                val pickSkipIntro = rememberServerSkipIntro(prefs.skipIntro) { v -> update { it.copy(skipIntro = v) } }
+                ChoiceRow(
+                    "Skip intro",
+                    prefs.skipIntro,
+                    SkipIntroMode.entries,
+                    Describe::skipIntro,
+                    "What happens when an intro starts. Skipping automatically acts only when the server is sure; credits always wait for you. Shared with the web app.",
+                    pickSkipIntro,
+                )
             }
         }
         if (FeatureHooks.TRAILERS) {
             item(key = "trailers") {
-                ChoiceRow("Trailers", prefs.trailers, TrailerMode.entries, Describe::trailers, "Where trailers come from.", { v -> update { it.copy(trailers = v) } })
+                ChoiceRow(
+                    "Trailers",
+                    prefs.trailers,
+                    TrailerMode.entries,
+                    Describe::trailers,
+                    "Where the Trailer button plays from. YouTube trailers appear only when the server offers them, and open in the YouTube app.",
+                    { v -> update { it.copy(trailers = v) } },
+                )
+            }
+            item(key = "theme") {
+                ToggleRow("Theme music", prefs.themeMusic, "Play a show's theme quietly on its page.", { v -> update { it.copy(themeMusic = v) } })
             }
         }
     }
@@ -534,7 +553,7 @@ fun summary(page: SettingsPage, prefs: Preferences): String = when (page) {
 /** The description each category shows when focused. */
 fun pageHelp(page: SettingsPage): String = when (page) {
     SettingsPage.Subtitles -> "On or off for every video, languages, and how they look."
-    SettingsPage.Playback -> "Next episode, resume, skip steps and streaming quality."
+    SettingsPage.Playback -> "Next episode, resume, skip steps, streaming quality, trailers and theme music."
     SettingsPage.Audio -> "Audio language and passthrough to a receiver."
     SettingsPage.Video -> "HDR and Dolby Vision, for a TV that shows them badly."
     SettingsPage.Home -> "Which rows Home shows, and in what order."

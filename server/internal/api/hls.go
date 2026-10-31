@@ -29,7 +29,7 @@ func (s *Server) hlsAllowed(w http.ResponseWriter, r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	allowed, err := s.Catalog.CanPlay(r.Context(), info(r).Policy, ss.VersionID)
+	allowed, err := s.canPlaySession(r.Context(), info(r).Policy, ss)
 	if err != nil {
 		s.internal(w, r, err)
 		return false

@@ -1,0 +1,8 @@
+{
+  "id": 9202,
+  "results": [
+    {"iso_639_1": "en", "iso_3166_1": "US", "name": "Season 2 Recap", "key": "RecapRecap1", "site": "YouTube", "size": 1080, "type": "Recap", "official": true, "published_at": "2023-06-01T12:00:00.000Z", "id": "64b0000000000000000001"},
+    {"iso_639_1": "en", "iso_3166_1": "US", "name": "Season 1 Teaser", "key": "ShowTeaser1", "site": "YouTube", "size": 1080, "type": "Teaser", "official": true, "published_at": "2021-09-01T12:00:00.000Z", "id": "64b0000000000000000002"},
+    {"iso_639_1": "en", "iso_3166_1": "US", "name": "Opening Titles", "key": "OpeningTtl1", "site": "YouTube", "size": 1080, "type": "Opening Credits", "official": true, "published_at": "2021-10-01T12:00:00.000Z", "id": "64b0000000000000000003"}
+  ]
+}
