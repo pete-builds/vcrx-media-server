@@ -18,18 +18,23 @@ import { capabilities } from "../caps.js";
 //   cannot play the fmp4 one. It seeks the same way: the seek endpoint starts
 //   a stream at the position and answers with its playlist.
 export async function playerView({ match, params }) {
-  const itemId = Number(match[1]);
+  // #/peer/<peer>/play/<item> plays a friend's title: the same player, every
+  // call under /peers/<peer>, which this server relays to the friend's.
+  const peerId = match[2] ? Number(match[1]) : null;
+  const itemId = Number(match[2] || match[1]);
+  const base = peerId ? `/peers/${peerId}` : "";
+  const itemHash = peerId ? `#/peer/${peerId}/item/${itemId}` : `#/item/${itemId}`;
   const body = { item_id: itemId, capabilities: capabilities() };
   if (params.get("version")) body.version_id = Number(params.get("version"));
   if (params.get("start") !== null) body.start_position_ms = Number(params.get("start")) || 0;
 
-  const back = () => (history.length > 1 ? history.back() : (location.hash = `#/item/${itemId}`));
+  const back = () => (history.length > 1 ? history.back() : (location.hash = itemHash));
   const backBtn = h("button", { class: "btn btn-small", type: "button", onclick: back, "aria-label": "Back" }, icon("back"), "Back");
   const shell = h("div", { class: "player" });
 
   let session, item;
   try {
-    [session, item] = await Promise.all([api("/playback/sessions", { method: "POST", body }), api(`/items/${itemId}`)]);
+    [session, item] = await Promise.all([api(`${base}/playback/sessions`, { method: "POST", body }), api(`${base}/items/${itemId}`)]);
   } catch (err) {
     const why = err instanceof ApiError ? err.message : "The server could not start playback.";
     shell.append(h("div", { class: "top" }, backBtn), h("div", { class: "overlay" },
@@ -116,7 +121,7 @@ export async function playerView({ match, params }) {
     // The audio track goes on the fmp4 stream's URL, or to the seek that
     // starts an HLS stream.
     const audio = audioIndex === null ? "" : `&audio=${audioIndex}`;
-    const at = await api(`/playback/sessions/${session.session_id}/seek?position_ms=${target}${hls ? audio : ""}`);
+    const at = await api(`${base}/playback/sessions/${session.session_id}/seek?position_ms=${target}${hls ? audio : ""}`);
     if (seq !== loadSeq) return;
     offsetMs = at.start_ms;
     video.src = hls ? at.url : at.url + audio;
@@ -127,7 +132,7 @@ export async function playerView({ match, params }) {
   const sid = session.session_id;
   let started = false, ended = false, paused = false, lastPos = 0, seekFrom = null;
   const report = (type, extra = {}, keepalive = false) =>
-    api(`/playback/sessions/${sid}/events`, { method: "POST", body: { type, position_ms: pos(), duration_ms: dur(), ...extra }, keepalive })
+    api(`${base}/playback/sessions/${sid}/events`, { method: "POST", body: { type, position_ms: pos(), duration_ms: dur(), ...extra }, keepalive })
       .catch((err) => {
         if (err instanceof ApiError && err.code === "session_terminated") terminated(err.message);
       });
@@ -239,7 +244,7 @@ export async function playerView({ match, params }) {
   function upNext(next) {
     let left = 10;
     const msg = h("p", { class: "muted" });
-    const play = () => { clearInterval(upNextTimer); location.hash = `#/play/${next.id}`; };
+    const play = () => { clearInterval(upNextTimer); location.hash = peerId ? `#/peer/${peerId}/play/${next.id}` : `#/play/${next.id}`; };
     const cancel = () => { clearInterval(upNextTimer); back(); };
     const tick = () => { msg.textContent = `${episodeCode(next)} · ${next.title} starts in ${left} s.`; };
     tick();

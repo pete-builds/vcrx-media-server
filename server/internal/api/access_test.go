@@ -39,9 +39,10 @@ import (
 // caller's policy until the probe passes.
 //
 // The whole walk runs once for each kind of principal: an account ("user"), a
-// household profile ("profile") and an invited device ("token"). Policy has
-// one enforcement path for all three, and this proves every route takes it,
-// so a new route fails until it is probed as each of them.
+// household profile ("profile"), an invited device ("token") and a linked
+// friend's server ("peer", milestone 9 item 3). Policy has one enforcement
+// path for all four, and this proves every route takes it, so a new route
+// fails until it is probed as each of them.
 
 // publicRoutes answer without a session and carry no titles.
 var publicRoutes = map[string]string{
@@ -56,6 +57,8 @@ var publicRoutes = map[string]string{
 	"POST /api/v1/invites/redeem": "spends an invite and signs the device in; returns its scope, no titles",
 	"POST /api/v1/pair":           "a TV asks to pair and gets a code to show; no titles",
 	"POST /api/v1/pair/poll":      "a TV asks whether it was approved; returns its session, no titles",
+	// Friends' servers: TestFederation* and TestLinkedServer* cover it.
+	"POST /api/v1/federation/link": "a friend's server spends a server invite; returns its session, no titles",
 }
 
 // householdRoutes serve the profile picker. They carry names and pictures of
@@ -65,6 +68,37 @@ var householdRoutes = map[string]string{
 	"GET /api/v1/profiles":                  "the household's profiles for the picker",
 	"GET /api/v1/profiles/{user_id}/avatar": "a household member's picture",
 	"POST /api/v1/auth/switch":              "switches the device to another household profile",
+}
+
+// peerRoutes answer only a linked friend's server. The walk refuses every
+// other principal each of them, and probes the catalog as the peer.
+var peerRoutes = map[string]string{
+	"GET /api/v1/federation/catalog": "probed in the walk as the peer: it stops listing what the peer's policy hides",
+	"DELETE /api/v1/federation/link": "the linked server ends its own link; reads no titles",
+}
+
+// friendsServerRoutes show this server's household what its friends' servers
+// share: a peer's titles, never this server's, under the caller's own policy.
+// TestPeerTitlesFollowTheCallersPolicy probes each of them (a profile with a
+// rating ceiling is refused a peer's R-rated film, its season, its artwork
+// and its stream); the walk checks that an invited device, a linked server
+// and an account outside the household are refused every one.
+var friendsServerRoutes = map[string]string{
+	"GET /api/v1/peers/home":                                                           "merged friends' row, filtered",
+	"GET /api/v1/peers/{peer_id}/items/{item_id}":                                      "a peer title's page",
+	"GET /api/v1/peers/{peer_id}/items/{item_id}/children":                             "a peer show's seasons and episodes",
+	"GET /api/v1/peers/{peer_id}/items/{item_id}/artwork/{kind}":                       "a peer title's artwork",
+	"POST /api/v1/peers/{peer_id}/playback/sessions":                                   "starts a stream from the peer",
+	"POST /api/v1/peers/{peer_id}/playback/sessions/{session_id}/events":               "the caller's own peer session",
+	"GET /api/v1/peers/{peer_id}/playback/sessions/{session_id}/seek":                  "the caller's own peer session",
+	"GET /api/v1/peers/{peer_id}/playback/sessions/{session_id}/file":                  "the caller's own peer session",
+	"HEAD /api/v1/peers/{peer_id}/playback/sessions/{session_id}/file":                 "the caller's own peer session",
+	"GET /api/v1/peers/{peer_id}/playback/sessions/{session_id}/stream.mp4":            "the caller's own peer session",
+	"HEAD /api/v1/peers/{peer_id}/playback/sessions/{session_id}/stream.mp4":           "the caller's own peer session",
+	"GET /api/v1/peers/{peer_id}/playback/sessions/{session_id}/hls/{run}/index.m3u8":  "the caller's own peer session",
+	"HEAD /api/v1/peers/{peer_id}/playback/sessions/{session_id}/hls/{run}/index.m3u8": "the caller's own peer session",
+	"GET /api/v1/peers/{peer_id}/playback/sessions/{session_id}/hls/{run}/{segment}":   "the caller's own peer session",
+	"GET /api/v1/peers/{peer_id}/playback/sessions/{session_id}/subtitles/{stream_id}": "the caller's own peer session",
 }
 
 // noItemRoutes are signed-in routes that read nothing about titles.
@@ -119,7 +153,8 @@ type walkFixture struct {
 	*fixture
 	movies, tv, vault int64
 	friendID          int64
-	// kind is the principal the walk runs as: "user", "profile" or "token".
+	// kind is the principal the walk runs as: "user", "profile", "token" or
+	// "peer".
 	kind string
 	// Hidden from the restricted friend, each for a different reason.
 	vaultMovie, horrorMovie, ratedMovie     int64 // ungranted library, denied label, rated R
@@ -286,7 +321,7 @@ func (w *walkFixture) restrict() {
 
 func (w *walkFixture) setAccess(libs []int64, pol map[string]any) {
 	w.t.Helper()
-	if w.kind == "token" {
+	if w.isToken() {
 		// An invited device's scope is fixed at mint: the admin routes refuse
 		// to widen it (TestInviteScopeCannotBeWidened). The walk sets the same
 		// two tables they write, through the same store, because the point is
@@ -365,7 +400,7 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 		ps = append(ps, at("GET /api/v1/versions/{version_id}/file", v).query("session="+sid),
 			at("HEAD /api/v1/versions/{version_id}/file", v).query("session="+sid))
 		// ...and, for the household's own devices, by the bare URL as well.
-		if w.kind != "token" {
+		if !w.isToken() {
 			ps = append(ps, at("GET /api/v1/versions/{version_id}/file", v), at("HEAD /api/v1/versions/{version_id}/file", v))
 		}
 	}
@@ -411,11 +446,19 @@ func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
 		at("GET /api/v1/items/{item_id}", f.showID).hides(`"child_count":2`),
 		at("GET /api/v1/items/{item_id}/children", f.showID).hides("Season 2"),
 	)
+	if w.kind == "peer" {
+		// What a linked server's catalog shares follows its policy too.
+		ps = append(ps, at("GET /api/v1/federation/catalog").hides("Zebra Vault", "Zebra Night", "Zebra Rated", "Zebra Street"))
+	}
 	return ps
 }
 
+// isToken is an invited device or a linked server: a principal whose scope
+// is its token's.
+func (w *walkFixture) isToken() bool { return w.kind == "token" || w.kind == "peer" }
+
 // checkCoverage fails for any registered route the walk does not account for.
-func checkCoverage(t *testing.T, routes []route, ps []probe) {
+func checkCoverage(t *testing.T, routes []route, ps []probe, kind string) {
 	t.Helper()
 	hidden, listed := map[string]bool{}, map[string]bool{}
 	registered := map[string]bool{}
@@ -448,6 +491,19 @@ func checkCoverage(t *testing.T, routes []route, ps []probe) {
 		case householdOnly:
 			if householdRoutes[key] == "" {
 				t.Errorf("%s serves the profile picker: add it to householdRoutes with the reason it carries no titles", key)
+			}
+			continue
+		case peerOnly:
+			if peerRoutes[key] == "" {
+				t.Errorf("%s answers linked servers only: add it to peerRoutes with how it is probed, and probe it as the peer if it lists titles", key)
+			}
+			if kind == "peer" && strings.Contains(peerRoutes[key], "probed in the walk") && !listed[key] && !hidden[key] {
+				t.Errorf("%s says it is probed in the walk as the peer, but no probe calls it", key)
+			}
+			continue
+		case friendsServers:
+			if friendsServerRoutes[key] == "" {
+				t.Errorf("%s shows friends' servers to the household: add it to friendsServerRoutes, and a probe to TestPeerTitlesFollowTheCallersPolicy that a restricted profile is refused through it", key)
 			}
 			continue
 		}
@@ -506,11 +562,14 @@ func (w *walkFixture) become(kind string) {
 	case "token":
 		d := w.invite(map[string]any{"name": "Walker's TV", "library_ids": []int64{w.movies, w.tv, w.vault}, "allow_transcode": true})
 		w.friendID, w.friendTok = d.userID, d.token
+	case "peer":
+		l := w.linkServer(map[string]any{"name": "Walker's server", "library_ids": []int64{w.movies, w.tv, w.vault}, "allow_transcode": true})
+		w.friendID, w.friendTok = l.userID, l.token
 	}
 }
 
 func TestAccessWalkEveryRouteAppliesThePolicy(t *testing.T) {
-	for _, kind := range []string{"user", "profile", "token"} {
+	for _, kind := range []string{"user", "profile", "token", "peer"} {
 		t.Run(kind, func(t *testing.T) { accessWalk(t, kind) })
 	}
 }
@@ -528,7 +587,7 @@ func accessWalk(t *testing.T, kind string) {
 	sessions = append(sessions, w.startSession(w.friendTok, w.movieID, &w.v4k))
 	adminSession := w.startSession(w.adminTok, w.movieID, &w.v1080)
 	ps := w.probes(sessions, adminSession)
-	checkCoverage(t, w.srv.Routes(), ps)
+	checkCoverage(t, w.srv.Routes(), ps, kind)
 
 	call := func(p probe, tok string) resp {
 		return w.do(p.method(), p.path, tok, p.body)
@@ -616,6 +675,31 @@ func accessWalk(t *testing.T, kind string) {
 			t.Errorf("%s %s: the admin from the internet got %d, want 403 lan_only", rt.Method, rt.Path, r.code)
 		}
 	}
+	// Linked servers' own routes refuse everyone else; friends' servers are
+	// shown to the household only, never passed on to an invited device, a
+	// linked server or an account outside it. A household profile reaches
+	// them, which shows the refusal is about who asks.
+	for _, rt := range w.srv.Routes() {
+		if (rt.access != peerOnly && rt.access != friendsServers) || (rt.access == peerOnly && kind == "peer") {
+			continue
+		}
+		path := routeParam.ReplaceAllString(rt.Path, "1")
+		r := w.do(rt.Method, path, w.friendTok, nil)
+		switch {
+		case rt.access == peerOnly && kind != "peer":
+			if r.code != http.StatusForbidden || !strings.Contains(string(r.body), "peers_only") {
+				t.Errorf("%s %s: the %s got %d %.120s, want 403 peers_only", rt.Method, rt.Path, kind, r.code, r.body)
+			}
+		case rt.access == friendsServers && kind != "profile":
+			if r.code != http.StatusForbidden || !strings.Contains(string(r.body), "not_household") {
+				t.Errorf("%s %s: the %s got %d %.120s, want 403 not_household", rt.Method, rt.Path, kind, r.code, r.body)
+			}
+		case rt.access == friendsServers && rt.Path == "/api/v1/peers/home":
+			if r.code != 200 {
+				t.Errorf("%s %s: the household profile got %d %.120s", rt.Method, rt.Path, r.code, r.body)
+			}
+		}
+	}
 	// The profile picker's routes: an invited device is refused every one,
 	// whatever its scope; a household profile reaches them, which shows the
 	// refusal is about the token and not a broken route.
@@ -626,9 +710,9 @@ func accessWalk(t *testing.T, kind string) {
 		path := routeParam.ReplaceAllString(rt.Path, fmt.Sprint(w.friendID))
 		r := w.do(rt.Method, path, w.friendTok, map[string]any{"user_id": w.friendID})
 		switch kind {
-		case "token":
+		case "token", "peer":
 			if r.code != http.StatusForbidden || !strings.Contains(string(r.body), "not_household") {
-				t.Errorf("%s %s: the invited device got %d %.120s, want 403 not_household", rt.Method, rt.Path, r.code, r.body)
+				t.Errorf("%s %s: the %s got %d %.120s, want 403 not_household", rt.Method, rt.Path, kind, r.code, r.body)
 			}
 		case "profile":
 			if rt.Method == "GET" && rt.Path == "/api/v1/profiles" && r.code != 200 {

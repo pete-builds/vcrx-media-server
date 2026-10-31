@@ -74,6 +74,10 @@ type Config struct {
 	// other name is refused, which stops DNS rebinding: a web page that points
 	// its own domain at this server cannot talk to it.
 	AllowedHosts []string `yaml:"allowed_hosts"`
+	// PeerAllowLoopback lets this server link to a friend's server on
+	// 127.0.0.1 or ::1. For running two servers on one machine in
+	// development only: a production peer on loopback is this server itself.
+	PeerAllowLoopback bool `yaml:"peer_allow_loopback"`
 
 	// WebhookURLs receive playback events (play, stop, refused, terminated). A
 	// Discord webhook URL gets Discord's message shape. The URLs carry tokens, so
@@ -199,6 +203,7 @@ func Load() (Config, error) {
 	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
 	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)
 	boolean("VCRX_AUTO_SIGN_IN_PICKER", &c.AutoSignInPicker)
+	boolean("VCRX_PEER_ALLOW_LOOPBACK", &c.PeerAllowLoopback)
 	list("VCRX_ALLOWED_HOSTS", &c.AllowedHosts)
 	str("VCRX_COLLECTIONS_DIR", &c.CollectionsDir)
 	str("VCRX_TMDB_LANGUAGE", &c.TMDbLanguage)

@@ -5,13 +5,14 @@ import { librariesTab, usersTab } from "./manage.js";
 import { newsletterTab } from "./newsletter.js";
 import { householdPanel } from "./household.js";
 import { devicesTab } from "./devices.js";
+import { friendsTab } from "./servers.js";
 
 export async function settingsView({ match }) {
   const tab = (match && match[1]) || "account";
   const admin = !!(state.me && state.me.is_admin);
   if (admin && tab !== "account") {
     const body = h("div", {});
-    const cleanup = await ({ libraries: librariesTab, devices: devicesTab, newsletter: newsletterTab }[tab] || usersTab)(body);
+    const cleanup = await ({ libraries: librariesTab, devices: devicesTab, friends: friendsTab, newsletter: newsletterTab }[tab] || usersTab)(body);
     const household = tab === "users" ? householdPanel(() => usersTab(body)) : null;
     return { el: h("div", { class: "settings wide-settings" }, h("h1", {}, "Settings"), tabs(tab, admin), body, household), title: "Settings", cleanup };
   }
@@ -54,6 +55,6 @@ export async function settingsView({ match }) {
 function tabs(active, admin) {
   if (!admin) return null;
   return h("nav", { class: "tabs", "aria-label": "Settings" },
-    [["account", "Account"], ["libraries", "Libraries"], ["users", "Users"], ["devices", "Devices"], ["newsletter", "Newsletter"]]
+    [["account", "Account"], ["libraries", "Libraries"], ["users", "Users"], ["devices", "Devices"], ["friends", "Friends"], ["newsletter", "Newsletter"]]
       .map(([k, label]) => h("a", { href: `#/settings/${k}`, class: k === active ? "active" : "" }, label)));
 }

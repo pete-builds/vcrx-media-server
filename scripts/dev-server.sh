@@ -6,7 +6,9 @@
 # system temp dir). The first run builds a few test clips with ffmpeg (invented
 # titles, test patterns and tones) and creates the admin "dev" with the password
 # "devpassword". The server listens on 127.0.0.1 only, port $VCRX_PORT (3751),
-# and signs this machine in without a password.
+# and signs this machine in without a password. A second one (its own
+# VCRX_DEV_DIR and VCRX_PORT, and VCRX_DEV_NAME to tell them apart) can be
+# linked to the first as a friend's server: both allow peers on loopback.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -101,7 +103,10 @@ nfo "$media/Movies/Paper Trail (1998)" movie.nfo 7.7 88000
 nfo "$media/TV/Quiet Street" tvshow.nfo 8.8 120000
 
 cat > "$dir/config/vcrx.yaml" << YAML
-server_name: VCRX Dev
+server_name: ${VCRX_DEV_NAME:-VCRX Dev}
+# Two dev servers on this machine may link as friends' servers. Never in
+# production: there a peer on loopback is the server itself.
+peer_allow_loopback: true
 auto_sign_in_user: dev
 trusted_networks: [127.0.0.0/8, "::1/128"]
 libraries:

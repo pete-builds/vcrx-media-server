@@ -91,16 +91,20 @@ jobs:
           cache-dependency-path: server/go.sum
       - name: Install ffmpeg for the sample clips
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
-      - name: Start the dev server and wait for its first scans
+      - name: Start the dev servers and wait for their first scans
         run: |
           VCRX_DEV_DIR="$RUNNER_TEMP/vcrx-dev" ./scripts/dev-server.sh > "$RUNNER_TEMP/dev.log" 2>&1 &
-          for _ in $(seq 1 180); do
-            [ "$(grep -c '^scan ' "$RUNNER_TEMP/dev.log" || true)" -ge 2 ] && exit 0
+          # A second server, linked to the first as a friend's server.
+          VCRX_DEV_DIR="$RUNNER_TEMP/vcrx-peer" VCRX_PORT=3752 VCRX_DEV_NAME="VCRX Peer" ./scripts/dev-server.sh > "$RUNNER_TEMP/peer.log" 2>&1 &
+          for _ in $(seq 1 240); do
+            [ "$(grep -c '^scan ' "$RUNNER_TEMP/dev.log" || true)" -ge 2 ] && [ "$(grep -c '^scan ' "$RUNNER_TEMP/peer.log" || true)" -ge 2 ] && exit 0
             sleep 1
           done
-          echo "dev server did not finish its scans"; tail -50 "$RUNNER_TEMP/dev.log"; exit 1
+          echo "dev servers did not finish their scans"; tail -50 "$RUNNER_TEMP/dev.log" "$RUNNER_TEMP/peer.log"; exit 1
       - name: Web smoke test in headless Chrome
         run: node scripts/web-smoke.mjs http://127.0.0.1:3751
+        env:
+          VCRX_SMOKE_PEER: http://127.0.0.1:3752
       - name: Server log
         if: failure()
-        run: tail -100 "$RUNNER_TEMP/dev.log"
+        run: tail -100 "$RUNNER_TEMP/dev.log" "$RUNNER_TEMP/peer.log"

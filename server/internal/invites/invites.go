@@ -87,14 +87,26 @@ type Scope struct {
 	AllowTranscode bool `json:"allow_transcode"`
 	// ExpiresAt is when the token stops working, in Unix milliseconds.
 	ExpiresAt int64 `json:"expires_at"`
+	// BandwidthKbps caps everything a linked server streams at once, in
+	// kilobits per second; 0 is no cap. Only server invites carry one.
+	BandwidthKbps int64 `json:"bandwidth_kbps"`
 }
+
+// Bandwidth cap limits for a linked server, in kilobits per second.
+const (
+	MinBandwidthKbps = 64
+	MaxBandwidthKbps = 10_000_000
+)
 
 // Device is one invited device, as the admin's list shows it.
 type Device struct {
-	ID          int64   `json:"id"`
-	UserID      int64   `json:"user_id"`
-	Name        string  `json:"name"`
-	Source      string  `json:"source"`
+	ID     int64  `json:"id"`
+	UserID int64  `json:"user_id"`
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	// Peer marks a linked friend's server (milestone 9, item 3) rather than
+	// a device: it redeemed a server invite, and streams for its household.
+	Peer        bool    `json:"peer"`
 	State       string  `json:"state"` // pending (not redeemed yet), active, revoked or expired
 	Scope       Scope   `json:"scope"`
 	Summary     string  `json:"summary"`
@@ -162,6 +174,9 @@ func (s *Store) Validate(ctx context.Context, sc *Scope) error {
 	if sc.MaxResolution != "" {
 		sc.MaxResolution = policy.Resolutions[policy.ResolutionRank(sc.MaxResolution)]
 	}
+	if sc.BandwidthKbps != 0 && (sc.BandwidthKbps < MinBandwidthKbps || sc.BandwidthKbps > MaxBandwidthKbps) {
+		return fmt.Errorf("a bandwidth cap is between %d kbit/s and %d Gbit/s, or none", MinBandwidthKbps, MaxBandwidthKbps/1_000_000)
+	}
 	now := s.now()
 	if sc.ExpiresAt < now.Add(MinLifetime).UnixMilli()-1000 || sc.ExpiresAt > now.Add(MaxLifetime).UnixMilli() {
 		return errors.New("an invite expires between an hour and a year from now")
@@ -170,7 +185,7 @@ func (s *Store) Validate(ctx context.Context, sc *Scope) error {
 }
 
 // create writes the principal, its scope and its token row in one transaction.
-func (s *Store) create(ctx context.Context, createdBy, name, source string, sc Scope, inviteHash []byte, dev auth.Device) (int64, int64, error) {
+func (s *Store) create(ctx context.Context, createdBy, name, source string, sc Scope, inviteHash []byte, dev auth.Device, peer bool) (int64, int64, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, err
@@ -212,10 +227,14 @@ func (s *Store) create(ctx context.Context, createdBy, name, source string, sc S
 	if inviteHash != nil {
 		hash = inviteHash
 	}
+	var kbps any
+	if peer && sc.BandwidthKbps > 0 {
+		kbps = sc.BandwidthKbps
+	}
 	res, err = tx.ExecContext(ctx, `INSERT INTO device_tokens (user_id, name, created_by, source, invite_hash, expires_at, redeemed_at,
-			device_name, device_model, platform, client, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, userID, name, nullStr(createdBy), source, hash, sc.ExpiresAt, redeemed,
-		nullStr(dev.Name), nullStr(dev.Model), nullStr(dev.Platform), nullStr(dev.Client), now)
+			device_name, device_model, platform, client, created_at, peer, bandwidth_kbps)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, userID, name, nullStr(createdBy), source, hash, sc.ExpiresAt, redeemed,
+		nullStr(dev.Name), nullStr(dev.Model), nullStr(dev.Platform), nullStr(dev.Client), now, peer, kbps)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -226,6 +245,18 @@ func (s *Store) create(ctx context.Context, createdBy, name, source string, sc S
 // Mint makes an invite and returns its device row and the secret. The secret
 // is not kept: this is the only time anyone sees it.
 func (s *Store) Mint(ctx context.Context, createdBy, name string, sc Scope) (Device, string, error) {
+	sc.BandwidthKbps = 0
+	return s.mint(ctx, createdBy, name, sc, false)
+}
+
+// MintPeer makes a server invite: the same single-use, hashed invite, whose
+// principal is a friend's whole server rather than one device. It may carry a
+// bandwidth cap.
+func (s *Store) MintPeer(ctx context.Context, createdBy, name string, sc Scope) (Device, string, error) {
+	return s.mint(ctx, createdBy, name, sc, true)
+}
+
+func (s *Store) mint(ctx context.Context, createdBy, name string, sc Scope, peer bool) (Device, string, error) {
 	name, err := CleanName(name)
 	if err != nil {
 		return Device{}, "", err
@@ -238,7 +269,7 @@ func (s *Store) Mint(ctx context.Context, createdBy, name string, sc Scope) (Dev
 		return Device{}, "", err
 	}
 	hash, _ := HashSecret(secret)
-	id, _, err := s.create(ctx, createdBy, name, "invite", sc, hash, auth.Device{})
+	id, _, err := s.create(ctx, createdBy, name, "invite", sc, hash, auth.Device{}, peer)
 	if err != nil {
 		return Device{}, "", err
 	}
@@ -256,7 +287,8 @@ func (s *Store) Approve(ctx context.Context, createdBy, name string, sc Scope, d
 	if err := s.Validate(ctx, &sc); err != nil {
 		return Device{}, err
 	}
-	id, _, err := s.create(ctx, createdBy, name, "pairing", sc, nil, dev)
+	sc.BandwidthKbps = 0
+	id, _, err := s.create(ctx, createdBy, name, "pairing", sc, nil, dev, false)
 	if err != nil {
 		return Device{}, err
 	}
@@ -265,8 +297,18 @@ func (s *Store) Approve(ctx context.Context, createdBy, name string, sc Scope, d
 
 // Redeem spends an invite: one UPDATE that only an unused, unrevoked,
 // unexpired invite passes, so two devices racing with the same link cannot
-// both get in, and a replayed link fails.
+// both get in, and a replayed link fails. A server invite is not a device's:
+// it redeems only through RedeemPeer, and a device invite never through that.
 func (s *Store) Redeem(ctx context.Context, secret string, dev auth.Device, ip string) (Device, error) {
+	return s.redeem(ctx, secret, dev, ip, false)
+}
+
+// RedeemPeer spends a server invite for the friend's server that presents it.
+func (s *Store) RedeemPeer(ctx context.Context, secret string, dev auth.Device, ip string) (Device, error) {
+	return s.redeem(ctx, secret, dev, ip, true)
+}
+
+func (s *Store) redeem(ctx context.Context, secret string, dev auth.Device, ip string, peer bool) (Device, error) {
 	hash, ok := HashSecret(secret)
 	if !ok {
 		return Device{}, ErrInvalid
@@ -275,9 +317,9 @@ func (s *Store) Redeem(ctx context.Context, secret string, dev auth.Device, ip s
 	var id int64
 	err := s.DB.QueryRowContext(ctx, `UPDATE device_tokens SET redeemed_at = ?, last_seen_at = ?, last_ip = ?,
 			device_name = ?, device_model = ?, platform = ?, client = ?
-		WHERE invite_hash = ? AND redeemed_at IS NULL AND revoked_at IS NULL AND expires_at > ?
+		WHERE invite_hash = ? AND redeemed_at IS NULL AND revoked_at IS NULL AND expires_at > ? AND peer = ?
 		RETURNING id`, now, now, nullStr(ip), nullStr(dev.Name), nullStr(dev.Model), nullStr(dev.Platform), nullStr(dev.Client),
-		hash, now).Scan(&id)
+		hash, now, peer).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Device{}, ErrInvalid
 	}
@@ -289,7 +331,7 @@ func (s *Store) Redeem(ctx context.Context, secret string, dev auth.Device, ip s
 
 const deviceCols = `dt.id, dt.user_id, dt.name, dt.source, dt.created_by, dt.created_at, dt.expires_at, dt.redeemed_at, dt.revoked_at,
 	dt.revoked_by, dt.last_seen_at, dt.last_ip, dt.device_name, dt.device_model, dt.platform, dt.client,
-	p.max_resolution, COALESCE(p.allow_transcode, 0)`
+	p.max_resolution, COALESCE(p.allow_transcode, 0), dt.peer, COALESCE(dt.bandwidth_kbps, 0)`
 
 const deviceFrom = ` FROM device_tokens dt LEFT JOIN user_policies p ON p.user_id = dt.user_id`
 
@@ -302,7 +344,8 @@ func (s *Store) scan(ctx context.Context, rows *sql.Rows) ([]Device, error) {
 		var createdBy, revokedBy, lastIP, dname, dmodel, platform, client, maxRes sql.NullString
 		var redeemed, revoked, seen sql.NullInt64
 		if err := rows.Scan(&d.ID, &d.UserID, &d.Name, &d.Source, &createdBy, &d.CreatedAt, &d.Scope.ExpiresAt, &redeemed, &revoked,
-			&revokedBy, &seen, &lastIP, &dname, &dmodel, &platform, &client, &maxRes, &d.Scope.AllowTranscode); err != nil {
+			&revokedBy, &seen, &lastIP, &dname, &dmodel, &platform, &client, &maxRes, &d.Scope.AllowTranscode, &d.Peer,
+			&d.Scope.BandwidthKbps); err != nil {
 			return nil, err
 		}
 		d.CreatedBy, d.RevokedBy, d.LastIP = str(createdBy), str(revokedBy), str(lastIP)
@@ -363,7 +406,21 @@ func (s *Store) summary(ctx context.Context, sc Scope) (string, error) {
 	} else {
 		out += ", direct play only"
 	}
+	if sc.BandwidthKbps > 0 {
+		out += ", at most " + FormatKbps(sc.BandwidthKbps)
+	}
 	return out + ".", nil
+}
+
+// FormatKbps writes a bandwidth cap for people: "8 Mbit/s", "512 kbit/s".
+func FormatKbps(k int64) string {
+	if k >= 1000 && k%100 == 0 {
+		if k%1000 == 0 {
+			return fmt.Sprintf("%d Mbit/s", k/1000)
+		}
+		return fmt.Sprintf("%.1f Mbit/s", float64(k)/1000)
+	}
+	return fmt.Sprintf("%d kbit/s", k)
 }
 
 func joinAnd(xs []string) string {

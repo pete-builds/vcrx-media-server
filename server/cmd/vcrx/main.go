@@ -38,6 +38,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/config"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
+	"github.com/pete-builds/vcrx-media-server/server/internal/federation"
 	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
@@ -344,6 +345,12 @@ func serve() error {
 	// polls with an unknown code, and ten wrong codes typed by an admin, per
 	// address per window.
 	srv.Invites, srv.Pairings, srv.PairLimiter = &invites.Store{DB: a.db}, &invites.Pairings{}, auth.NewLimiter(10, 15*time.Minute)
+	// Friends' servers: link with a server invite, stream from each other,
+	// never copy (milestone 9, item 3).
+	srv.SetUpFederation(federation.Guard{AllowLoopback: cfg.PeerAllowLoopback})
+	if cfg.PeerAllowLoopback {
+		log.Warn("peer_allow_loopback is on: friends' servers may be linked on this machine's loopback address; for development only")
+	}
 	go func() {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()

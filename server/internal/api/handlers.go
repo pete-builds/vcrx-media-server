@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/netip"
 	"path/filepath"
@@ -564,15 +563,21 @@ func (s *Server) streamVersion(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", m)
 	}
 	w.Header().Set("Cache-Control", "private, no-transform")
-	var body io.ReadSeeker = f
-	if session != "" {
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		s.streams.add(session, &cancel)
-		defer s.streams.remove(session, &cancel)
-		body = ctxReader{ctx: ctx, rs: f}
+	if session == "" {
+		http.ServeContent(w, r, filepath.Base(v.Path), fi.ModTime(), f)
+		return
 	}
-	http.ServeContent(w, r, filepath.Base(v.Path), fi.ModTime(), body)
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	s.streams.add(session, &cancel)
+	defer s.streams.remove(session, &cancel)
+	// A cut (a stop, a terminate, a revoked invite or link) also fails the
+	// write in progress, which on a slow or capped connection may hold a
+	// whole read buffer of the file.
+	_ = streamUntilCancelled(ctx, w, func() error {
+		http.ServeContent(w, r, filepath.Base(v.Path), fi.ModTime(), ctxReader{ctx: ctx, rs: f})
+		return nil
+	})
 }
 
 func playbackMime(c *string) string {

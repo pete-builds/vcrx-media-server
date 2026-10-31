@@ -106,6 +106,11 @@ type Session struct {
 	// TokenID is the invited device this session belongs to, or 0 for an
 	// account or a household profile. Such a session is its own principal.
 	TokenID int64
+	// Peer marks a token that is a linked friend's server, not a device;
+	// BandwidthKbps is that server's cap on everything it streams at once,
+	// 0 for none (milestone 9, item 3).
+	Peer          bool
+	BandwidthKbps int64
 }
 
 // Principal kinds, as Activity records them.
@@ -296,6 +301,10 @@ func (s *Store) SignInDevice(ctx context.Context, userID, tokenID, expiresAt int
 		sess.ExpiresAt = expiresAt
 	}
 	sess.TokenID = tokenID
+	if err := s.DB.QueryRowContext(ctx, `SELECT peer, COALESCE(bandwidth_kbps, 0) FROM device_tokens WHERE id = ?`, tokenID).Scan(
+		&sess.Peer, &sess.BandwidthKbps); err != nil {
+		return "", Session{}, err
+	}
 	// Devices lists it as seen from the moment it signs in.
 	_, _ = s.DB.ExecContext(ctx, `UPDATE device_tokens SET last_seen_at = ?, last_ip = ? WHERE id = ?`, time.Now().UnixMilli(), ip, tokenID)
 	return tok, sess, nil
@@ -332,17 +341,18 @@ func (s *Store) Authenticate(ctx context.Context, token, ip string) (Session, er
 	var dn, devID, devName, devModel, platform, client, clientVer sql.NullString
 	var lastSeen int64
 	var isToken bool
-	var tokenID, tokenExpires, tokenRevoked sql.NullInt64
+	var tokenID, tokenExpires, tokenRevoked, tokenKbps sql.NullInt64
+	var tokenPeer sql.NullBool
 	// An invited device's session is checked against its token on every
 	// request: revoked or expired, it stops here, whatever the session says.
 	err := s.DB.QueryRowContext(ctx, `SELECT s.id, s.expires_at, s.last_seen_at, s.device_id, s.device_name, s.device_model, s.platform,
 			s.client, s.client_version, u.id, u.username, u.display_name, u.is_admin, u.disabled, u.created_at, u.managed,
-			u.device_token, dt.id, dt.expires_at, dt.revoked_at
+			u.device_token, dt.id, dt.expires_at, dt.revoked_at, dt.peer, dt.bandwidth_kbps
 		FROM auth_sessions s JOIN users u ON u.id = s.user_id LEFT JOIN device_tokens dt ON dt.user_id = u.id
 		WHERE s.token_hash = ?`, sum[:]).Scan(
 		&sess.ID, &sess.ExpiresAt, &lastSeen, &devID, &devName, &devModel, &platform, &client, &clientVer,
 		&sess.User.ID, &sess.User.Username, &dn, &sess.User.IsAdmin, &sess.User.Disabled, &sess.User.CreatedAt, &sess.User.Managed,
-		&isToken, &tokenID, &tokenExpires, &tokenRevoked)
+		&isToken, &tokenID, &tokenExpires, &tokenRevoked, &tokenPeer, &tokenKbps)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrInvalidToken
 	}
@@ -360,6 +370,7 @@ func (s *Store) Authenticate(ctx context.Context, token, ip string) (Session, er
 			return Session{}, ErrInvalidToken
 		}
 		sess.TokenID = tokenID.Int64
+		sess.Peer, sess.BandwidthKbps = tokenPeer.Bool, tokenKbps.Int64
 	}
 	sess.User.DisplayName = dn.String
 	sess.Device = Device{ID: devID.String, Name: devName.String, Model: devModel.String, Platform: platform.String,

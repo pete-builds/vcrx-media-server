@@ -6,9 +6,15 @@
 // keyboard shortcuts list that does not open, a Home feature whose Play does
 // not play, season tabs that do not switch, a phone menu that does not open, or
 // an invited device that is not signed in by its invite, sees past its scope,
-// reaches the profile picker, or survives being revoked.
+// reaches the profile picker, or survives being revoked; and, given a second
+// dev server, a friend's server that does not link, badge its titles on Home,
+// play through this one, or leave Home when unlinked.
 //
 //   node scripts/web-smoke.mjs [base-url]      (default http://127.0.0.1:3751)
+//   VCRX_SMOKE_PEER=http://127.0.0.1:3752 node scripts/web-smoke.mjs ...
+//
+// VCRX_SMOKE_PEER names a second ./scripts/dev-server.sh (its own VCRX_DEV_DIR
+// and VCRX_PORT) to link to as a friend's server.
 //
 // Run it against ./scripts/dev-server.sh, which signs the local browser in and
 // has the sample clips this expects (one plays directly, one has its audio
@@ -28,6 +34,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const base = (process.argv[2] || "http://127.0.0.1:3751").replace(/\/$/, "");
+const peer = (process.env.VCRX_SMOKE_PEER || "").replace(/\/$/, "");
 const chrome = process.env.CHROME || [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser",
@@ -182,6 +189,7 @@ async function main() {
     ["/settings/users", ".user-summary"],
     ["/settings/newsletter", ".newsletter-form"],
     ["/settings/devices", ".scope-form"],
+    ["/settings/friends", ".link-form"],
   ];
   for (const [path, selector] of pages) {
     console.log(`page #${path}`);
@@ -430,6 +438,8 @@ async function main() {
   else await hlsMSE(evaluate, ids);
   await profilePicker(s, evaluate, () => exceptions, (v) => { exceptions = v; });
   await inviteLoop(s, evaluate, () => exceptions, (v) => { exceptions = v; });
+  if (peer) await friendsLoop(s, evaluate, () => exceptions, (v) => { exceptions = v; });
+  else console.log("friends' servers: skipped (set VCRX_SMOKE_PEER to a second dev server)");
   await s("Page.navigate", { url: `${base}/#/` });
   await sleep(500);
 
@@ -761,6 +771,126 @@ async function inviteLoop(s, evaluate, getExceptions, setExceptions) {
   if (getExceptions().length) fail("invite", `threw: ${getExceptions()[0]}`);
 }
 
+// Friends' servers (milestone 9, item 3), against a second dev server: its
+// admin mints a server invite (over its API: that server signs this machine
+// in without a password), this server's admin pastes it into Settings >
+// Friends, Home shows the friend's titles badged with where they live, one
+// plays from the friend's server through this one, and once this side
+// unlinks, the friend's titles leave Home.
+async function friendsLoop(s, evaluate, getExceptions, setExceptions) {
+  console.log(`friends' servers: link ${peer}, badge, play, unlink`);
+  setExceptions([]);
+  const helpers = `
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const wait = async (sel, n = 40) => { for (let i = 0; i < n && !document.querySelector(sel); i++) await sleep(150); return document.querySelector(sel); };`;
+  const json = { "Content-Type": "application/json" };
+  const auto = await fetch(`${peer}/api/v1/auth/auto`, { method: "POST", headers: json,
+    body: JSON.stringify({ device: { id: "smoke-peer-admin", name: "Smoke", platform: "web", client: "web-smoke" } }) }).then((r) => r.json());
+  const auth = { ...json, Authorization: `Bearer ${auto.token}` };
+  const libs = ((await fetch(`${peer}/api/v1/libraries`, { headers: auth }).then((r) => r.json())).libraries || []).map((l) => l.id);
+  const minted = await fetch(`${peer}/api/v1/admin/peers/invites`, { method: "POST", headers: auth,
+    body: JSON.stringify({ name: "Smoke server", library_ids: libs, max_resolution: "1080p", allow_transcode: true, expires_in_days: 1 }) })
+    .then((r) => r.json());
+  if (!/#\/link\/[a-z2-7]{32}$/.test(minted.url || "")) return fail("friends", `the friend's server minted no server invite: ${JSON.stringify(minted).slice(0, 200)}`);
+
+  await s("Page.navigate", { url: `${base}/#/settings/friends` });
+  const linked = await evaluate(`${helpers}
+    const form = await wait(".link-form");
+    if (!form) return { why: "no link form under Settings > Friends" };
+    form.elements.invite.value = ${JSON.stringify(minted.url)};
+    form.elements.name.value = "Smoke Friend";
+    form.querySelector("button[type=submit]").click();
+    let row = null;
+    for (let i = 0; i < 60 && !row; i++) {
+      row = [...document.querySelectorAll(".peer-row")].find((r) => r.innerText.includes("Smoke Friend"));
+      if (!row) await sleep(150);
+    }
+    if (!row) return { why: "the friend's server is not listed after linking: " + form.querySelector(".form-error").textContent };
+    return { id: Number(row.dataset.id), state: row.dataset.state };`);
+  if (linked.why) return fail("friends", linked.why);
+  try {
+    if (linked.state !== "online") fail("friends", `the linked server shows ${linked.state}, not online`);
+    await s("Page.navigate", { url: `${base}/#/?friends=1` });
+    const home = await evaluate(`${helpers}
+      if (!(await wait(".friends-row .card", 80))) return { why: "Home has no row from friends' servers: " + document.getElementById("view").innerText.slice(0, 200) };
+      const cards = [...document.querySelectorAll(".friends-row .card")];
+      const copper = cards.find((c) => c.title === "Copper Valley");
+      return { badges: cards.map((c) => (c.querySelector(".source-badge") || {}).textContent || ""), href: copper && copper.getAttribute("href"),
+        text: document.querySelector(".friends-row").innerText };`);
+    if (home.why) return fail("friends", home.why);
+    if (!home.badges.length || home.badges.some((b) => !b.startsWith("on Smoke Friend"))) fail("friends", `cards without a source badge: ${JSON.stringify(home.badges)}`);
+    if (!home.badges.some((b) => b === "on Smoke Friend, 720p")) fail("friends", `no badge names the resolution: ${JSON.stringify(home.badges)}`);
+    const junk = home.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+    if (junk) fail("friends", `the friends row shows "${junk[0]}"`);
+    if (!home.href) return fail("friends", "Copper Valley is not in the friends row");
+    console.log(`  ${home.badges.length} titles badged "${home.badges[0]}"`);
+
+    // The phone: the friends row fits.
+    await s("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await s("Page.navigate", { url: `${base}/#/?friends=phone` });
+    const phone = await evaluate(`${helpers}
+      await wait(".friends-row .card", 80);
+      await sleep(200);
+      return { row: !!document.querySelector(".friends-row .source-badge"), scroll: document.documentElement.scrollWidth, width: screen.width };`);
+    await s("Emulation.clearDeviceMetricsOverride");
+    if (!phone.row) fail("friends on a phone", "no badged friends row");
+    if (phone.scroll > phone.width + 1) fail("friends on a phone", `Home is ${phone.scroll}px wide on a ${phone.width}px screen`);
+
+    // The title's page, then Play: it streams from the friend's server.
+    await s("Page.navigate", { url: `${base}/${home.href}` });
+    const page = await evaluate(`${helpers}
+      const btn = await wait(".hero .actions .btn-primary", 60);
+      if (!btn) return { why: "the friend's title page has no Play: " + document.getElementById("view").innerText.slice(0, 200) };
+      const text = document.getElementById("view").innerText;
+      document.querySelectorAll("video").forEach((v) => { v.dataset.stale = "1"; });
+      btn.click();
+      const fresh = () => document.querySelector("video:not([data-stale])");
+      for (let i = 0; i < 60 && !fresh(); i++) await sleep(150);
+      const v = fresh();
+      if (!v) return { why: "Play showed no video: " + document.getElementById("view").innerText.slice(0, 200), text };
+      v.muted = true;
+      v.play().catch(() => {});
+      for (let i = 0; i < 80 && !(v.currentTime > 1.5); i++) await sleep(150);
+      return { text, t: v.currentTime, src: v.currentSrc, hash: location.hash, err: v.error && v.error.code,
+        overlay: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
+    if (page.why) fail("friends", page.why);
+    else {
+      if (!/on Smoke Friend/i.test(page.text)) fail("friends", `the title page does not say where it lives: ${page.text.slice(0, 160)}`);
+      const junk2 = page.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+      if (junk2) fail("friends", `the title page shows "${junk2[0]}"`);
+      if (!(page.t > 1.5)) fail("friends", `the friend's title did not play (t=${page.t}, media error ${page.err}) ${page.overlay}`);
+      if (!new RegExp(`/api/v1/peers/${linked.id}/playback/sessions/[0-9a-f]{32}/`).test(page.src)) fail("friends", `the video did not stream through this server: ${page.src}`);
+      else console.log(`  played ${page.hash} through ${new URL(page.src).pathname.replace(/[0-9a-f]{32}/, "<session>")}`);
+    }
+    await s("Page.navigate", { url: `${base}/#/settings/friends?after=play` });
+    await sleep(300);
+  } finally {
+    // Unlink from Settings > Friends; the friend's titles leave Home.
+    const gone = await evaluate(`${helpers}
+      window.confirm = () => true;
+      let row = null;
+      for (let i = 0; i < 40 && !row; i++) {
+        row = document.querySelector('.peer-row[data-id="${linked.id}"]');
+        if (!row) await sleep(150);
+      }
+      if (!row) return { why: "the linked server is not listed to unlink" };
+      row.querySelector("button").click();
+      for (let i = 0; i < 40 && document.querySelector('.peer-row[data-id="${linked.id}"]'); i++) await sleep(150);
+      return { listed: !!document.querySelector('.peer-row[data-id="${linked.id}"]') };`);
+    if (gone.why || gone.listed) fail("friends", gone.why || "Unlink left the server listed");
+  }
+  await s("Page.navigate", { url: `${base}/#/?friends=gone` });
+  const after = await evaluate(`${helpers}
+    await wait("#view .row", 40);
+    await sleep(1500);
+    return { row: !!document.querySelector(".friends-row .card") };`);
+  if (after.row) fail("friends", "the friend's titles are still on Home after unlinking");
+  const told = await fetch(`${peer}/api/v1/admin/peers`, { headers: auth }).then((r) => r.json());
+  const mine = (told.linked_servers || []).find((d) => d.name === "Smoke server" && d.state === "active");
+  if (mine) fail("friends", "the friend's server still lists the link as active after unlinking");
+  if (getExceptions().length) fail("friends", `threw: ${getExceptions()[0]}`);
+}
+
 try {
   await main();
 } catch (e) {
@@ -775,4 +905,5 @@ if (failures.length) {
   process.exit(1);
 }
 console.log("\nweb-smoke: every page, every playback path (HLS included), Continue Watching removal, search as you type, the shortcuts list, " +
-  "the Home feature, season tabs and the phone menu, the History section, and the invite and pairing loop passed");
+  "the Home feature, season tabs and the phone menu, the History section, the invite and pairing loop" +
+  (peer ? ", and linking, badging, playing and unlinking a friend's server" : "") + " passed");
