@@ -20,6 +20,10 @@ data class ServerInfo(
     @SerialName("api_version") val apiVersion: Int = 0,
     /** True when this device's network may sign in without a password (POST /api/v1/auth/auto). */
     @SerialName("auto_sign_in") val autoSignIn: Boolean = false,
+    /** True when this network gets "Who's watching?" (GET /api/v1/profiles) instead of auto sign-in. */
+    @SerialName("profile_picker") val profilePicker: Boolean = false,
+    /** True when the admin turned on YouTube trailers, so details may carry one with source "youtube". */
+    @SerialName("trailers_youtube") val trailersYoutube: Boolean = false,
 )
 
 @Serializable
@@ -149,7 +153,35 @@ data class Item(
     @SerialName("next_episode") val nextEpisode: Item? = null,
     /** Collections this item is in, such as a film series. */
     val collections: List<CollectionRef> = emptyList(),
+    /** A short line some Home rows add, such as "3 new episodes"; null elsewhere. */
+    val note: String? = null,
+    /** A movie's or show's local trailers, featurettes and the like, trailers first. */
+    val extras: List<Extra> = emptyList(),
+    /** What the Trailer button plays: a local extra first, else YouTube when the server offers it. */
+    val trailer: Trailer? = null,
+    /** A show's theme.mp3. */
+    @SerialName("theme_music") val themeMusic: ThemeMusic? = null,
 )
+
+@Serializable
+data class Extra(
+    val id: Long,
+    val kind: String = "other",
+    val title: String = "",
+    @SerialName("duration_ms") val durationMs: Long? = null,
+)
+
+@Serializable
+data class Trailer(
+    /** "local" or "youtube". */
+    val source: String,
+    val title: String = "Trailer",
+    @SerialName("extra_id") val extraId: Long? = null,
+    @SerialName("youtube_key") val youtubeKey: String? = null,
+)
+
+@Serializable
+data class ThemeMusic(val id: Long, val url: String)
 
 @Serializable
 data class CollectionRef(val id: Long, val name: String)
@@ -174,16 +206,45 @@ data class ItemPage(
 @Serializable
 data class ItemsResponse(val items: List<Item> = emptyList())
 
+/**
+ * One Home row. The server decides which rows exist and their order (the
+ * user's Home layout); the app draws whatever comes. [id] is stable and is the
+ * key for GET /api/v1/rows/{id} when [seeAll] is true.
+ */
 @Serializable
 data class HomeRow(
     val id: String,
     val title: String,
+    val kind: String = "",
     @SerialName("library_id") val libraryId: Long? = null,
+    @SerialName("see_all") val seeAll: Boolean = false,
     val items: List<Item> = emptyList(),
 )
 
 @Serializable
 data class HomeResponse(val rows: List<HomeRow> = emptyList())
+
+/** One slot of the Home layout: a kind of row, whether it shows, and its place. */
+@Serializable
+data class HomeLayoutRow(
+    val key: String,
+    val title: String = "",
+    val description: String = "",
+    val enabled: Boolean = true,
+)
+
+/** The caller's Home layout; [source] is "user", "server" or "default". */
+@Serializable
+data class HomeLayout(
+    val rows: List<HomeLayoutRow> = emptyList(),
+    val source: String = "default",
+)
+
+@Serializable
+data class HomeLayoutEntry(val key: String, val enabled: Boolean)
+
+@Serializable
+data class HomeLayoutInput(val rows: List<HomeLayoutEntry>)
 
 @Serializable
 data class SetWatchedRequest(val played: Boolean)
@@ -225,6 +286,8 @@ data class PlaybackRequest(
     @SerialName("version_id") val versionId: Long? = null,
     @SerialName("start_position_ms") val startPositionMs: Long? = null,
     val capabilities: Capabilities,
+    /** Plays one of the item's extras (a trailer) instead of a version. */
+    @SerialName("extra_id") val extraId: Long? = null,
 )
 
 @Serializable
@@ -272,6 +335,10 @@ data class PlaybackSession(
     @SerialName("webvtt_subtitles") val webVttSubtitles: List<SubtitleSource> = emptyList(),
     @SerialName("resume_position_ms") val resumePositionMs: Long = 0,
     @SerialName("heartbeat_interval_ms") val heartbeatIntervalMs: Long = 10_000,
+    /** Intro and credits, for Skip Intro and Skip Credits (player/SkipMarkers.kt). */
+    val markers: List<Marker> = emptyList(),
+    /** This user's choice: button, auto or off. Set with [ServerApi.setPlaybackSettings]. */
+    @SerialName("skip_markers") val skipMarkers: String = PlaybackSettings.BUTTON,
 )
 
 @Serializable
@@ -306,3 +373,32 @@ data class NowPlaying(
 
 @Serializable
 data class TerminateRequest(val message: String)
+
+/** A stretch of an episode a player may offer to skip. */
+@Serializable
+data class Marker(
+    /** intro or credits */
+    val kind: String,
+    @SerialName("start_ms") val startMs: Long,
+    @SerialName("end_ms") val endMs: Long,
+    val confidence: Double = 1.0,
+    val source: String = "",
+    /** The server says to skip this one without asking (a confident intro, with skip_markers auto). */
+    @SerialName("auto_skip") val autoSkip: Boolean = false,
+)
+
+/**
+ * The signed-in user's own playback choices, stored on the server and shared with
+ * the web app: GET and PUT /api/v1/me/playback-settings.
+ */
+@Serializable
+data class PlaybackSettings(
+    /** Intros: [BUTTON] (the default), [AUTO] (confident intros only) or [OFF]. */
+    @SerialName("skip_markers") val skipMarkers: String = BUTTON,
+) {
+    companion object {
+        const val BUTTON = "button"
+        const val AUTO = "auto"
+        const val OFF = "off"
+    }
+}

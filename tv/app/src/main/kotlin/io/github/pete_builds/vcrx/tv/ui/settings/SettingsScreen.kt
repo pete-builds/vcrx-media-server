@@ -45,6 +45,7 @@ import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.HomeRow
 import io.github.pete_builds.vcrx.tv.player.CaptionStyles
+import io.github.pete_builds.vcrx.tv.player.rememberServerSkipIntro
 import io.github.pete_builds.vcrx.tv.settings.Choices
 import io.github.pete_builds.vcrx.tv.settings.Describe
 import io.github.pete_builds.vcrx.tv.settings.FeatureHooks
@@ -337,12 +338,30 @@ private fun PlaybackSettings() {
         }
         if (FeatureHooks.SKIP_INTRO) {
             item(key = "intro") {
-                ChoiceRow("Skip intro", prefs.skipIntro, SkipIntroMode.entries, Describe::skipIntro, "What happens when an intro starts.", { v -> update { it.copy(skipIntro = v) } })
+                val pickSkipIntro = rememberServerSkipIntro(prefs.skipIntro) { v -> update { it.copy(skipIntro = v) } }
+                ChoiceRow(
+                    "Skip intro",
+                    prefs.skipIntro,
+                    SkipIntroMode.entries,
+                    Describe::skipIntro,
+                    "What happens when an intro starts. Skipping automatically acts only when the server is sure; credits always wait for you. Shared with the web app.",
+                    pickSkipIntro,
+                )
             }
         }
         if (FeatureHooks.TRAILERS) {
             item(key = "trailers") {
-                ChoiceRow("Trailers", prefs.trailers, TrailerMode.entries, Describe::trailers, "Where trailers come from.", { v -> update { it.copy(trailers = v) } })
+                ChoiceRow(
+                    "Trailers",
+                    prefs.trailers,
+                    TrailerMode.entries,
+                    Describe::trailers,
+                    "Where the Trailer button plays from. YouTube trailers appear only when the server offers them, and open in the YouTube app.",
+                    { v -> update { it.copy(trailers = v) } },
+                )
+            }
+            item(key = "theme") {
+                ToggleRow("Theme music", prefs.themeMusic, "Play a show's theme quietly on its page.", { v -> update { it.copy(themeMusic = v) } })
             }
         }
     }
@@ -470,26 +489,61 @@ private fun AccountSettings() {
     val actions = LocalAppActions.current
     val scope = rememberCoroutineScope()
     var signingOut by remember { mutableStateOf(false) }
+    // An invited device (an invite, or a TV a phone approved) is its own
+    // principal: no profiles to switch to, and no password to come back with.
+    val invited = graph.tokens.isInvitedDevice
+    // Signs out here; [then] decides where the TV goes next.
+    val signOut = { then: () -> Unit ->
+        if (!signingOut) {
+            signingOut = true
+            scope.launch {
+                // Revoke the token on the server if it answers quickly; sign out locally regardless.
+                withTimeoutOrNull(3_000) { runCatching { graph.api.logout() } }
+                graph.tokens.clear()
+                graph.settings.skipAutoSignIn = true
+                then()
+            }
+        }
+    }
     SettingsPageFrame("Account and server") { first ->
-        item(key = "user") { FactRow("Signed in as", graph.settings.username ?: "Unknown user", first) }
+        item(key = "user") {
+            FactRow("Signed in as", (graph.settings.username ?: "Unknown user") + if (invited) " (invited device)" else "", first)
+        }
         item(key = "server") {
             FactRow("Server", listOfNotNull(graph.settings.serverName, graph.settings.serverUrl).joinToString("  ").ifEmpty { "None" })
         }
+        // An invited device is its own principal: no profiles to switch to.
+        if (!invited) {
+            item(key = "profile") {
+                SettingRow(
+                    "Switch profile",
+                    null,
+                    "Who's watching? Pick another household profile, with its PIN if it has one.",
+                    onClick = { actions.openProfiles() },
+                )
+            }
+        }
         item(key = "switch") {
             SettingRow(
-                if (signingOut) "Signing out" else "Switch user or sign out",
+                if (signingOut) "Signing out" else if (invited) "Sign out (needs a new invite)" else "Switch user or sign out",
                 null,
-                "Signs out of this TV and shows the sign-in form. Settings stay with each user.",
+                if (invited) {
+                    "This TV was invited, so signing out gives the invite up. Coming back needs a new invite or pairing."
+                } else {
+                    "Signs out of this TV and shows the sign-in form. Settings stay with each user."
+                },
+                onClick = { signOut { actions.toLogin() } },
+            )
+        }
+        item(key = "pair") {
+            SettingRow(
+                "Pair with a phone",
+                null,
+                "Signs out here, then shows a code an admin's phone approves: this TV becomes an invited device with the scope the phone chooses.",
                 onClick = {
-                    if (!signingOut) {
-                        signingOut = true
-                        scope.launch {
-                            // Revoke the token on the server if it answers quickly; sign out locally regardless.
-                            withTimeoutOrNull(3_000) { runCatching { graph.api.logout() } }
-                            graph.tokens.clear()
-                            graph.settings.skipAutoSignIn = true
-                            actions.toLogin()
-                        }
+                    signOut {
+                        actions.toLogin()
+                        actions.openPair()
                     }
                 },
             )
@@ -526,7 +580,7 @@ fun summary(page: SettingsPage, prefs: Preferences): String = when (page) {
 /** The description each category shows when focused. */
 fun pageHelp(page: SettingsPage): String = when (page) {
     SettingsPage.Subtitles -> "On or off for every video, languages, and how they look."
-    SettingsPage.Playback -> "Next episode, resume, skip steps and streaming quality."
+    SettingsPage.Playback -> "Next episode, resume, skip steps, streaming quality, trailers and theme music."
     SettingsPage.Audio -> "Audio language and passthrough to a receiver."
     SettingsPage.Video -> "HDR and Dolby Vision, for a TV that shows them badly."
     SettingsPage.Home -> "Which rows Home shows, and in what order."

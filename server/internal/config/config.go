@@ -17,6 +17,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/arr"
+	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 )
 
@@ -65,6 +66,10 @@ type Config struct {
 	// "every private range" also covers the Docker and Incus bridges on a server
 	// host, so a compromised container could sign in. List your own networks.
 	TrustedNetworks []string `yaml:"trusted_networks"`
+	// AutoSignInPicker shows trusted-network clients the "Who's watching?"
+	// profile picker instead of signing them in as AutoSignInUser, who is then
+	// only the profile the picker starts on. Off (sign straight in) by default.
+	AutoSignInPicker bool `yaml:"auto_sign_in_picker"`
 	// AllowedHosts are host names the server answers to besides IP addresses
 	// and localhost (for example a Tailscale MagicDNS name). A request for any
 	// other name is refused, which stops DNS rebinding: a web page that points
@@ -97,7 +102,26 @@ type Config struct {
 	TMDbLanguage string `yaml:"tmdb_language"`
 	// TMDbCountry picks the content rating shown, e.g. US for PG-13.
 	TMDbCountry string `yaml:"tmdb_country"`
+	// TMDbHomeLists adds Home rows from TMDb's trending and popular lists,
+	// limited to titles in the library. Off by default; needs TMDbAPIKey. The
+	// lists refresh every six hours and the last good copy is kept offline.
+	TMDbHomeLists bool `yaml:"tmdb_home_lists"`
+	// TrailersYouTube looks up each title's official YouTube trailer on TMDb and
+	// offers it when there is no local trailer file. Off by default: it needs the
+	// internet to play, and VCRX works without it. Needs a TMDb key.
+	TrailersYouTube bool `yaml:"trailers_youtube"`
 
+	// DetectMarkers finds intros and end credits in TV episodes from their
+	// audio, for Skip Intro and Skip Credits. On by default. It runs at low
+	// priority, one season at a time, only during MarkerHours.
+	DetectMarkers bool `yaml:"detect_markers"`
+	// MarkerHours is when detection may run, local time (set TZ): "01:00-06:00"
+	// by default, or "always".
+	MarkerHours string `yaml:"marker_hours"`
+	// MarkerIntroMinutes and MarkerCreditsMinutes are how much of the start
+	// and of the end of each episode are compared (10 and 8).
+	MarkerIntroMinutes   int `yaml:"marker_intro_minutes"`
+	MarkerCreditsMinutes int `yaml:"marker_credits_minutes"`
 	// OpenSubtitlesAPIKey turns on subtitle search (opensubtitles.com, REST API
 	// v1). Downloads also need OpenSubtitlesUsername and OpenSubtitlesPassword,
 	// because the daily quota belongs to an account. The key and password are
@@ -142,6 +166,11 @@ func defaults() Config {
 		TMDbLanguage:      "en-US",
 		TMDbCountry:       "US",
 		SubtitleLanguages: []string{"en"},
+
+		DetectMarkers:        true,
+		MarkerHours:          "01:00-06:00",
+		MarkerIntroMinutes:   10,
+		MarkerCreditsMinutes: 8,
 	}
 }
 
@@ -210,11 +239,16 @@ func Load() (Config, error) {
 	str("VCRX_LOG_FORMAT", &c.LogFormat)
 	boolean("VCRX_ADMIN_ALLOW_REMOTE", &c.AdminAllowRemote)
 	boolean("VCRX_IMDB_RATINGS", &c.IMDbRatings)
+	boolean("VCRX_TMDB_HOME_LISTS", &c.TMDbHomeLists)
+	boolean("VCRX_TRAILERS_YOUTUBE", &c.TrailersYouTube)
 	list("VCRX_TRUSTED_PROXIES", &c.TrustedProxies)
 	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
 	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)
+	boolean("VCRX_AUTO_SIGN_IN_PICKER", &c.AutoSignInPicker)
 	list("VCRX_ALLOWED_HOSTS", &c.AllowedHosts)
 	str("VCRX_COLLECTIONS_DIR", &c.CollectionsDir)
+	boolean("VCRX_DETECT_MARKERS", &c.DetectMarkers)
+	str("VCRX_MARKER_HOURS", &c.MarkerHours)
 	str("VCRX_TMDB_LANGUAGE", &c.TMDbLanguage)
 	str("VCRX_TMDB_COUNTRY", &c.TMDbCountry)
 	str("VCRX_TMDB_API_KEY", &c.TMDbAPIKey)
@@ -302,6 +336,12 @@ func (c *Config) validate() error {
 	if c.SessionTTL < time.Hour {
 		errs = append(errs, errors.New("session TTL must be at least one day"))
 	}
+	if _, err := markers.ParseHours(c.MarkerHours); err != nil {
+		errs = append(errs, fmt.Errorf("marker_hours: %w", err))
+	}
+	if c.MarkerIntroMinutes < 1 || c.MarkerIntroMinutes > 30 || c.MarkerCreditsMinutes < 1 || c.MarkerCreditsMinutes > 30 {
+		errs = append(errs, errors.New("marker_intro_minutes and marker_credits_minutes must be 1 to 30"))
+	}
 	for i, r := range c.MediaRoots {
 		if !filepath.IsAbs(r) {
 			errs = append(errs, fmt.Errorf("media root %q must be absolute", r))
@@ -327,6 +367,10 @@ func (c *Config) validate() error {
 	return errors.Join(errs...)
 }
 
+// YouTubeTrailers reports whether YouTube trailers are on: asked for, and a
+// TMDb key to look them up with.
+func (c Config) YouTubeTrailers() bool { return c.TrailersYouTube && c.TMDbAPIKey != "" }
+
 func (c Config) Addr() string { return fmt.Sprintf("%s:%d", c.Bind, c.Port) }
 
 func (c Config) DBPath() string { return filepath.Join(c.ConfigDir, "vcrx.db") }
@@ -340,6 +384,10 @@ func (c Config) SmartCollectionsDir() string {
 }
 
 func (c Config) BackupDir() string { return filepath.Join(c.ConfigDir, "backups") }
+
+// AvatarDir holds household profile pictures. It is data, not cache: an
+// upload cannot be rebuilt.
+func (c Config) AvatarDir() string { return filepath.Join(c.ConfigDir, "avatars") }
 
 func (c Config) ArtworkCacheDir() string { return filepath.Join(c.CacheDir, "artwork") }
 

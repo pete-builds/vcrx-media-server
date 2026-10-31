@@ -41,6 +41,32 @@ class ServerApi(
     suspend fun autoLogin(request: AutoLoginRequest): LoginResponse =
         send(post("/api/v1/auth/auto", request, AutoLoginRequest.serializer()), LoginResponse.serializer(), authRoute = false)
 
+    /** The household for "Who's watching?". Needs no token from a trusted network when the server shows the picker. */
+    suspend fun profiles(): ProfilesResponse = get("/api/v1/profiles", ProfilesResponse.serializer())
+
+    /**
+     * Switches this device to a household profile and returns its new session; the
+     * server ends the current one. A 401 here is a missing or wrong PIN or password
+     * (its code says which), not a lost session. The client header is required of
+     * requests without a token, as the CSRF rule for the picker.
+     */
+    suspend fun switchProfile(request: SwitchRequest): LoginResponse {
+        val call = post("/api/v1/auth/switch", request, SwitchRequest.serializer()).newBuilder().header("X-VCRX-Client", "tv").build()
+        return send(call, LoginResponse.serializer(), authRoute = false)
+    }
+
+    /** A TV asks to pair with a phone: a code to show, and a device code to poll with. */
+    suspend fun pairStart(request: PairStartRequest): PairStartResponse =
+        send(post("/api/v1/pair", request, PairStartRequest.serializer()), PairStartResponse.serializer(), authRoute = false)
+
+    /** Whether a phone approved this TV yet; approved, the answer carries its session once. */
+    suspend fun pairPoll(request: PairPollRequest): PairPollResponse =
+        send(post("/api/v1/pair/poll", request, PairPollRequest.serializer()), PairPollResponse.serializer(), authRoute = false)
+
+    /** Spends an invite and signs in as the invited device. A 401 is an invite that is not valid, not a lost session. */
+    suspend fun redeemInvite(request: RedeemRequest): LoginResponse =
+        send(post("/api/v1/invites/redeem", request, RedeemRequest.serializer()), LoginResponse.serializer(), authRoute = false)
+
     suspend fun logout() {
         send<Unit>(Request.Builder().url(url("/api/v1/auth/logout")).post(EMPTY_BODY).build(), null, authRoute = true)
     }
@@ -48,6 +74,29 @@ class ServerApi(
     suspend fun me(): User = get("/api/v1/me", User.serializer())
 
     suspend fun home(): List<HomeRow> = get("/api/v1/home", HomeResponse.serializer()).rows
+
+    /** A Home row's See all: the same row with up to 100 titles. */
+    suspend fun homeRow(rowId: String): HomeRow {
+        val url = url("/api/v1/rows").newBuilder().addPathSegment(rowId).build()
+        return send(Request.Builder().url(url).build(), HomeRow.serializer())
+    }
+
+    /**
+     * The Home layout the web's Customize Home edits too, so a TV Settings
+     * "Home rows" screen and the browser stay in step: read it, then save the
+     * whole order with [saveHomeLayout] or go back to the default with
+     * [resetHomeLayout]. Both answer with the layout now in effect.
+     */
+    suspend fun homeLayout(): HomeLayout = get("/api/v1/layout/home", HomeLayout.serializer())
+
+    suspend fun saveHomeLayout(rows: List<HomeLayoutRow>): HomeLayout {
+        val input = HomeLayoutInput(rows.map { HomeLayoutEntry(it.key, it.enabled) })
+        val body = json.encodeToString(HomeLayoutInput.serializer(), input).toRequestBody(JSON)
+        return send(Request.Builder().url(url("/api/v1/layout/home")).put(body).build(), HomeLayout.serializer())
+    }
+
+    suspend fun resetHomeLayout(): HomeLayout =
+        send(Request.Builder().url(url("/api/v1/layout/home")).delete().build(), HomeLayout.serializer())
 
     suspend fun libraries(): List<Library> = get("/api/v1/libraries", LibrariesResponse.serializer()).libraries
 
@@ -88,6 +137,14 @@ class ServerApi(
     suspend fun setWatched(itemId: Long, played: Boolean) {
         val body = json.encodeToString(SetWatchedRequest.serializer(), SetWatchedRequest(played)).toRequestBody(JSON)
         send<Unit>(Request.Builder().url(url("/api/v1/items/$itemId/watched")).put(body).build(), null)
+    }
+
+    /** The user's Skip intro choice, for the Settings screen. */
+    suspend fun playbackSettings(): PlaybackSettings = get("/api/v1/me/playback-settings", PlaybackSettings.serializer())
+
+    suspend fun setPlaybackSettings(settings: PlaybackSettings): PlaybackSettings {
+        val body = json.encodeToString(PlaybackSettings.serializer(), settings).toRequestBody(JSON)
+        return send(Request.Builder().url(url("/api/v1/me/playback-settings")).put(body).build(), PlaybackSettings.serializer())
     }
 
     suspend fun startPlayback(request: PlaybackRequest): PlaybackSession =

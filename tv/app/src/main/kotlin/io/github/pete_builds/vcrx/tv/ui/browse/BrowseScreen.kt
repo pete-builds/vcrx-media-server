@@ -63,6 +63,9 @@ class BrowseFocus {
 
     /** The item whose card opened Details; that card takes focus again on return. */
     var restoreItemId by mutableStateOf<Long?>(null)
+
+    /** The Home row that card was in, since one title can be in several rows. */
+    var restoreRowId by mutableStateOf<String?>(null)
 }
 
 class BrowseViewModel(private val graph: AppGraph) : ViewModel() {

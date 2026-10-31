@@ -9,8 +9,11 @@ sealed class ApiException(message: String, cause: Throwable? = null) : Exception
     class Unreachable(cause: IOException) :
         ApiException("Cannot reach the server (${cause.javaClass.simpleName}: ${cause.message ?: "no detail"}).", cause)
 
-    /** 401: the token is missing, expired or revoked. */
-    class Unauthorized(message: String) : ApiException(message)
+    /**
+     * 401: the token is missing, expired or revoked, or (from a profile switch)
+     * the PIN or password was missing or wrong; [code] says which.
+     */
+    class Unauthorized(message: String, val code: String = "unauthorized") : ApiException(message)
 
     /** Any other non-success status, with the server's machine code and TV-safe text. */
     class Http(val status: Int, val code: String, message: String) : ApiException(message)
@@ -26,7 +29,7 @@ fun httpError(status: Int, body: String?, json: Json): ApiException {
         ?.let { runCatching { json.decodeFromString(ErrorBody.serializer(), it) }.getOrNull() }
     val message = parsed?.message?.takeIf { it.isNotBlank() } ?: defaultMessage(status)
     val code = parsed?.error?.takeIf { it.isNotBlank() } ?: "http_$status"
-    return if (status == 401) ApiException.Unauthorized(message) else ApiException.Http(status, code, message)
+    return if (status == 401) ApiException.Unauthorized(message, code) else ApiException.Http(status, code, message)
 }
 
 private fun defaultMessage(status: Int): String = when (status) {

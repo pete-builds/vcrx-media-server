@@ -289,15 +289,16 @@ func (s *Service) Preview(ctx context.Context) (notify.Digest, int, error) {
 // audience returns the policy condition on items alias "i" the digest is built
 // under, and a description of it. With a chosen account it is that account's
 // policy: granted libraries, label rules, resolution ceiling. Otherwise it is
-// every enabled non-admin account's policy at once, so a title appears only
-// if each of them could open it; with no such accounts nothing qualifies.
+// every enabled non-admin account's policy at once, invited devices that are
+// still active included, so a title appears only if each of them could open
+// it; with no such accounts nothing qualifies.
 func (s *Service) audience(ctx context.Context, st Settings) (string, []any, string, error) {
 	var ids []int64
 	who := "Everyone: only titles every friend account can see"
 	if st.AudienceUserID != 0 {
 		var name string
 		var isAdmin, disabled bool
-		err := s.DB.QueryRowContext(ctx, `SELECT username, is_admin, disabled FROM users WHERE id = ?`, st.AudienceUserID).
+		err := s.DB.QueryRowContext(ctx, `SELECT username, is_admin, disabled FROM users WHERE id = ? AND device_token = 0`, st.AudienceUserID).
 			Scan(&name, &isAdmin, &disabled)
 		if errors.Is(err, sql.ErrNoRows) || isAdmin || disabled {
 			return "", nil, "", ErrBadAudience
@@ -307,7 +308,8 @@ func (s *Service) audience(ctx context.Context, st Settings) (string, []any, str
 		}
 		ids, who = []int64{st.AudienceUserID}, "What "+name+" can see"
 	} else {
-		rows, err := s.DB.QueryContext(ctx, `SELECT id FROM users WHERE is_admin = 0 AND disabled = 0 ORDER BY id`)
+		rows, err := s.DB.QueryContext(ctx, `SELECT id FROM users WHERE is_admin = 0 AND disabled = 0 AND (device_token = 0
+			OR id IN (SELECT user_id FROM device_tokens WHERE revoked_at IS NULL AND expires_at > ?)) ORDER BY id`, time.Now().UnixMilli())
 		if err != nil {
 			return "", nil, "", err
 		}

@@ -82,6 +82,147 @@ paths:
         "200": { description: Logged in, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } } }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/profiles:
+    get:
+      operationId: listProfiles
+      summary: >-
+        The household's profiles for the "Who's watching?" picker. Answers a household member's session, or
+        no session at all from a trusted network when the server sets auto_sign_in_picker (GET /api/v1/server
+        says profile_picker). Anyone else gets 401, and a signed-in user outside the household 403.
+      security: [{ bearer: [] }, { cookie: [] }, {}]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [profiles, current_id, focus_id]
+                properties:
+                  profiles: { type: array, items: { $ref: "#/components/schemas/Profile" } }
+                  current_id: { type: [integer, "null"], description: The caller's own profile; null from the picker. }
+                  focus_id: { type: [integer, "null"], description: "The profile to focus first: the caller's, or auto_sign_in_user's in the picker." }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /api/v1/profiles/{user_id}/avatar:
+    get:
+      operationId: profileAvatar
+      summary: A household profile's uploaded picture, a 256 px square JPEG. 404 when it has none (draw the initials).
+      security: [{ bearer: [] }, { cookie: [] }, {}]
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: The picture, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/auth/switch:
+    post:
+      operationId: switchProfile
+      summary: >-
+        Switch this device to another household profile and get a fresh session for it. The caller's own
+        session, if any, ends. A profile with a PIN needs it (or its password); an admin profile reached from a
+        restricted profile or the picker always needs its PIN or password, on any network. Wrong PINs are
+        limited per 15 minutes, counted before the PIN is checked: 5 per address, and per profile 25 shared by
+        the LAN or 5 from away. A password counts against the sign-in limits instead, so an admin whose PIN is
+        locked can still use it. Requests
+        without a bearer token must send X-VCRX-Client.
+      security: [{ bearer: [] }, { cookie: [] }, {}]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SwitchRequest" } } }
+      responses:
+        "200": { description: Switched, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } } }
+        "401": { description: "pin_required, credential_required, wrong_pin, or no session", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /api/v1/invites/redeem:
+    post:
+      operationId: redeemInvite
+      summary: >-
+        Spend an invite (from its link or QR code) and sign this device in as its own principal: no username,
+        password or email. Each invite works once; a replay, a revoked or an expired invite is refused with
+        invalid_invite, and wrong invites are limited per address like wrong passwords. The device sees only
+        the invite's scope, never the profile picker. With cookie set, the X-VCRX-Client header is required.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invite]
+              properties:
+                invite: { type: string, description: The secret from the invite link, 32 characters; case, spaces and dashes are ignored. }
+                device: { $ref: "#/components/schemas/Device" }
+                cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers." }
+      responses:
+        "200":
+          description: Signed in as the invited device
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/LoginResponse" }
+                  - { type: object, properties: { device: { $ref: "#/components/schemas/InvitedDevice" } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /api/v1/pair:
+    post:
+      operationId: pairStart
+      summary: >-
+        A TV asks to pair. It gets a device code to keep and a user code to show, with a QR code of the
+        approval page; an admin approves it from a phone on the local network, and the TV polls
+        POST /api/v1/pair/poll. Codes last ten minutes and work once. Ten starts per address per 15 minutes.
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { device: { $ref: "#/components/schemas/Device" } } } } }
+      responses:
+        "200":
+          description: Pairing started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_code, user_code, verification_url, qr_png, expires_in, interval]
+                properties:
+                  device_code: { type: string, description: Secret; only the TV holds it. }
+                  user_code: { type: string, example: BCDF-GHJK }
+                  verification_url: { type: string, description: "The web app's approval page for this code, as the TV reached the server." }
+                  qr_png: { type: string, format: byte, description: A QR code of verification_url, as base64 PNG. }
+                  expires_in: { type: integer, description: Seconds. }
+                  interval: { type: integer, description: Seconds between polls. }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/v1/pair/poll:
+    post:
+      operationId: pairPoll
+      summary: >-
+        The TV asks whether it was approved. Pending until then; once approved, the answer carries the TV's
+        session token, once. An expired, denied, used or unknown code is pairing_not_found; ten of those per
+        address per 15 minutes lock the address out.
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [device_code], properties: { device_code: { type: string } } } } }
+      responses:
+        "200":
+          description: Pending, or approved with the session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [pending, approved] }
+                  interval: { type: integer }
+                  token: { type: string }
+                  expires_at: { type: integer }
+                  user: { $ref: "#/components/schemas/User" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /api/v1/hooks/arr:
     post:
       operationId: arrWebhook
@@ -116,15 +257,42 @@ paths:
   /api/v1/auth/logout:
     post:
       operationId: logout
-      summary: Revoke the token used for this request.
+      summary: >-
+        Revoke the token used for this request. On an invited device this gives the invite up: the device is
+        revoked and needs a new invite.
       responses:
         "204": { description: Logged out }
   /api/v1/me:
     get:
       operationId: getMe
       responses:
-        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/User" }
+                  - type: object
+                    required: [kind]
+                    properties:
+                      kind: { type: string, enum: [user, profile, token], description: "token: an invited device, which never sees the profile picker." }
+                      device_expires_at: { type: integer, description: When an invited device's access ends. }
         "401": { $ref: "#/components/responses/Error" }
+  /api/v1/me/playback-settings:
+    get:
+      operationId: getPlaybackSettings
+      summary: The signed-in user's own playback choices, kept on the server so every client (web, TV) shares them.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackSettings" } } } }
+    put:
+      operationId: setPlaybackSettings
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackSettings" } } }
+      responses:
+        "200": { description: Saved, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackSettings" } } } }
+        "400": { $ref: "#/components/responses/Error" }
 
   /api/v1/home:
     get:
@@ -140,6 +308,39 @@ paths:
                 required: [rows]
                 properties:
                   rows: { type: array, items: { $ref: "#/components/schemas/HomeRow" } }
+  /api/v1/rows/{row_id}:
+    get:
+      operationId: getHomeRow
+      summary: >-
+        A Home row's See all view: the row with up to 100 titles, under the caller's access. row_id is a HomeRow id
+        from /api/v1/home, such as top_rated_movies, genre:Comedy or seasonal:halloween. Continue Watching has none.
+      parameters:
+        - { name: row_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/HomeRow" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/layout/home:
+    get:
+      operationId: getHomeLayout
+      summary: >-
+        The caller's Home layout: every row slot in order with whether it shows. The caller's own choice, else the
+        server default, else the built-in order. The web and TV Customize Home editors both read and write this.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+    put:
+      operationId: setHomeLayout
+      summary: Save the caller's own Home layout. Slots left out keep their default and go last.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayoutInput" } } }
+      responses:
+        "200": { description: The layout as saved, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: resetHomeLayout
+      summary: Forget the caller's own layout, so the server default applies again.
+      responses:
+        "200": { description: The layout now in effect, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
 
   /api/v1/libraries:
     get:
@@ -461,10 +662,12 @@ paths:
       operationId: streamVersion
       summary: |
         The media file itself, for direct play. Supports Range, If-Range and HEAD.
-        Access is checked on every request against the caller's policy.
+        Access is checked on every request against the caller's policy. An invited device must name one
+        of its own open playback sessions for this version: it streams, and is never handed the file to
+        keep (403 stream_only).
       parameters:
         - { name: version_id, in: path, required: true, schema: { type: integer } }
-        - { name: session, in: query, schema: { type: string }, description: Playback session id, for activity accounting. }
+        - { name: session, in: query, schema: { type: string }, description: "Playback session id, for activity accounting; required for invited devices." }
       responses:
         "200": { description: Whole file }
         "206": { description: Partial content }
@@ -477,6 +680,29 @@ paths:
         - { name: version_id, in: path, required: true, schema: { type: integer } }
       responses:
         "200": { description: Headers only }
+  /api/v1/extras/{extra_id}/file:
+    get:
+      operationId: streamExtra
+      summary: |
+        An extra's file: a trailer or featurette for direct play (the stream URL of a
+        session started with extra_id), or a show's theme music (theme_music.url, no
+        session). Supports Range, If-Range and HEAD. Access is the item's: 404 for a
+        caller who cannot see the movie or show it belongs to.
+      parameters:
+        - { name: extra_id, in: path, required: true, schema: { type: integer } }
+        - { name: session, in: query, schema: { type: string }, description: Playback session id, for activity accounting. }
+      responses:
+        "200": { description: Whole file }
+        "206": { description: Partial content }
+        "404": { $ref: "#/components/responses/Error" }
+        "416": { description: Range not satisfiable }
+    head:
+      operationId: headExtra
+      parameters:
+        - { name: extra_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: Headers only }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/subtitles/{stream_id}:
     get:
       operationId: getSubtitle
@@ -601,6 +827,202 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
 
+  /api/v1/admin/profiles:
+    get:
+      operationId: adminListProfiles
+      summary: Every user with their household settings, members or not.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [profiles]
+                properties:
+                  profiles: { type: array, items: { $ref: "#/components/schemas/AdminProfile" } }
+    post:
+      operationId: adminCreateProfile
+      summary: >-
+        Add a managed household profile: no password, never an admin, reached only by switching to it. A kid's
+        profile gets a PG ceiling unless another is given. library_ids omitted grants every library.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ProfileInput" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/AdminProfile" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/profiles/{user_id}:
+    put:
+      operationId: adminUpdateProfile
+      summary: Change household membership, the kid flag or the rating ceiling. Omitted fields stay as they are.
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                household: { type: boolean }
+                kid: { type: boolean, description: Admins cannot be kids. Turning it on with no ceiling set sets PG. }
+                max_content_rating: { type: string, enum: ["", G, PG, PG-13, R, NC-17], description: '"" removes the ceiling.' }
+      responses:
+        "204": { description: Saved }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/profiles/{user_id}/pin:
+    put:
+      operationId: adminSetPIN
+      summary: Set a profile's PIN, 4 to 8 digits, stored as an argon2id hash. Clears its wrong-PIN count.
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin]
+              properties:
+                pin: { type: string, pattern: "^[0-9]{4,8}$" }
+      responses:
+        "204": { description: Saved }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: adminClearPIN
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Cleared }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/profiles/{user_id}/avatar:
+    put:
+      operationId: adminSetAvatar
+      summary: >-
+        Upload a profile picture (JPEG, PNG or GIF, up to 10 MB). The server keeps a 256 px centred square
+        re-encoded as JPEG in its config directory, which drops the photo's metadata.
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { image/*: { schema: { type: string, format: binary } } }
+      responses:
+        "204": { description: Saved }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: adminDeleteAvatar
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/devices:
+    get:
+      operationId: adminListDevices
+      summary: Every invited device, pending, active, revoked or expired, newest first. Never carries an invite secret.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [devices], properties: { devices: { type: array, items: { $ref: "#/components/schemas/InvitedDevice" } } } }
+    post:
+      operationId: adminMintInvite
+      summary: >-
+        Mint an invite: a link and a QR code that sign one device in with this scope. The secret is in this
+        answer only; the server keeps its SHA-256.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/InviteScope" } } }
+      responses:
+        "201":
+          description: Minted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device, invite, url, qr_png]
+                properties:
+                  device: { $ref: "#/components/schemas/InvitedDevice" }
+                  invite: { type: string, description: The secret, 160 random bits as 32 base32 characters. Shown once. }
+                  url: { type: string, description: "The invite link: the web app's #/invite/ page with the secret." }
+                  qr_png: { type: string, format: byte, description: A QR code of url, as base64 PNG. }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/devices/{device_id}:
+    delete:
+      operationId: adminRevokeDevice
+      summary: >-
+        Revoke one device. Its sessions end, so its next request is refused, and any stream it has open stops
+        now, with a message in history. Other devices are untouched.
+      parameters:
+        - { name: device_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device: { $ref: "#/components/schemas/InvitedDevice" }
+                  streams_stopped: { type: integer }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/pairings/{code}:
+    get:
+      operationId: adminPairing
+      summary: >-
+        The TV waiting with this code, so the phone can show which device it is approving. Wrong codes are
+        limited per address: ten per 15 minutes.
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, example: BCDF-GHJK } }
+      responses:
+        "200":
+          description: Waiting
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_code: { type: string }
+                  device_name: { type: [string, "null"] }
+                  device_model: { type: [string, "null"] }
+                  platform: { type: [string, "null"] }
+                  client: { type: [string, "null"] }
+                  ip: { type: string }
+                  location: { type: string }
+                  created_at: { type: integer }
+                  expires_at: { type: integer }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: adminDenyPairing
+      summary: Turn the TV away; its next poll learns the code is gone.
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Denied }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/pairings/{code}/approve:
+    post:
+      operationId: adminApprovePairing
+      summary: Approve the TV with a scope. Works once per code. An empty name takes the TV's own.
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/InviteScope" } } }
+      responses:
+        "201": { description: Approved, content: { application/json: { schema: { type: object, properties: { device: { $ref: "#/components/schemas/InvitedDevice" } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /api/v1/admin/libraries:
     get:
       operationId: adminListLibraries
@@ -765,6 +1187,26 @@ paths:
       responses:
         "204": { description: Saved }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/layout/home:
+    get:
+      operationId: adminGetHomeLayout
+      summary: The server default Home layout, for everyone without their own.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+    put:
+      operationId: adminSetHomeLayout
+      summary: Set the server default Home layout.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayoutInput" } } }
+      responses:
+        "200": { description: The default as saved, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: adminResetHomeLayout
+      summary: Forget the server default, so the built-in order applies.
+      responses:
+        "200": { description: The default now in effect, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
   /api/v1/admin/labels:
     get:
       operationId: adminListLabels
@@ -1010,6 +1452,119 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
 
+  /api/v1/admin/markers:
+    get:
+      operationId: adminMarkerStatus
+      summary: >-
+        Intro and credits detection over the whole TV library: whether it is on, its hours, seasons and episodes
+        done, markers found, per-show progress and the latest files that could not be read.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, hours, in_window, seasons_total, seasons_done, episodes_total, episodes_done, intros, credits, errors, shows, recent_errors]
+                properties:
+                  enabled: { type: boolean }
+                  hours: { type: string, description: "Local time window, e.g. 01:00-06:00, or always." }
+                  in_window: { type: boolean }
+                  seasons_total: { type: integer }
+                  seasons_done: { type: integer, description: Seasons whose every episode has been looked at in its current file. }
+                  episodes_total: { type: integer }
+                  episodes_done: { type: integer }
+                  intros: { type: integer }
+                  credits: { type: integer }
+                  errors: { type: integer }
+                  shows:
+                    type: array
+                    items:
+                      type: object
+                      required: [show_id, title, seasons_total, seasons_done, episodes_total, episodes_done, intros, credits, errors]
+                      properties:
+                        show_id: { type: integer }
+                        title: { type: string }
+                        seasons_total: { type: integer }
+                        seasons_done: { type: integer }
+                        episodes_total: { type: integer }
+                        episodes_done: { type: integer }
+                        intros: { type: integer }
+                        credits: { type: integer }
+                        errors: { type: integer }
+                  recent_errors:
+                    type: array
+                    items:
+                      type: object
+                      required: [item_id, show_title, season_number, episode_number, error, checked_at]
+                      properties:
+                        item_id: { type: integer }
+                        show_title: { type: string }
+                        season_number: { type: [integer, "null"] }
+                        episode_number: { type: [integer, "null"] }
+                        error: { type: string }
+                        checked_at: { type: integer }
+  /api/v1/admin/items/{item_id}/markers/detect:
+    post:
+      operationId: adminDetectMarkers
+      summary: >-
+        Detect intros and credits again for a show, a season or an episode's season, now, whatever the hour (still
+        one season at a time at low priority). Markers an admin set or cleared are kept.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+      responses:
+        "202":
+          description: Queued
+          content: { application/json: { schema: { type: object, required: [seasons], properties: { seasons: { type: integer } } } } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/items/{item_id}/markers/{kind}:
+    put:
+      operationId: adminSetMarker
+      summary: Set an episode's (or movie's) intro or credits by hand. Detection never replaces it.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [intro, credits] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [start_ms, end_ms]
+              properties:
+                start_ms: { type: integer, minimum: 0 }
+                end_ms: { type: integer, description: After start_ms and not past the end of the file. }
+      responses:
+        "200": { description: The item's markers now, content: { application/json: { schema: { $ref: "#/components/schemas/MarkerList" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: adminClearMarker
+      summary: Remove an intro or credits marker and keep it removed (detection will not add it back).
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [intro, credits] } }
+      responses:
+        "200": { description: The item's markers now, content: { application/json: { schema: { $ref: "#/components/schemas/MarkerList" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/items/{item_id}/markers/{kind}/apply-to-season:
+    post:
+      operationId: adminApplyMarkerToSeason
+      summary: >-
+        Copy this episode's marker to the rest of its season by finding the same audio in each episode. Episodes
+        where it is not found, and markers an admin set by hand, are left alone. Runs in the background now.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [intro, credits] } }
+      responses:
+        "202": { description: Queued }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
   /api/v1/admin/activity/now:
     get:
       operationId: adminActivityNow
@@ -1098,6 +1653,7 @@ paths:
                         last_device: { type: [string, "null"] }
                         last_ip: { type: [string, "null"] }
                         last_location: { $ref: "#/components/schemas/Location" }
+                        device: { type: boolean, description: "An invited device; username is then the name it was given." }
         "403": { $ref: "#/components/responses/Error" }
 
   /api/v1/admin/activity/sessions/{session_id}/terminate:
@@ -1465,6 +2021,8 @@ components:
         version: { type: string }
         api_version: { type: integer, const: 1 }
         auto_sign_in: { type: boolean, description: "True when this client may sign in without a password (POST /api/v1/auth/auto)." }
+        profile_picker: { type: boolean, description: "True when this client should show the profile picker (GET /api/v1/profiles, POST /api/v1/auth/switch) instead of signing in automatically; POST /api/v1/auth/auto then answers 409 choose_profile." }
+        trailers_youtube: { type: boolean, description: "True when the admin turned on YouTube trailers (trailers_youtube, with a TMDb key): details may carry a trailer with source youtube." }
     AutoLoginRequest:
       type: object
       required: [device]
@@ -1489,6 +2047,86 @@ components:
         password: { type: string, format: password }
         device: { $ref: "#/components/schemas/Device" }
         cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers. Cookie-authenticated requests that change something must send the X-VCRX-Client header." }
+    Profile:
+      type: object
+      required: [id, name, is_admin, kid, has_pin, color, avatar_url, needs]
+      properties:
+        id: { type: integer }
+        name: { type: string, description: Display name, or the username. }
+        is_admin: { type: boolean }
+        kid: { type: boolean }
+        has_pin: { type: boolean }
+        color: { type: string, description: Avatar background for the initials, e.g. "#1d4ed8". }
+        avatar_url: { type: [string, "null"], description: The uploaded picture; null shows the initials. }
+        needs:
+          type: string
+          enum: [none, pin, password]
+          description: What switching to this profile asks of this caller. password means an admin with no PIN, reached from a restricted profile or the picker.
+    AdminProfile:
+      allOf:
+        - $ref: "#/components/schemas/Profile"
+        - type: object
+          properties:
+            username: { type: string }
+            household: { type: boolean }
+            managed: { type: boolean, description: No password; reached only by switching. }
+            disabled: { type: boolean }
+            max_content_rating: { type: string, description: '"" for no ceiling.' }
+    ProfileInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 32 }
+        kid: { type: boolean, default: false }
+        max_content_rating: { type: string, enum: ["", G, PG, PG-13, R, NC-17] }
+        pin: { type: string, pattern: "^[0-9]{4,8}$" }
+        library_ids: { type: array, items: { type: integer }, description: Omit for every library. }
+    SwitchRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: { type: integer }
+        pin: { type: string, description: The target profile's PIN, when it has one. }
+        password: { type: string, format: password, description: The target's password instead of its PIN (not for managed profiles). }
+        device: { $ref: "#/components/schemas/Device" }
+        cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers." }
+    InviteScope:
+      type: object
+      required: [library_ids, expires_in_days]
+      properties:
+        name: { type: string, description: "What to call the device, 1 to 64 characters, e.g. Mark's TV." }
+        library_ids: { type: array, items: { type: integer }, minItems: 1 }
+        max_resolution: { type: string, enum: ["", SD, 480p, 576p, 720p, 1080p, 4K, 8K], description: '"" for no limit.' }
+        allow_transcode: { type: boolean, description: Whether the server may convert files for it, 4K included. }
+        expires_in_days: { type: integer, minimum: 1, maximum: 365 }
+    InvitedDevice:
+      type: object
+      required: [id, user_id, name, source, state, scope, summary, created_at]
+      properties:
+        id: { type: integer }
+        user_id: { type: integer, description: The device's own principal. }
+        name: { type: string }
+        source: { type: string, enum: [invite, pairing] }
+        state: { type: string, enum: [pending, active, revoked, expired] }
+        scope:
+          type: object
+          properties:
+            library_ids: { type: array, items: { type: integer } }
+            max_resolution: { type: string }
+            allow_transcode: { type: boolean }
+            expires_at: { type: integer }
+        summary: { type: string, example: "Sees Movies, up to 1080p, direct play only." }
+        created_by: { type: [string, "null"] }
+        created_at: { type: integer }
+        redeemed_at: { type: [integer, "null"] }
+        revoked_at: { type: [integer, "null"] }
+        revoked_by: { type: [string, "null"] }
+        last_seen_at: { type: [integer, "null"] }
+        last_ip: { type: [string, "null"] }
+        device_name: { type: [string, "null"] }
+        device_model: { type: [string, "null"] }
+        platform: { type: [string, "null"] }
+        client: { type: [string, "null"] }
     LoginResponse:
       type: object
       required: [token, user, expires_at]
@@ -1548,6 +2186,7 @@ components:
         has_thumb: { type: boolean }
         added_at: { type: integer }
         watch: { $ref: "#/components/schemas/WatchState" }
+        note: { type: string, description: 'A short line some Home rows add to a card, such as "3 new episodes" or "Season 2 added". Absent elsewhere.' }
     Track:
       type: object
       required: [id, kind, is_default, is_forced, is_external, is_image_based]
@@ -1614,7 +2253,49 @@ components:
                   id: { type: integer }
                   name: { type: string }
               description: Collections this item is in.
+            markers: { type: array, items: { $ref: "#/components/schemas/Marker" }, description: "Intro and credits of a movie or episode (empty for others), intro first." }
+            extras:
+              type: array
+              items: { $ref: "#/components/schemas/Extra" }
+              description: >-
+                A movie's or show's local extras (trailers first, then featurettes, behind the scenes, deleted scenes,
+                interviews, scenes, shorts, other), from files beside it on disk. Empty for seasons and episodes.
+                Play one with POST /api/v1/playback/sessions and extra_id.
+            trailer: { oneOf: [{ $ref: "#/components/schemas/Trailer" }, { type: "null" }], description: "The trailer a Trailer button plays: a local one first, else YouTube when trailers_youtube is on. Null when there is none." }
+            theme_music:
+              oneOf:
+                - type: object
+                  required: [id, url]
+                  properties:
+                    id: { type: integer }
+                    url: { type: string, description: Path of the MP3 relative to the server base URL. }
+                - type: "null"
+              description: A show's theme.mp3, for clients to play quietly on its page.
             next_episode: { oneOf: [{ $ref: "#/components/schemas/ItemSummary" }, { type: "null" }], description: "For a show or season: the episode Play should start (first unwatched, or in progress). For an episode: the one after it, for Up Next (the rest of the season, then the next; specials only after a special); null at the end of the show." }
+    Extra:
+      type: object
+      required: [id, kind, title]
+      properties:
+        id: { type: integer }
+        kind: { type: string, enum: [trailer, featurette, behind_the_scenes, deleted_scene, interview, scene, short, other] }
+        title: { type: string }
+        duration_ms: { type: [integer, "null"] }
+        container: { type: [string, "null"] }
+        resolution: { oneOf: [{ $ref: "#/components/schemas/Resolution" }, { type: "null" }] }
+    Trailer:
+      type: object
+      required: [source, title]
+      properties:
+        source: { type: string, enum: [local, youtube] }
+        title: { type: string }
+        extra_id: { type: [integer, "null"], description: "For a local trailer: play it with POST /api/v1/playback/sessions and this extra_id." }
+        duration_ms: { type: [integer, "null"] }
+        youtube_key:
+          type: [string, "null"]
+          pattern: "^[A-Za-z0-9_-]{11}$"
+          description: >-
+            For a YouTube trailer: the video id. The web app embeds https://www.youtube-nocookie.com/embed/<key>;
+            the TV app opens vnd.youtube:<key>, else https://www.youtube.com/watch?v=<key>.
     Collection:
       type: object
       required: [id, library_id, name, item_count, poster_item_ids]
@@ -1640,10 +2321,45 @@ components:
       type: object
       required: [id, title, items]
       properties:
-        id: { type: string, description: "continue_watching, recently_added_movies, recently_added_episodes, or library:<id>" }
+        id:
+          type: string
+          description: >-
+            Stable for the row, and the key for its See all view: continue_watching, recently_added_movies:<library id>,
+            recently_added_tv:<library id>, seasonal:<season id> (seasonal:<season id>:family for the kids' row),
+            new_seasons, because_you_watched:<item id>, trending, recently_released, top_rated_movies, top_rated_shows,
+            unwatched_gems, genre:<genre>, collection:<collection id>, most_watched, most_watched_by_you, rediscover,
+            best_of_decade:<1990>, tmdb_trending or tmdb_popular. Clients render whatever rows come, in order.
+        kind: { type: string, description: "The row's slot in the Home layout (a HomeLayoutRow key), or genre, collection or best_of_decade." }
         title: { type: string }
-        library_id: { type: [integer, "null"] }
+        library_id: { type: [integer, "null"], description: "Set on a library's Recently Added row." }
+        see_all: { type: boolean, description: "Whether GET /api/v1/rows/{row_id} offers more." }
         items: { type: array, items: { $ref: "#/components/schemas/ItemSummary" } }
+    HomeLayoutRow:
+      type: object
+      required: [key, title, description, enabled]
+      properties:
+        key: { type: string, description: "A row slot: continue_watching, recently_added_movies, seasonal, genres, collections and so on." }
+        title: { type: string }
+        description: { type: string }
+        enabled: { type: boolean }
+    HomeLayout:
+      type: object
+      required: [rows, source]
+      properties:
+        rows: { type: array, items: { $ref: "#/components/schemas/HomeLayoutRow" }, description: "Every slot once, in Home's order." }
+        source: { type: string, enum: [user, server, default], description: "Whose layout this is." }
+    HomeLayoutInput:
+      type: object
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+            required: [key, enabled]
+            properties:
+              key: { type: string }
+              enabled: { type: boolean }
     VideoCodecCapability:
       type: object
       required: [codec]
@@ -1678,12 +2394,18 @@ components:
         default_audio_only: { type: boolean, description: "The client plays only the default audio track (a browser), so that track is the one that has to decode." }
     PlaybackRequest:
       type: object
-      required: [item_id, capabilities]
+      required: [capabilities]
       properties:
-        item_id: { type: integer, description: A movie or episode. }
+        item_id: { type: integer, description: A movie or episode. Required unless extra_id is given. }
         version_id: { type: [integer, "null"], description: Omit to let the server pick the best version the device can play. }
         start_position_ms: { type: [integer, "null"], description: Omit to resume from the saved position. }
         capabilities: { $ref: "#/components/schemas/Capabilities" }
+        extra_id:
+          type: [integer, "null"]
+          description: >-
+            Play one of the item's extras (a trailer) instead of a version. item_id may then be omitted or 0; when
+            given it must be the extra's item. Same decision ladder and policy as a version; no watch state is
+            written, and theme music is refused (422).
     SubtitleSource:
       type: object
       required: [track_id, url, codec, mime_type]
@@ -1705,7 +2427,8 @@ components:
         decision: { type: string, enum: [direct_play, remux, audio_transcode, transcode] }
         reason: { type: string, description: Why this decision, in plain words. Recorded in activity. }
         item_id: { type: integer }
-        version: { $ref: "#/components/schemas/Version" }
+        extra_id: { type: integer, description: Present when the session plays an extra. }
+        version: { $ref: "#/components/schemas/Version", description: "The file being played; for an extra, its id is the extra's." }
         stream:
           type: object
           required: [url, protocol]
@@ -1737,6 +2460,39 @@ components:
           properties:
             enabled: { type: boolean, description: Offer "Search for subtitles". }
             can_download: { type: boolean, description: The user may download a result. }
+        markers:
+          type: array
+          description: The item's intro and credits, each saying whether this user's settings skip it without asking.
+          items:
+            allOf:
+              - $ref: "#/components/schemas/Marker"
+              - type: object
+                required: [auto_skip]
+                properties:
+                  auto_skip: { type: boolean, description: "True only for an intro, when skip_markers is auto and confidence is at least 0.75. Credits are never skipped without a press." }
+        skip_markers: { type: string, enum: [button, auto, off], description: The user's choice; off means show no Skip button. }
+    Marker:
+      type: object
+      required: [kind, start_ms, end_ms, confidence, source]
+      properties:
+        kind: { type: string, enum: [intro, credits] }
+        start_ms: { type: integer }
+        end_ms: { type: integer, description: "Where Skip lands. Credits that run to the end of the file end at its duration, so a player can go to the next episode; credits followed by a scene end before it." }
+        confidence: { type: number, description: "1 for markers from the file or an admin; 0 to 1 for detected ones." }
+        source: { type: string, enum: [detected, chapter, nfo, manual] }
+    MarkerList:
+      type: object
+      required: [markers]
+      properties:
+        markers: { type: array, items: { $ref: "#/components/schemas/Marker" } }
+    PlaybackSettings:
+      type: object
+      required: [skip_markers]
+      properties:
+        skip_markers:
+          type: string
+          enum: [button, auto, off]
+          description: "Intros: show a Skip button (the default), skip automatically (only confident markers; otherwise the button), or neither. Credits always get a button when not off."
     PlaybackEvent:
       type: object
       required: [type, position_ms]
@@ -1901,6 +2657,9 @@ components:
         last_event_at: { type: integer }
         ended_at: { type: [integer, "null"] }
         terminated_message: { type: [string, "null"] }
+        principal_kind: { type: string, enum: [user, profile, token], description: "Who played: an account, a household profile, or an invited device." }
+        token_id: { type: [integer, "null"], description: "The invited device, for DELETE /api/v1/admin/devices/{device_id}." }
+        token_active: { type: boolean, description: The device can still be revoked. }
     TitleWatch:
       type: object
       required: [item_id, kind, title, year, library_id, library, paths, size_bytes, added_at, last_played_at, play_count, finished_by]

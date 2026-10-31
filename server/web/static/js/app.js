@@ -7,6 +7,7 @@ import { h, errorBox, skeleton } from "./dom.js";
 import { homeView } from "./views/home.js";
 import { libraryView } from "./views/library.js";
 import { libraryCollectionsView, collectionView } from "./views/collections.js";
+import { rowView } from "./views/rows.js";
 import { itemView } from "./views/item.js";
 import { searchView } from "./views/search.js";
 import { playerView } from "./views/player.js";
@@ -17,6 +18,8 @@ import { searchSuggest } from "./suggest.js";
 import { installShortcuts } from "./shortcuts.js";
 import { musicLibraryView, musicArtistView, musicAlbumView } from "./views/music.js";
 import { installMusicPlayer } from "./music/player.js";
+import { pickerView, drawProfileButton } from "./views/profiles.js";
+import { pairView, inviteView } from "./views/devices.js";
 
 export const state = { me: null, server: null, libraries: [] };
 
@@ -25,16 +28,23 @@ const routes = [
   [/^\/library\/(\d+)$/, () => libraryView],
   [/^\/library\/(\d+)\/collections$/, () => libraryCollectionsView],
   [/^\/collection\/(\d+)$/, () => collectionView],
+  [/^\/row\/([^/]+)$/, () => rowView],
   [/^\/item\/(\d+)$/, () => itemView],
   [/^\/search$/, () => searchView],
   [/^\/play\/(\d+)$/, () => playerView],
   [/^\/activity(?:\/(now|history|stats|users))?$/, () => activityView],
-  [/^\/settings(?:\/(account|libraries|users|newsletter))?$/, () => settingsView],
+  [/^\/settings(?:\/(account|home|libraries|users|devices|newsletter|markers))?$/, () => settingsView],
   [/^\/login$/, () => loginView],
   [/^\/music\/(\d+)$/, () => musicLibraryView],
   [/^\/music\/artist\/(\d+)$/, () => musicArtistView],
   [/^\/music\/album\/(\d+)$/, () => musicAlbumView],
+  [/^\/profiles$/, () => pickerView],
+  [/^\/pair\/([A-Za-z-]{1,16})$/, () => pairView],
+  [/^\/invite\/([A-Za-z2-7-]{16,64})$/, () => inviteView],
 ];
+
+// An invite link opens on a device that has no session yet.
+const isInvite = (path) => path.startsWith("/invite/");
 
 let cleanup = null;
 let renderSeq = 0;
@@ -58,8 +68,8 @@ async function render() {
   }
   const { path, params } = parseHash();
   const view = document.getElementById("view");
-  if (!state.me && path !== "/login") {
-    go("/login?next=" + encodeURIComponent(path));
+  if (!state.me && path !== "/login" && path !== "/profiles" && !isInvite(path)) {
+    go(signInPath() + "?next=" + encodeURIComponent(path));
     return;
   }
   let match = null, viewFn = null;
@@ -67,7 +77,7 @@ async function render() {
     match = path.match(re);
     if (match) { viewFn = fn(); break; }
   }
-  document.getElementById("topbar").hidden = !state.me || path.startsWith("/play/");
+  document.getElementById("topbar").hidden = !state.me || path.startsWith("/play/") || path === "/profiles" || isInvite(path);
   markNav(path);
   setMenu(false);
   // While a page with a hero loads, its skeleton already sits under the
@@ -168,13 +178,20 @@ export async function signedIn() {
   const libs = await api("/libraries");
   state.libraries = libs.libraries || [];
   drawNav();
+  drawProfileButton();
+}
+
+// signInPath is where a signed-out browser goes: the "Who's watching?" picker
+// when the server shows one on this network, else the sign-in form.
+function signInPath() {
+  return state.server && state.server.profile_picker ? "/profiles" : "/login";
 }
 
 async function boot() {
   whenSignedOut(() => {
     if (!state.me) return;
     state.me = null;
-    go("/login?next=" + encodeURIComponent(parseHash().path));
+    go(signInPath() + "?next=" + encodeURIComponent(parseHash().path));
   });
   document.getElementById("search").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -194,7 +211,9 @@ async function boot() {
     await signedIn();
   } catch (err) {
     if (!(err instanceof ApiError) || err.status !== 401) throw err;
-    if (state.server.auto_sign_in) {
+    // An invite link joins as the invited device: signing this browser in as
+    // the household first would only be undone.
+    if (state.server.auto_sign_in && !state.server.profile_picker && !isInvite(parseHash().path)) {
       try {
         await autoSignIn();
         await signedIn();

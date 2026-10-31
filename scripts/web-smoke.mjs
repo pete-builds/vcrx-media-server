@@ -4,8 +4,12 @@
 // missing its main content, a video that does not play, search as you type that
 // lists nothing, a Continue Watching Remove control that does not remove, a
 // keyboard shortcuts list that does not open, a Home feature whose Play does
-// not play, season tabs that do not switch, a phone menu that does not open, or
-// music that stops when the page changes.
+// not play, season tabs that do not switch, a phone menu that does not open,
+// Home rows missing (the Halloween row, with the dev server's fixed date),
+// a Customize Home editor that does not hide or move a row, or an invited
+// device that is not signed in by its invite, sees past its scope, reaches
+// the profile picker, or survives being revoked, or music that stops when
+// the page changes.
 //
 //   node scripts/web-smoke.mjs [base-url]      (default http://127.0.0.1:3751)
 //
@@ -124,8 +128,11 @@ async function main() {
         out.converted = by("River Line") ? by("River Line").id : null;
         out.transcoded = by("Tin Kettle Road") ? by("Tin Kettle Road").id : null;
         out.cast = by("Harbor Lights") ? by("Harbor Lights").id : null;
-      } else if (l.kind === "show") {
-        out.show = items[0] && items[0].id;
+      } else {
+        // Quiet Street by name: it has the two seasons and the theme music the
+        // checks below need, and Lantern Bay (Skip Intro) sorts before it.
+        const qs = items.find((i) => i.title === "Quiet Street") || items[0];
+        out.show = qs && qs.id;
       }
     }
     return out;`);
@@ -185,9 +192,13 @@ async function main() {
     ["/activity/history", ".tabs"],
     ["/activity/stats?days=7", ".chart-box svg"],
     ["/activity/users", "table.list"],
+    ["/settings/users", ".household .profile-row"],
+    ["/profiles", ".picker .profile"],
     ["/settings", ".settings h1"],
     ["/settings/libraries", "table.list"],
     ["/settings/users", ".user-summary"],
+    ["/settings/home", ".layout-list li"],
+    ["/row/trending", ".grid .card"],
     ["/settings/newsletter", ".newsletter-form"],
     // Music: artists, albums, live shows, an album's tracklist, an artist, and
     // music in search results.
@@ -199,6 +210,8 @@ async function main() {
       [`/music/artist/${ids.artist}`, ".music-head h1"],
       ["/search?q=tide", ".music-results .tracklist .track"],
     ] : []),
+    ["/settings/devices", ".scope-form"],
+    ["/settings/markers", "table.list"],
   ];
   for (const [path, selector] of pages) {
     console.log(`page #${path}`);
@@ -308,6 +321,84 @@ async function main() {
   }
   if (exceptions.length) fail("continue watching", `threw: ${exceptions[0]}`);
 
+  // Home's rows: the dev server pins Home's date to Oct 31 and seeds plays,
+  // so Halloween, Trending and the others must all be there, each with at
+  // least four titles, and See all must open a row's grid.
+  console.log("home rows");
+  exceptions = [];
+  const homeRows = async () => {
+    await s("Page.navigate", { url: `${base}/#/` });
+    return evaluate(`${wait(`document.querySelectorAll("#view .row").length > 3`)}
+      return [...document.querySelectorAll("#view .row")].map((r) => ({ id: r.dataset.row, title: r.querySelector("h2").innerText,
+        cards: r.querySelectorAll("a.card").length, notes: [...r.querySelectorAll(".sub.note")].map((n) => n.innerText),
+        titles: [...r.querySelectorAll("a.card .title")].map((t) => t.innerText),
+        more: r.querySelector(".row-head a") ? r.querySelector(".row-head a").getAttribute("href") : null }));`);
+  };
+  const rowsBefore = await homeRows();
+  const ids0 = rowsBefore.map((r) => r.id);
+  for (const want of ["seasonal:halloween", "trending", "top_rated_movies", "most_watched", "recently_released", "unwatched_gems"]) {
+    if (!ids0.includes(want)) fail("home rows", `no ${want} row; rows: ${ids0.join(" ")}`);
+  }
+  if (!ids0.some((id) => id.startsWith("because_you_watched:"))) fail("home rows", `no Because You Watched row; rows: ${ids0.join(" ")}`);
+  for (const r of rowsBefore) {
+    if (r.id !== "continue_watching" && r.cards < 4) fail("home rows", `${r.id} shows ${r.cards} titles, fewer than four`);
+  }
+  const halloween = rowsBefore.find((r) => r.id === "seasonal:halloween");
+  if (halloween && !halloween.titles.some((t) => /Hollow Pines|Lantern Hour|Grave Weather/.test(t))) {
+    fail("home rows", `the Halloween row has no horror: ${halloween.titles.join(", ")}`);
+  }
+  const tvRow = rowsBefore.find((r) => r.id.startsWith("recently_added_tv:"));
+  if (!tvRow || !tvRow.notes.some((n) => /new episode/.test(n))) fail("home rows", `Recently Added TV has no "new episodes" note: ${JSON.stringify(tvRow)}`);
+  const trendingRow = rowsBefore.find((r) => r.id === "trending");
+  if (trendingRow) {
+    if (trendingRow.more !== "#/row/trending") fail("home rows", `Trending's See all goes to ${trendingRow.more}`);
+    await s("Page.navigate", { url: `${base}/${trendingRow.more}` });
+    const grid = await evaluate(`${wait(`document.querySelectorAll(".grid .card").length`)}
+      return { n: document.querySelectorAll(".grid .card").length, h1: document.querySelector(".toolbar h1")?.innerText };`);
+    if (grid.n < trendingRow.cards || grid.h1 !== trendingRow.title) fail("home rows", `See all for Trending: ${JSON.stringify(grid)}`);
+  }
+  if (exceptions.length) fail("home rows", `threw: ${exceptions[0]}`);
+
+  // Customize Home, by keyboard: Space on a row's checkbox hides it, Enter on
+  // Move up moves it and keeps the focus on it, and Reset brings Home back.
+  console.log("customize home");
+  exceptions = [];
+  const editor = async () => {
+    await s("Page.navigate", { url: `${base}/#/settings/home` });
+    return evaluate(`${wait(`document.querySelectorAll(".layout-list li").length > 5`)}
+      return [...document.querySelectorAll(".layout-list li")].map((li) => ({ key: li.dataset.key, on: li.querySelector("input").checked }));`);
+  };
+  await editor();
+  await evaluate(`document.querySelector('.layout-list li[data-key="seasonal"] input').focus();`);
+  await press(" ", "Space", 32, " ");
+  const hidden = await evaluate(`${wait(`document.querySelector(".layout-source").innerText.includes("your own")`)}
+    return document.querySelector('.layout-list li[data-key="seasonal"] input').checked;`);
+  if (hidden) fail("customize home", "Space did not turn the seasonal row off");
+  const afterHide = (await homeRows()).map((r) => r.id);
+  if (afterHide.some((id) => id.startsWith("seasonal:"))) fail("customize home", `a hidden row still shows: ${afterHide.join(" ")}`);
+  const order0 = await editor();
+  const at = order0.findIndex((r) => r.key === "trending");
+  const above = order0[at - 1].key;
+  await evaluate(`document.querySelector('.layout-list li[data-key="trending"] [data-move="up"]').focus();`);
+  await press("Enter", "Enter", 13, "\r");
+  const moved = await evaluate(`${wait(`[...document.querySelectorAll(".layout-list li")].findIndex((li) => li.dataset.key === "trending") === ${at - 1}`)}
+    const keys = [...document.querySelectorAll(".layout-list li")].map((li) => li.dataset.key);
+    const f = document.activeElement;
+    return { at: keys.indexOf("trending"), focus: f && f.closest("li") ? f.closest("li").dataset.key + ":" + f.dataset.move : String(f && f.tagName) };`);
+  if (moved.at !== at - 1) fail("customize home", `Move up left Trending at ${moved.at}, from ${at}`);
+  if (moved.focus !== "trending:up") fail("customize home", `focus went to ${moved.focus} after moving`);
+  const kindOf = (id) => id.split(":")[0].replace(/^(genre|collection|best_of_decade)$/, "x");
+  const order1 = (await homeRows()).map((r) => kindOf(r.id));
+  const ti = order1.indexOf("trending");
+  const ai = order1.indexOf(kindOf(above));
+  if (ti < 0 || (ai >= 0 && ti > ai)) fail("customize home", `Home did not follow the new order: ${order1.join(" ")}`);
+  await editor();
+  await evaluate(`[...document.querySelectorAll(".layout-actions button")].find((b) => b.innerText.includes("Reset")).click();`);
+  await evaluate(`${wait(`!document.querySelector(".layout-source").innerText.includes("your own")`)}`);
+  const restored = (await homeRows()).map((r) => r.id);
+  if (!restored.includes("seasonal:halloween")) fail("customize home", `Reset did not bring the Halloween row back: ${restored.join(" ")}`);
+  if (exceptions.length) fail("customize home", `threw: ${exceptions[0]}`);
+
   // Search as you type: suggestions after two characters, arrow keys and Enter
   // open one, Escape closes, Enter with none highlighted goes to the results.
   console.log("search as you type");
@@ -410,6 +501,70 @@ async function main() {
   if (exceptions.length) fail("season tabs", `threw: ${exceptions[0]}`);
 
   await music(s, evaluate, press, ids, { reset: () => { exceptions = []; }, first: () => exceptions[0] });
+  // Extras: Harbor Lights has a -trailer file and two extras folders, and Quiet
+  // Street a theme.mp3 (scripts/dev-server.sh). None may become a title of its
+  // own. The film's page shows an Extras row and a Trailer button; the trailer,
+  // clicked with a real mouse, plays in the VCRX player as a direct stream.
+  console.log(`trailer and extras (#/item/${ids.cast})`);
+  exceptions = [];
+  const indexed = await evaluate(`
+    const j = (p) => fetch("/api/v1" + p).then((r) => r.json());
+    const titles = [];
+    for (const l of (await j("/libraries")).libraries) titles.push(...(await j("/libraries/" + l.id + "/items?limit=200")).items.map((i) => i.title));
+    const files = (await j("/items/${ids.cast}")).versions.map((v) => v.file_name);
+    return { titles, files };`);
+  const leaked = indexed.titles.filter((t) => /trailer|Raising the Lighthouse|The Long Night|theme/i.test(t));
+  if (leaked.length) fail("extras", `extras became titles: ${leaked.join(", ")}`);
+  // With title_year grouping, an extra read as a film would join Harbor Lights as a version instead.
+  if (indexed.files.length !== 1) fail("extras", `Harbor Lights has ${indexed.files.length} versions: ${indexed.files.join(", ")}`);
+  await s("Page.navigate", { url: `${base}/#/item/${ids.cast}` });
+  const ex = await evaluate(`${wait(`document.querySelector(".extras .extra") && document.querySelector(".hero .trailer-btn")`)}
+    const b = document.querySelector(".hero .trailer-btn");
+    const row = document.querySelector(".extras");
+    if (!b) return { tiles: row ? row.querySelectorAll(".extra").length : 0, text: row ? row.innerText : "" };
+    b.scrollIntoView({ block: "center" });
+    const r = b.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    return { tiles: row ? row.querySelectorAll(".extra").length : 0, text: row ? row.innerText : "", x, y,
+      hit: document.elementFromPoint(x, y)?.closest("button") === b };`);
+  if (ex.tiles < 3) fail("extras", `the Extras row shows ${ex.tiles} extras, want the trailer, a featurette and a deleted scene`);
+  if (!/Raising the Lighthouse/.test(ex.text) || !/Deleted scene/.test(ex.text)) fail("extras", `Extras row: ${ex.text.replace(/\n/g, " ").slice(0, 160)}`);
+  const exJunk = ex.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+  if (exJunk) fail("extras", `shows "${exJunk[0]}"`);
+  if (ex.x === undefined) fail("trailer", "no Trailer button on the film's page");
+  else {
+    if (!ex.hit) fail("trailer", "the Trailer button is covered by something else");
+    await evaluate(`document.querySelectorAll("video").forEach((v) => { v.dataset.stale = "1"; v.pause(); });`);
+    await s("Input.dispatchMouseEvent", { type: "mouseMoved", x: ex.x, y: ex.y });
+    await s("Input.dispatchMouseEvent", { type: "mousePressed", x: ex.x, y: ex.y, button: "left", clickCount: 1 });
+    await s("Input.dispatchMouseEvent", { type: "mouseReleased", x: ex.x, y: ex.y, button: "left", clickCount: 1 });
+    const tr = await evaluate(`
+      const fresh = () => document.querySelector("video:not([data-stale])");
+      for (let i = 0; i < 60 && !fresh(); i++) await new Promise((r) => setTimeout(r, 150));
+      const v = fresh();
+      if (!v) return { ok: false, hash: location.hash, why: document.getElementById("view").innerText.slice(0, 200) };
+      v.muted = true;
+      v.play().catch(() => {});
+      for (let i = 0; i < 80 && !(v.currentTime > 1.5); i++) await new Promise((r) => setTimeout(r, 150));
+      return { ok: v.currentTime > 1.5, t: v.currentTime, err: v.error && v.error.code, hash: location.hash, src: v.currentSrc,
+        title: (document.querySelector(".player .ptitle") || {}).innerText || "" };`);
+    if (!/^#\/play\/\d+\?extra=\d+$/.test(tr.hash)) fail("trailer", `the Trailer button went to ${tr.hash}`);
+    if (!tr.ok) fail("trailer", `trailer did not play (t=${tr.t}, media error ${tr.err}) ${tr.why || ""}`);
+    if (!/\/api\/v1\/extras\/\d+\/file\?session=/.test(tr.src || "")) fail("trailer", `played ${tr.src}, not the extra's file`);
+    if (!/Harbor Lights · Trailer/.test(tr.title)) fail("trailer", `player title "${tr.title}"`);
+  }
+  // Theme music: a button on the show's page, which plays only when pressed.
+  await s("Page.navigate", { url: `${base}/#/item/${ids.show}` });
+  const theme = await evaluate(`${wait(`document.querySelector(".hero .theme-btn")`)}
+    const b = document.querySelector(".hero .theme-btn");
+    if (!b) return { found: false };
+    const before = b.getAttribute("aria-pressed");
+    b.click();
+    ${wait(`b.getAttribute("aria-pressed") === "true"`)}
+    return { found: true, before, after: b.getAttribute("aria-pressed") };`);
+  if (!theme.found) fail("theme music", "no Theme music button on the show's page");
+  else if (theme.before !== "false" || theme.after !== "true") fail("theme music", `played before a click or not after one (${theme.before} then ${theme.after})`);
+  if (exceptions.length) fail("trailer and extras", `threw: ${exceptions[0]}`);
 
   // Playback: a file the browser plays directly, one whose audio it needs
   // converted, and one whose video it cannot decode at all. The pill says
@@ -523,6 +678,8 @@ async function main() {
       return gone ? { ok: true } : { why: "the subtitle was still listed after Delete" };`);
     if (!del.ok) fail("subtitles delete", del.why);
   }
+  await profilePicker(s, evaluate, () => exceptions, (v) => { exceptions = v; });
+  await inviteLoop(s, evaluate, () => exceptions, (v) => { exceptions = v; });
   await s("Page.navigate", { url: `${base}/#/` });
   await sleep(500);
 
@@ -553,6 +710,84 @@ async function main() {
       fail(`#${path}`, `shows "${junk[0]}" in "...${at}..."`);
     }
     if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
+  }
+
+  // Skip Intro and Next Episode on the sample season with a shared theme. The
+  // server detects the markers in the background after its scans, so wait
+  // for them first.
+  console.log("skip intro (Lantern Bay)");
+  const bay = await evaluate(`
+    const j = (p) => fetch("/api/v1" + p).then((r) => r.json());
+    const found = (await j("/search?q=Lantern%20Bay")).items || [];
+    const show = found.find((i) => i.kind === "show" && i.title === "Lantern Bay");
+    if (!show) return { why: "no Lantern Bay show in the library" };
+    const season = (await j("/items/" + show.id + "/children")).items[0];
+    const eps = (await j("/items/" + season.id + "/children")).items;
+    const ep = eps[1];
+    for (let i = 0; i < 180; i++) {
+      const d = await j("/items/" + ep.id);
+      const intro = d.markers.find((m) => m.kind === "intro");
+      const credits = d.markers.find((m) => m.kind === "credits");
+      if (intro && credits) return { id: ep.id, intro, credits };
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return { why: "no intro and credits markers after 3 minutes" };`);
+  if (!bay.id) {
+    fail("skip intro", bay.why);
+  } else {
+    exceptions = [];
+    await s("Page.navigate", { url: `${base}/#/play/${bay.id}?start=${bay.intro.start_ms + 1000}` });
+    const res = await evaluate(`
+      for (let i = 0; i < 60 && !document.querySelector("video"); i++) await new Promise((r) => setTimeout(r, 150));
+      const v = document.querySelector("video");
+      if (!v) return { why: "no video" };
+      v.muted = true;
+      v.play().catch(() => {});
+      const shown = () => { const b = document.querySelector(".player .skip-btn"); return b && !b.hidden ? b : null; };
+      for (let i = 0; i < 60 && !shown(); i++) await new Promise((r) => setTimeout(r, 150));
+      const b = shown();
+      if (!b) return { why: "no Skip button inside the intro (t=" + v.currentTime + ")" };
+      const label = b.textContent;
+      b.click();
+      for (let i = 0; i < 40 && v.currentTime * 1000 < ${bay.intro.end_ms} - 500; i++) await new Promise((r) => setTimeout(r, 150));
+      return { label, t: v.currentTime, hidden: !shown() };`);
+    if (res.why) fail("skip intro", res.why);
+    else {
+      if (res.label !== "Skip Intro") fail("skip intro", `button says "${res.label}"`);
+      if (res.t * 1000 < bay.intro.end_ms - 500) fail("skip intro", `still at ${res.t} s, intro ends at ${bay.intro.end_ms / 1000} s`);
+      if (!res.hidden) fail("skip intro", "button still showing after the skip");
+    }
+    // Credits that run to the end, with an episode after: Next Episode, and Up Next.
+    await s("Page.navigate", { url: `${base}/#/play/${bay.id}?start=${bay.credits.start_ms + 1000}` });
+    const next = await evaluate(`
+      for (let i = 0; i < 60 && !document.querySelector("video"); i++) await new Promise((r) => setTimeout(r, 150));
+      const v = document.querySelector("video");
+      v.muted = true;
+      v.play().catch(() => {});
+      const shown = () => { const b = document.querySelector(".player .skip-btn"); return b && !b.hidden ? b : null; };
+      for (let i = 0; i < 60 && !shown(); i++) await new Promise((r) => setTimeout(r, 150));
+      const b = shown();
+      if (!b) return { why: "no button inside the credits" };
+      const label = b.textContent;
+      b.click();
+      for (let i = 0; i < 60 && !document.querySelector(".player .up-next"); i++) await new Promise((r) => setTimeout(r, 150));
+      return { label, upNext: !!document.querySelector(".player .up-next") };`);
+    if (next.why) fail("next episode", next.why);
+    else {
+      if (next.label !== "Next Episode") fail("next episode", `button says "${next.label}"`);
+      if (!next.upNext) fail("next episode", "Up Next did not appear");
+    }
+    if (exceptions.length) fail("skip intro", `threw: ${exceptions[0]}`);
+    // The admin's marker editor on the episode page, and detection's progress.
+    for (const [path, selector] of [[`/item/${bay.id}`, ".markers-edit .marker-row"], ["/settings/markers", "table.list"]]) {
+      await s("Page.navigate", { url: `${base}/#${path}` });
+      const page = await evaluate(`
+        for (let i = 0; i < 40 && !document.querySelector(${JSON.stringify(selector)}); i++) await new Promise((r) => setTimeout(r, 150));
+        const text = document.getElementById("view").innerText;
+        return { found: !!document.querySelector(${JSON.stringify(selector)}), junk: (text.match(/\\b(null|undefined|NaN)\\b/) || [])[0] || "" };`);
+      if (!page.found) fail(`#${path}`, `no ${selector}`);
+      if (page.junk) fail(`#${path}`, `shows "${page.junk}"`);
+    }
   }
 }
 
@@ -745,6 +980,217 @@ async function hlsMSE(evaluate, ids) {
   if (!(Math.abs(res.total - 90) < 1 && Math.abs(res.duration - 90) < 1)) fail("play HLS (MSE)", `playlist ${res.total} s, media ${res.duration} s, want 90`);
 }
 
+// "Who's watching?" on a phone: a kid's profile with a PIN refuses a wrong
+// PIN on the pad and opens with the right one; back on the admin, reached
+// from the kid, it asks for the password. Leaves the browser as the admin.
+async function profilePicker(s, evaluate, getExceptions, setExceptions) {
+  console.log("profile picker (PIN pad, 390 px)");
+  setExceptions([]);
+  await s("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  const helpers = `
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const wait = async (sel) => { for (let i = 0; i < 40 && !document.querySelector(sel); i++) await sleep(150); return document.querySelector(sel); };
+    const me = () => fetch("/api/v1/me").then((r) => r.json()).then((m) => m.username);
+    const left = async () => { for (let i = 0; i < 40 && location.hash.startsWith("#/profiles"); i++) await sleep(150); };`;
+  const ids = await evaluate(`
+    const call = (p, method = "GET", body) => fetch("/api/v1" + p, { method, body: body && JSON.stringify(body),
+      headers: { "X-VCRX-Client": "web", "Content-Type": "application/json" } }).then((r) => (r.status === 204 ? null : r.json()));
+    const all = (await call("/admin/profiles")).profiles;
+    const kid = all.find((p) => p.username === "Smoke Kid") || (await call("/admin/profiles", "POST", { name: "Smoke Kid", kid: true }));
+    await call("/admin/profiles/" + kid.id + "/pin", "PUT", { pin: "2468" });
+    return { kid: kid.id, admin: all.find((p) => p.username === "dev").id };`);
+  await s("Page.navigate", { url: `${base}/#/profiles` });
+  const kid = await evaluate(`${helpers}
+    const card = await wait('.profile[data-id="${ids.kid}"]');
+    if (!card) return { why: "the kid's profile is not in the picker: " + document.getElementById("view").innerText.slice(0, 160) };
+    card.click();
+    if (!(await wait(".pin-keys"))) return { why: "choosing a profile with a PIN showed no PIN pad" };
+    const press = (k) => document.querySelector('.pin-key[data-key="' + k + '"]').click();
+    for (const k of "1111") press(k);
+    press("ok");
+    let wrong = "";
+    for (let i = 0; i < 40 && !wrong; i++) { wrong = document.querySelector(".pin-error").textContent; await sleep(150); }
+    const width = document.documentElement.scrollWidth;
+    for (const k of "2468") press(k);
+    press("ok");
+    await left();
+    return { wrong, width, screen: screen.width, me: await me() };`);
+  if (kid.why) fail("profile picker", kid.why);
+  else {
+    if (!kid.wrong) fail("profile picker", "a wrong PIN showed no error");
+    if (kid.width > kid.screen + 1) fail("profile picker on a phone", `PIN pad is ${kid.width}px wide on a ${kid.screen}px screen`);
+    if (kid.me !== "Smoke Kid") fail("profile picker", `the right PIN left the browser signed in as ${kid.me}`);
+  }
+  await s("Page.navigate", { url: `${base}/#/profiles` });
+  const back = await evaluate(`${helpers}
+    const card = await wait('.profile[data-id="${ids.admin}"]');
+    if (!card) return { why: "no admin profile in the picker" };
+    card.click();
+    const pw = await wait(".pin-password input");
+    if (!pw) return { why: "the admin, reached from a kid's profile, did not ask for a password" };
+    pw.value = "devpassword";
+    document.querySelector(".pin-password button").click();
+    await left();
+    return { me: await me() };`);
+  if (back.why) fail("profile picker", back.why);
+  else if (back.me !== "dev") fail("profile picker", `switching back left the browser as ${back.me}`);
+  if (getExceptions().length) fail("profile picker", `threw: ${getExceptions()[0]}`);
+  await s("Emulation.clearDeviceMetricsOverride");
+}
+
+// The invite is the account: the admin mints an invite for Movies only, a
+// second browser (its own cookie jar, so not the admin) opens the link and
+// joins with no password, sees Movies and nothing else, never the profile
+// picker, and cannot replay the link; then the admin revokes it from Settings
+// and its next request is refused. Then a TV's pairing code is approved from
+// the admin's phone page and the TV's poll gets its session.
+async function inviteLoop(s, evaluate, getExceptions, setExceptions) {
+  console.log("invite: mint, redeem, scope, revoke; pair a TV");
+  setExceptions([]);
+  const helpers = `
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const wait = async (sel, n = 40) => { for (let i = 0; i < n && !document.querySelector(sel); i++) await sleep(150); return document.querySelector(sel); };`;
+  await s("Page.navigate", { url: `${base}/#/settings/devices` });
+  const minted = await evaluate(`${helpers}
+    const form = await wait(".scope-form");
+    if (!form) return { why: "no invite form under Settings > Devices" };
+    form.elements.name.value = "Smoke Phone";
+    const libs = (await fetch("/api/v1/libraries").then((r) => r.json())).libraries;
+    const movies = libs.find((l) => l.name === "Movies");
+    for (const box of form.querySelectorAll(".checks input[type=checkbox][value]")) box.checked = box.value === String(movies.id);
+    form.querySelector("button[type=submit]").click();
+    const link = await wait(".invite-card .invite-link");
+    const img = await wait(".invite-card img.qr");
+    if (!link || !img) return { why: "minting showed no invite: " + document.getElementById("view").innerText.slice(0, 200) };
+    for (let i = 0; i < 20 && !img.naturalWidth; i++) await sleep(100);
+    let decoded = null;
+    if ("BarcodeDetector" in window) {
+      try { decoded = ((await new BarcodeDetector({ formats: ["qr_code"] }).detect(img))[0] || {}).rawValue || ""; } catch { decoded = null; }
+    }
+    return { url: link.value, qr: img.naturalWidth, decoded, card: document.querySelector(".invite-card").innerText };`);
+  if (minted.why) return fail("invite", minted.why);
+  if (!/#\/invite\/[a-z2-7]{32}$/.test(minted.url)) fail("invite", `the invite link looks wrong: ${minted.url}`);
+  if (!minted.qr) fail("invite", "the QR code image did not load");
+  if (minted.decoded !== null && minted.decoded !== minted.url) fail("invite", `the QR code reads "${minted.decoded}", not the link`);
+  if (minted.decoded !== null) console.log("  QR code decodes to the invite link");
+  // The invited device: a browser context of its own, at phone width.
+  const { browserContextId } = await send("Target.createBrowserContext");
+  const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId });
+  const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
+  const d = (m, p) => send(m, p, sessionId);
+  const devErrors = [];
+  listeners.push((m) => {
+    if (m.sessionId === sessionId && m.method === "Runtime.exceptionThrown") devErrors.push(m.params.exceptionDetails.text);
+  });
+  await d("Runtime.enable");
+  await d("Page.enable");
+  await d("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  const devEval = async (expr) => {
+    const r = await d("Runtime.evaluate", { expression: `(async () => { ${helpers} ${expr} })()`, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+    return r.result.value;
+  };
+  const call = `const call = (p, method = "GET", body) => fetch("/api/v1" + p, { method, body: body && JSON.stringify(body),
+      headers: { "X-VCRX-Client": "web", "Content-Type": "application/json" } }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));`;
+  try {
+    await d("Page.navigate", { url: minted.url });
+    const joined = await devEval(`${call}
+      const join = await wait(".invite-page button");
+      if (!join) return { why: "the invite link showed no Join button: " + document.getElementById("view").innerText.slice(0, 160) };
+      const before = (await call("/me")).status;
+      const width = document.documentElement.scrollWidth;
+      join.click();
+      for (let i = 0; i < 40 && location.hash.startsWith("#/invite/"); i++) await sleep(150);
+      await wait(".row .card, .empty, .grid .card");
+      const me = (await call("/me")).body || {};
+      const libs = ((await call("/libraries")).body || {}).libraries || [];
+      const picker = (await call("/profiles")).status;
+      const switched = (await call("/auth/switch", "POST", { user_id: 1 })).status;
+      const replay = (await call("/invites/redeem", "POST", { invite: ${JSON.stringify(minted.url.split("/").pop())} })).status;
+      const avatarBtn = !document.getElementById("nav-profile").hidden;
+      location.hash = "#/settings";
+      await wait(".settings dl");
+      return { before, width, screen: screen.width, hash: location.hash, me, libs: libs.map((l) => l.name), picker, switched, replay, avatarBtn,
+        settings: document.querySelector(".settings dl").innerText };`);
+    if (joined.why) fail("invite", joined.why);
+    else {
+      if (joined.before !== 401) fail("invite", `before joining, the new browser was already signed in (${joined.before})`);
+      if (joined.width > joined.screen + 1) fail("invite on a phone", `the invite page is ${joined.width}px wide on a ${joined.screen}px screen`);
+      if (joined.me.kind !== "token" || joined.me.display_name !== "Smoke Phone") fail("invite", `joined as ${JSON.stringify(joined.me)}, not the invited device`);
+      if (joined.libs.join() !== "Movies") fail("invite", `the invited device sees ${joined.libs.join(", ") || "nothing"}, not Movies only`);
+      if (joined.picker !== 403 || joined.switched !== 403) fail("invite", `the invited device reached the profile picker (${joined.picker}) or a switch (${joined.switched})`);
+      if (joined.avatarBtn) fail("invite", "the invited device shows the Switch profile button");
+      if (joined.replay !== 401) fail("invite", `replaying the spent invite answered ${joined.replay}, not 401`);
+      if (!/Smoke Phone \(invited\)/.test(joined.settings)) fail("invite", `Settings does not say this is an invited device: ${joined.settings.slice(0, 120)}`);
+    }
+    // The admin revokes it from Settings > Devices (a fresh load of the list).
+    await s("Page.navigate", { url: `${base}/#/settings/devices?after=join` });
+    const revoked = await evaluate(`${helpers}
+      window.confirm = () => true;
+      let row = null;
+      for (let i = 0; i < 40 && !row; i++) {
+        row = [...document.querySelectorAll(".device-row")].find((r) => r.innerText.includes("Smoke Phone") && r.dataset.state === "active");
+        if (!row) await sleep(150);
+      }
+      if (!row) return { why: "the redeemed device is not listed as active: " + document.getElementById("view").innerText.slice(0, 200) };
+      const seen = row.innerText;
+      row.querySelector("button").click();
+      let state = "";
+      for (let i = 0; i < 40 && state !== "revoked"; i++) {
+        await sleep(150);
+        const r = [...document.querySelectorAll(".device-row")].find((x) => x.innerText.includes("Smoke Phone"));
+        state = r ? r.dataset.state : "";
+      }
+      return { state, seen };`);
+    if (revoked.why) fail("invite", revoked.why);
+    else {
+      if (revoked.state !== "revoked") fail("invite", `after Revoke the device shows ${revoked.state}`);
+      if (!/Last seen/.test(revoked.seen)) fail("invite", `the device row has no last seen: ${revoked.seen}`);
+    }
+    const after = await devEval(`${call}
+      const me = (await call("/me")).status;
+      location.hash = "#/";
+      for (let i = 0; i < 40 && !location.hash.startsWith("#/login"); i++) await sleep(150);
+      return { me, hash: location.hash };`);
+    if (after.me !== 401) fail("invite", `after the revoke the device's next request answered ${after.me}, not 401`);
+    if (!after.hash.startsWith("#/login")) fail("invite", `after the revoke the device stayed on ${after.hash}`);
+
+    // A TV pairs: it asks for a code (here from the signed-out browser), the
+    // admin approves it on #/pair/<code>, and the TV's poll gets its session.
+    const tv = await devEval(`${call}
+      const r = await call("/pair", "POST", { device: { id: "smoke-tv", name: "Smoke TV", platform: "android_tv", client: "vcrx-tv", client_version: "1" } });
+      return r.body;`);
+    if (!tv || !tv.user_code) fail("pair", `no pairing code: ${JSON.stringify(tv)}`);
+    else {
+      await s("Page.navigate", { url: `${base}/#/pair/${tv.user_code.replace("-", "")}` });
+      const approved = await evaluate(`${helpers}
+        const form = await wait(".pair-page .scope-form");
+        if (!form) return { why: "the approval page has no scope form: " + document.getElementById("view").innerText.slice(0, 200) };
+        const who = document.querySelector(".pair-who").innerText;
+        form.querySelector("button[type=submit]").click();
+        for (let i = 0; i < 40 && document.querySelector(".pair-page .scope-form"); i++) await sleep(150);
+        return { who, text: document.getElementById("view").innerText };`);
+      if (approved.why) fail("pair", approved.why);
+      else {
+        if (!approved.who.includes("Smoke TV") || !approved.who.includes(tv.user_code)) fail("pair", `the approval page does not name the TV and its code: ${approved.who}`);
+        if (!/is paired/.test(approved.text)) fail("pair", `approving did not confirm: ${approved.text.slice(0, 160)}`);
+      }
+      const polled = await devEval(`${call}
+        const r = await call("/pair/poll", "POST", { device_code: ${JSON.stringify(tv.device_code)} });
+        const again = await call("/pair/poll", "POST", { device_code: ${JSON.stringify(tv.device_code)} });
+        const me = r.body && r.body.token ? await fetch("/api/v1/me", { headers: { Authorization: "Bearer " + r.body.token } }).then((x) => x.json()) : null;
+        return { status: r.body && r.body.status, me, again: again.status };`);
+      if (polled.status !== "approved" || !polled.me || polled.me.kind !== "token") fail("pair", `the TV's poll after approval: ${JSON.stringify(polled)}`);
+      if (polled.again !== 404) fail("pair", `a second poll answered ${polled.again}, not 404: the code is single-use`);
+    }
+    if (devErrors.length) fail("invite", `the invited device threw: ${devErrors[0]}`);
+  } finally {
+    await send("Target.closeTarget", { targetId }).catch(() => {});
+    await send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
+  }
+  if (getExceptions().length) fail("invite", `threw: ${getExceptions()[0]}`);
+}
+
 try {
   await main();
 } catch (e) {
@@ -759,4 +1205,5 @@ if (failures.length) {
   process.exit(1);
 }
 console.log("\nweb-smoke: every page, every playback path (HLS included), Continue Watching removal, search as you type, the shortcuts list, " +
-  "the Home feature, season tabs and the phone menu, the History section, and music (playing across pages, gapless hand-over, Space) passed");
+  "the Home feature and rows, Customize Home, season tabs and the phone menu, the History section, the trailer, extras and theme music, " +
+  "Skip Intro and Next Episode, the invite and pairing loop, and music (playing across pages, gapless hand-over, Space) passed");

@@ -180,6 +180,10 @@ func (s *Server) gate(rt route) http.Handler {
 			return
 		}
 		tok, viaCookie := sessionToken(r)
+		if rt.access == householdOnly && tok == "" {
+			s.pickerGate(w, r, rt)
+			return
+		}
 		if tok == "" {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Sign in first.")
 			return
@@ -190,6 +194,11 @@ func (s *Server) gate(rt route) http.Handler {
 		}
 		sess, err := s.Auth.Authenticate(r.Context(), tok, ri.IP)
 		if err != nil {
+			if errors.Is(err, auth.ErrInvalidToken) && rt.access == householdOnly {
+				// A stale cookie must not hide the picker from a trusted network.
+				s.pickerGate(w, r, rt)
+				return
+			}
 			if errors.Is(err, auth.ErrInvalidToken) {
 				writeError(w, http.StatusUnauthorized, "unauthorized", "Your session has expired. Sign in again.")
 				return
@@ -199,6 +208,12 @@ func (s *Server) gate(rt route) http.Handler {
 		}
 		if rt.access == adminOnly && !sess.User.IsAdmin {
 			writeError(w, http.StatusForbidden, "forbidden", "Only an admin can do that.")
+			return
+		}
+		if rt.access == householdOnly && sess.TokenID != 0 {
+			// An invited device is its own principal: the profile picker and
+			// profile switching are never its to see.
+			writeError(w, http.StatusForbidden, "not_household", "An invited device cannot switch profiles.")
 			return
 		}
 		pol, err := policy.Load(r.Context(), s.DB, sess.User.ID, sess.User.IsAdmin)
