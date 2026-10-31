@@ -48,6 +48,10 @@ type Enricher struct {
 	Busy  func(libraryID int64) bool
 	Batch int
 	Now   func() time.Time
+	// AfterPass, when set, runs after every pass (a Fix Match may have made a
+	// pair since), e.g. to merge copies of a film that share a TMDb id. It
+	// runs before Changed, so smart collections stamp the merged movie.
+	AfterPass func(ctx context.Context)
 	// Changed, when set, is called after a pass that matched anything and
 	// after a Fix Match: genres and ratings just changed, so smart collections
 	// and the labels they stamp rebuild at once instead of on their timer.
@@ -94,6 +98,11 @@ func (e *Enricher) Run(ctx context.Context, initial, interval time.Duration) {
 		}
 		wait = interval
 		st, err := e.Drain(ctx)
+		// AfterPass merges copies before Changed rebuilds smart collections,
+		// so the rebuild sees the merged movies.
+		if e.AfterPass != nil && ctx.Err() == nil {
+			e.AfterPass(ctx)
+		}
 		if e.Changed != nil && st.Matched+st.Episodes > 0 {
 			e.Changed()
 		}

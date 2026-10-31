@@ -553,3 +553,10 @@ kbd {
 .cast-member { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); min-width: 0; }
 .cast-name { font-weight: 600; overflow-wrap: anywhere; }
 .cast-role { color: var(--muted); font-size: 0.875rem; overflow-wrap: anywhere; }
+
+/* Version tools on a movie's page, for admins (views/versions.js). */
+.version-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.version-name { min-width: 0; overflow-wrap: anywhere; }
+.version-name .faint { font-size: 13px; }
+.version-row .btn { flex-shrink: 0; white-space: nowrap; }
+.merge { margin-top: 16px; }
