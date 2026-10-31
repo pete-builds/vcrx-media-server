@@ -383,10 +383,15 @@ async function main() {
     }
     console.log(`play ${label} (#/play/${id})`);
     exceptions = [];
+    // Page.navigate returns before the app handles hashchange, so the previous
+    // clip's player can still be on the page: mark its video so this clip is
+    // never judged by the last one's.
+    await evaluate(`document.querySelectorAll("video").forEach((v) => { v.dataset.stale = "1"; v.pause(); });`);
     await s("Page.navigate", { url: `${base}/#/play/${id}?start=0` });
     const res = await evaluate(`
-      for (let i = 0; i < 60 && !document.querySelector("video"); i++) await new Promise((r) => setTimeout(r, 150));
-      const v = document.querySelector("video");
+      const fresh = () => document.querySelector("video:not([data-stale])");
+      for (let i = 0; i < 60 && !fresh(); i++) await new Promise((r) => setTimeout(r, 150));
+      const v = fresh();
       if (!v) return { ok: false, why: document.getElementById("view").innerText.slice(0, 200) };
       v.muted = true;
       v.play().catch(() => {});
