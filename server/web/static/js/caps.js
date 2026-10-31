@@ -45,7 +45,16 @@ export function capabilities() {
     containers, video_codecs: video, audio_codecs: audio, hdr_types: hdr, subtitle_codecs: ["webvtt"],
     max_width: 3840, max_height: 2160, max_bitrate: 0,
     // The player handles converted streams, and a <video> plays only the
-    // file's default audio track.
-    fmp4_stream: true, default_audio_only: true,
+    // file's default audio track. Safari plays video only from a server that
+    // answers byte ranges, which a converted stream cannot, so it is not
+    // offered one: files that need converting are refused with the reason.
+    fmp4_stream: !isSafari(), default_audio_only: true,
   };
+}
+
+// isSafari is true for WebKit Safari (desktop and iOS), false for Chromium,
+// Edge and Firefox, whose user agents also mention Safari.
+export function isSafari() {
+  const ua = navigator.userAgent;
+  return /Safari\//.test(ua) && !/Chrome\/|Chromium\/|CriOS\/|Edg\/|FxiOS\/|Firefox\//.test(ua);
 }

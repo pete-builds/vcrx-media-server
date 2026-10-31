@@ -1,6 +1,6 @@
 import { api, ApiError } from "../api.js";
 import { h, icon, errorBox, episodeCode, clock, toast } from "../dom.js";
-import { capabilities } from "../caps.js";
+import { capabilities, isSafari } from "../caps.js";
 
 // The player: asks the server for a session with this browser's capabilities,
 // plays it, and reports start, pause, seek, progress and stop so resume points
@@ -28,7 +28,9 @@ export async function playerView({ match, params }) {
   } catch (err) {
     const why = err instanceof ApiError ? err.message : "The server could not start playback.";
     shell.append(h("div", { class: "top" }, backBtn), h("div", { class: "overlay" },
-      errorBox("This cannot play in the browser", why, h("p", { class: "faint" }, "The TV app may still play it."))));
+      errorBox("This cannot play in the browser", why, h("p", { class: "faint" },
+        isSafari() ? "Safari cannot play files that need converting yet. Chrome or Edge can, and so can the TV app."
+          : "The TV app may still play it."))));
     return { el: shell, title: "Cannot play" };
   }
 
