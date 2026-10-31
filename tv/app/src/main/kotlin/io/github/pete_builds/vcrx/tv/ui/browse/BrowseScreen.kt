@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
@@ -48,6 +49,7 @@ import kotlinx.coroutines.launch
 const val HOME = "home"
 const val SEARCH = "search"
 const val SETTINGS = "settings"
+const val ACTIVITY = "activity"
 fun librarySection(id: Long) = "library:$id"
 
 /**
@@ -68,8 +70,19 @@ class BrowseViewModel(private val graph: AppGraph) : ViewModel() {
     var libraries by mutableStateOf<LoadState<List<Library>>>(LoadState.Loading)
         private set
 
+    /** Admins get Activity in the rail; the server enforces it either way. */
+    var isAdmin by mutableStateOf(false)
+        private set
+
     init {
         loadLibraries()
+        viewModelScope.launch {
+            isAdmin = try {
+                graph.api.me().isAdmin
+            } catch (_: ApiException) {
+                false
+            }
+        }
     }
 
     fun loadLibraries() {
@@ -97,6 +110,7 @@ fun BrowseScreen() {
         add(RailEntry(HOME, "Home", Icons.Filled.Home))
         libraries.forEach { add(RailEntry(librarySection(it.id), it.name, if (it.kind == "show") AppIcons.Tv else AppIcons.Movie)) }
         add(RailEntry(SEARCH, "Search", Icons.Filled.Search))
+        if (vm.isAdmin) add(RailEntry(ACTIVITY, "Activity", Icons.Filled.PlayArrow))
         add(RailEntry(SETTINGS, "Settings", Icons.Filled.Settings))
     }
 
@@ -138,6 +152,7 @@ fun BrowseScreen() {
                 section == HOME -> HomeSection(vm.focus, onRetry = vm::loadLibraries)
                 section == SEARCH -> SearchSection(vm.focus)
                 section == SETTINGS -> SettingsSection(vm.focus)
+                section == ACTIVITY -> ActivitySection(vm.focus)
                 section.startsWith("library:") -> {
                     val library = libraries.firstOrNull { librarySection(it.id) == section }
                     when {
