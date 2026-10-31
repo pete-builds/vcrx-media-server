@@ -1143,3 +1143,69 @@ func TestClearProgressLeavesContinueWatching(t *testing.T) {
 		t.Fatalf("clear an unstarted episode: %d", r.code)
 	}
 }
+
+func TestContinueWatchingOffersTheNextEpisode(t *testing.T) {
+	f := newFixture(t)
+	now := time.Now().UnixMilli()
+	var tv int64
+	if err := f.db.QueryRow(`SELECT library_id FROM items WHERE id = ?`, f.showID).Scan(&tv); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.db.Exec(`INSERT INTO items (library_id, kind, parent_id, group_key, title, sort_title, season_number, episode_number, added_at, updated_at)
+		VALUES (?, 'episode', ?, '2', 'Second', 'Second', 1, 2, ?, ?)`, tv, f.seasonID, now, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2, _ := res.LastInsertId()
+	if _, err := f.db.Exec(`INSERT INTO media_versions (item_id, library_id, path, rel_path, size, mtime, container, probe_status, added_at, updated_at)
+		VALUES (?, ?, '/x/e2.mkv', 'e2.mkv', 1, 0, 'mkv', 'ok', ?, ?)`, e2, tv, now, now); err != nil {
+		t.Fatal(err)
+	}
+	cont := func() []int64 {
+		t.Helper()
+		var home struct {
+			Rows []struct {
+				ID    string
+				Items []struct{ ID int64 }
+			}
+		}
+		f.do("GET", "/api/v1/home", f.adminTok, nil).json(t, &home)
+		var ids []int64
+		for _, r := range home.Rows {
+			if r.ID == "continue_watching" {
+				for _, i := range r.Items {
+					ids = append(ids, i.ID)
+				}
+			}
+		}
+		return ids
+	}
+	if got := cont(); len(got) != 0 {
+		t.Fatalf("nothing watched yet: %v", got)
+	}
+	// Finishing S01E01 offers S01E02.
+	if r := f.do("PUT", fmt.Sprintf("/api/v1/items/%d/watched", f.episodeID), f.adminTok, map[string]any{"played": true}); r.code != 204 {
+		t.Fatalf("mark watched: %d", r.code)
+	}
+	if got := cont(); len(got) != 1 || got[0] != e2 {
+		t.Fatalf("after S01E01: %v, want [%d]", got, e2)
+	}
+	// Once S01E02 is under way it shows once, as in progress, not twice.
+	if _, err := f.db.Exec(`INSERT INTO watch_state (user_id, item_id, position_ms, played, play_count, last_played_at, updated_at)
+		SELECT id, ?, 60000, 0, 0, ?, ? FROM users WHERE username = 'pete'`, e2, now+1, now+1); err != nil {
+		t.Fatal(err)
+	}
+	if got := cont(); len(got) != 1 || got[0] != e2 {
+		t.Fatalf("with S01E02 in progress: %v", got)
+	}
+	// An episode finished long ago no longer offers anything.
+	if _, err := f.db.Exec(`DELETE FROM watch_state WHERE item_id = ?`, e2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Exec(`UPDATE watch_state SET last_played_at = ? WHERE item_id = ?`, now-90*24*3600*1000, f.episodeID); err != nil {
+		t.Fatal(err)
+	}
+	if got := cont(); len(got) != 0 {
+		t.Fatalf("after 90 days: %v", got)
+	}
+}

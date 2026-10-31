@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 )
@@ -403,9 +404,7 @@ func (c *Catalog) Search(ctx context.Context, pol policy.Policy, userID int64, q
 func (c *Catalog) Home(ctx context.Context, pol policy.Policy, userID int64) ([]HomeRow, error) {
 	rows := []HomeRow{}
 	cond, args := pol.ItemCond("i")
-	ids, err := c.queryIDs(ctx, `SELECT i.id FROM items i JOIN watch_state w ON w.item_id = i.id AND w.user_id = ?
-		WHERE i.kind IN ('movie', 'episode') AND w.played = 0 AND w.position_ms > 0 AND `+cond+`
-		ORDER BY w.last_played_at DESC LIMIT 20`, append([]any{userID}, args...)...)
+	ids, err := c.continueWatching(ctx, pol, userID, time.Now())
 	if err != nil {
 		return nil, err
 	}
