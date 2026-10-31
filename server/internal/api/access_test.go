@@ -104,6 +104,9 @@ var noItemRoutes = map[string]string{
 	"GET /api/v1/me/playback-settings": "the caller's own playback settings",
 	"PUT /api/v1/me/playback-settings": "the caller's own playback settings",
 	"GET /api/v1/speedtest":            "random filler bytes for timing the connection; reads nothing from the library",
+	// Before a movie: the admin's own bumper clips, by a name from preroll_dir.
+	"GET /api/v1/preroll":  "a clip from the admin's preroll_dir, not a library title; invited devices are refused",
+	"HEAD /api/v1/preroll": "a clip from the admin's preroll_dir, not a library title; invited devices are refused",
 	// The Home layout is the caller's own list of row kinds ("trending",
 	// "seasonal") with fixed names and descriptions; it names no titles.
 	"GET /api/v1/layout/home":    "the caller's own Home row order, row kinds only",
@@ -501,6 +504,11 @@ func (w *walkFixture) videoProbes(sessions []string, adminSession string) []prob
 	hiddenItems := []int64{w.vaultMovie, w.horrorMovie, w.ratedMovie, w.horrorShow, w.horrorSeason, w.horrorEpisode, w.strictSeason, w.strictEpisode}
 	hiddenPlayables := []int64{w.vaultMovie, w.horrorMovie, w.ratedMovie, w.horrorEpisode, w.strictEpisode}
 	var ps []probe
+	// First, before the watched probes below mark these titles played (a
+	// played title's trailer is not offered either).
+	if !w.isToken() {
+		ps = append(ps, at("GET /api/v1/items/{item_id}/before", f.movieID).hides("Zebra Night", "Zebra Lent"))
+	}
 	for _, id := range hiddenItems {
 		ps = append(ps,
 			at("GET /api/v1/items/{item_id}", id),
@@ -510,6 +518,13 @@ func (w *walkFixture) videoProbes(sessions []string, adminSession string) []prob
 	for _, id := range []int64{w.horrorShow, w.horrorSeason, w.strictSeason} {
 		ps = append(ps, at("GET /api/v1/items/{item_id}/children", id))
 	}
+	// Before a movie: a hidden movie has no list of its own (the list probe
+	// at the top shows a hidden movie's trailer never plays ahead of one the
+	// friend may see). Invited devices get an empty list.
+	for _, id := range []int64{w.vaultMovie, w.horrorMovie, w.ratedMovie} {
+		ps = append(ps, at("GET /api/v1/items/{item_id}/before", id))
+	}
+
 	for _, id := range w.posters {
 		ps = append(ps, at("GET /api/v1/items/{item_id}/artwork/{kind}", id, "poster"))
 	}
@@ -719,6 +734,10 @@ func (w *walkFixture) become(kind string) {
 	case "peer":
 		l := w.linkServer(map[string]any{"name": "Walker's server", "library_ids": []int64{w.movies, w.tv, w.vault}, "allow_transcode": true})
 		w.friendID, w.friendTok = l.userID, l.token
+	}
+	// Trailers before a movie, so the walk sees what they would offer.
+	if _, err := w.db.Exec(`UPDATE users SET before_movie_trailers = 3 WHERE id = ?`, w.friendID); err != nil {
+		w.t.Fatal(err)
 	}
 }
 

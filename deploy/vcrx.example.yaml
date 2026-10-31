@@ -45,6 +45,11 @@ server_name: VCRX
 # trailer when there is no local one; playing it needs the internet.
 #trailers_youtube: true
 
+# Before a movie: a folder of short clips (mp4, m4v, mkv, mov, webm), mounted
+# read-only in compose.yaml (VCRX_PREROLL_DIR). A profile that turns on the
+# pre-roll in its playback settings sees one at random before each movie.
+#preroll_dir: /media/Pre-Roll
+
 # Radarr and Sonarr webhooks find the folder by name in a library. If they see
 # the NAS at another path and folder names differ, map their prefix to VCRX's.
 #arr_path_map:

@@ -553,6 +553,63 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: "#/components/schemas/ItemSummary" } }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/items/{item_id}/before:
+    get:
+      operationId: getBeforeMovie
+      summary: >-
+        What plays before a movie under the caller's Before a movie settings: up to
+        before_movie_trailers local trailers for other movies the caller may see and
+        has not watched, at random, then a pre-roll clip when before_movie_preroll is
+        on and preroll_dir has one. Empty for anything but a movie and for an invited
+        device. Clips play by their URL and never touch watch state.
+      parameters: [{ $ref: "#/components/parameters/ItemID" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [clips]
+                properties:
+                  clips:
+                    type: array
+                    items:
+                      type: object
+                      required: [kind, title, url]
+                      properties:
+                        kind: { type: string, enum: [trailer, preroll] }
+                        title: { type: string, description: "The trailer's movie, or the pre-roll's file name without its extension." }
+                        url: { type: string }
+                        trailer:
+                          type: object
+                          description: Set for a trailer.
+                          properties:
+                            extra_id: { type: integer }
+                            item_id: { type: integer }
+                            item_title: { type: string }
+                            year: { type: [integer, "null"] }
+                            duration_ms: { type: [integer, "null"] }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/preroll:
+    get:
+      operationId: getPreroll
+      summary: One pre-roll clip from preroll_dir, by a name GET /items/{item_id}/before gave. Range requests work. Refused to invited devices.
+      parameters:
+        - { name: name, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The clip, content: { video/*: { schema: { type: string, format: binary } } } }
+        "206": { description: Part of the clip }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    head:
+      operationId: headPreroll
+      parameters:
+        - { name: name, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The clip's headers }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/items/{item_id}/watched:
     put:
       operationId: setWatched
@@ -3035,12 +3092,20 @@ components:
         markers: { type: array, items: { $ref: "#/components/schemas/Marker" } }
     PlaybackSettings:
       type: object
-      required: [skip_markers]
+      description: A PUT saves only the fields it sends.
       properties:
         skip_markers:
           type: string
           enum: [button, auto, off]
           description: "Intros: show a Skip button (the default), skip automatically (only confident markers; otherwise the button), or neither. Credits always get a button when not off."
+        before_movie_trailers:
+          type: integer
+          minimum: 0
+          maximum: 3
+          description: Local trailers for other unwatched titles to play before a movie; 0 (the default) for none.
+        before_movie_preroll:
+          type: boolean
+          description: Play a pre-roll clip from the server's preroll_dir before a movie. Off by default.
     PlaybackEvent:
       type: object
       required: [type, position_ms]

@@ -114,6 +114,10 @@ type Config struct {
 	// offers it when there is no local trailer file. Off by default: it needs the
 	// internet to play, and VCRX works without it. Needs a TMDb key.
 	TrailersYouTube bool `yaml:"trailers_youtube"`
+	// PrerollDir is a folder of short clips (mp4, m4v, mkv, mov, webm). A
+	// profile that turns on Before a movie > Pre-roll sees one of them, picked
+	// at random, before each movie. Empty: no pre-roll.
+	PrerollDir string `yaml:"preroll_dir"`
 
 	// DetectMarkers finds intros and end credits in TV episodes from their
 	// audio, for Skip Intro and Skip Credits. On by default. It runs at low
