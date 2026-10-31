@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Drives the web app in headless Chrome and fails on anything a person would
 // notice: a page that throws, a page showing "null" or "undefined", a page
-// missing its main content, a video that does not play, search as you type that
+// missing its main content, a details panel without its writers, release date
+// or votes, a video that does not play, search as you type that
 // lists nothing, a Continue Watching Remove control that does not remove, a
 // keyboard shortcuts list that does not open, a Home feature whose Play does
 // not play, season tabs that do not switch, a phone menu that does not open,
@@ -245,6 +246,19 @@ async function main() {
       fail(`#${path}`, `shows "${junk[0]}" in "...${at}..."`);
     }
     if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
+  }
+
+  // The details panel: writers, country, release date and the votes behind
+  // the rating, from Harbor Lights' NFO.
+  if (ids.cast) {
+    console.log("details panel facts");
+    await s("Page.navigate", { url: `${base}/#/item/${ids.cast}` });
+    const facts = await evaluate(`${wait(`document.querySelector(".facts")`)}
+      const f = document.querySelector(".facts");
+      return f ? f.innerText : "";`);
+    for (const want of ["Written by", "Rafe Lindqvist", "Country", "Canada", "Released", "2001", "IMDb 8.4", "310K votes"]) {
+      if (!facts.includes(want)) fail("details panel", `no "${want}" in: ${facts.slice(0, 300).replace(/\n/g, " | ")}`);
+    }
   }
 
   // The same pages on a phone: nothing may be wider than the screen.

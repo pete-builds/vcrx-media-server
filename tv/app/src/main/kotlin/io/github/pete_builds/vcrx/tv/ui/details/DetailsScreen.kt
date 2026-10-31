@@ -1,6 +1,7 @@
 package io.github.pete_builds.vcrx.tv.ui.details
 
 import android.os.SystemClock
+import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,6 +42,7 @@ import io.github.pete_builds.vcrx.tv.settings.ResumeMode
 import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
 import io.github.pete_builds.vcrx.tv.ui.components.Artwork
 import io.github.pete_builds.vcrx.tv.ui.components.CardShape
+import io.github.pete_builds.vcrx.tv.ui.theme.CornerRadius
 import io.github.pete_builds.vcrx.tv.ui.components.EmptyView
 import io.github.pete_builds.vcrx.tv.ui.components.BrandButton
 import io.github.pete_builds.vcrx.tv.ui.components.BrandDialog
@@ -51,6 +54,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
 import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
+import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
 import io.github.pete_builds.vcrx.tv.ui.theme.Orange
 import kotlinx.coroutines.launch
@@ -202,11 +206,21 @@ private fun Details(item: Item, vm: DetailsViewModel) {
         if (item.extras.isNotEmpty()) {
             item(key = "extras") { ExtrasRow(item) }
         }
+        // The panel sits above the cast row: the D-pad cannot stop on text, so
+        // moving down to the cast scrolls the panel into view on the way.
+        if (!isContainer) {
+            val facts = detailFacts(item, item.versions.firstOrNull { it.id == vm.versionId } ?: item.versions.firstOrNull())
+            if (facts.about.isNotEmpty() || facts.media.isNotEmpty()) {
+                item(key = "facts") { FactsPanel(facts) }
+            }
+            if (item.cast.isNotEmpty()) item(key = "cast") { CastRow(item) }
+        }
         if (isContainer && item.kind == "show" && vm.seasons.isNotEmpty()) {
             item(key = "seasons") { SeasonRow(vm) }
         }
         if (isContainer) {
             item(key = "episodes") { EpisodeList(vm) }
+            if (item.kind == "show" && item.cast.isNotEmpty()) item(key = "cast") { CastRow(item) }
         }
     }
 
@@ -274,6 +288,51 @@ private fun ShowButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusReq
             primary = true,
             modifier = Modifier.focusRequester(primaryFocus),
         )
+    }
+}
+
+/** Details: about the title on the left, the file on the right. */
+@Composable
+private fun FactsPanel(facts: Facts) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Label("Details", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(48.dp)) {
+            FactColumn(facts.about, Modifier.weight(1f))
+            FactColumn(facts.media, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun FactColumn(facts: List<Fact>, modifier: Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        facts.forEach { f ->
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Label(f.label, Modifier.width(150.dp), style = MaterialTheme.typography.labelSmall, color = Gray)
+                Text(f.value, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** The cast in billing order. Cards take focus so the D-pad can reach the panel and the cast. */
+@Composable
+private fun CastRow(item: Item) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Label("Cast", style = MaterialTheme.typography.labelLarge)
+        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(item.cast, key = { it.name }) { member ->
+                FrameCard(onClick = {}, modifier = Modifier.width(220.dp)) {
+                    Column(
+                        Modifier.fillMaxWidth().background(Graphite, RoundedCornerShape(CornerRadius)).padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(member.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Label(member.role.orEmpty(), style = MaterialTheme.typography.labelSmall, color = Gray, maxLines = 2)
+                    }
+                }
+            }
+        }
     }
 }
 

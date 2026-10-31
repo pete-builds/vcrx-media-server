@@ -2766,7 +2766,10 @@ components:
             content_rating: { type: [string, "null"] }
             genres: { type: array, items: { type: string } }
             directors: { type: array, items: { type: string } }
+            writers: { type: array, items: { type: string } }
             studios: { type: array, items: { type: string } }
+            countries: { type: array, items: { type: string }, description: Production countries as the metadata names them. }
+            premiere_date: { type: [string, "null"], description: "Release or first air date, YYYY-MM-DD." }
             cast:
               type: array
               description: Up to 20 actors in billing order; an episode lists its own guests before its show's cast.
@@ -2776,6 +2779,7 @@ components:
                   name: { type: string }
                   role: { type: [string, "null"] }
             ratings: { type: object, additionalProperties: { type: number }, description: "Keyed by source: imdb, tmdb, nfo." }
+            rating_votes: { type: object, additionalProperties: { type: integer }, description: "How many votes stand behind each rating, keyed like ratings; a source with no count is absent." }
             versions: { type: array, items: { $ref: "#/components/schemas/Version" }, description: Only versions the caller may play, best first. }
             loan:
               description: Set while the movie is out on loan; only its borrower can play it until due_at.
