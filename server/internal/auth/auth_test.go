@@ -167,3 +167,26 @@ func TestIPKeyGroupsIPv6ByPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestTailscaleAddresses(t *testing.T) {
+	for ip, want := range map[string]bool{"100.64.0.1": true, "100.127.255.254": true, "100.128.0.1": false,
+		"fd7a:115c:a1e0::1": true, "fd7a:115c:a1e1::1": false, "192.168.1.20": false, "unknown": false} {
+		if got := IsTailscale(ip); got != want {
+			t.Errorf("IsTailscale(%q) = %v", ip, got)
+		}
+	}
+	if a, b := IPKey("fd7a:115c:a1e0::1"), IPKey("fd7a:115c:a1e0::2"); a == b {
+		t.Errorf("two Tailscale peers share the bucket %s", a)
+	}
+	l := NewLimiter(2, time.Minute)
+	for range 2 {
+		l.Fail(UserKey("pete"))
+		l.Fail(LANUserKey("pete"))
+	}
+	if ok, _ := l.Allowed(UserKey("pete")); ok {
+		t.Error("internet account key not locked at the limit")
+	}
+	if ok, _ := l.Allowed(LANUserKey("pete")); !ok {
+		t.Error("LAN account key locked at the base limit, want LANAccountFactor times it")
+	}
+}

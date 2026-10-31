@@ -214,9 +214,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if !IsLAN(ip) {
-		// A LAN sign-in leaves the account's internet count alone: those
-		// failures are someone else's.
+	if !limiterLAN(ip) {
+		// Only a sign-in from off the LAN clears the account's internet
+		// count. LAN sign-ins clear nothing: a device guessing on the LAN
+		// must not get a fresh allowance each time Pete signs in.
 		s.Limiter.Reset(auth.UserKey(req.Username))
 	}
 	s.Log.Info("login", "user", sess.User.Username, "ip", ip, "device", dev.Name, "client", dev.Client)
@@ -226,17 +227,26 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": sess.ExpiresAt, "user": toUserJSON(sess.User)})
 }
 
-// loginKeys are the limiter buckets a sign-in counts against: always the
-// client's address, and the account too when the client is off the LAN. The
-// account lock stops guessing spread across many addresses on the internet;
-// applied on the LAN as well, anyone on the internet could keep it shut by
-// failing as "pete" every few minutes, and Pete could never sign in at home.
-// Guessing from the LAN stays limited per address.
+// loginKeys are the limiter buckets a sign-in counts against: the client's
+// address, and the account in the client's scope. The account buckets stop
+// guessing spread over many addresses. They are split by where the client is:
+// the internet scope (10 per window) can be filled by anyone on the internet
+// failing as "pete", so it must never apply at home; the LAN scope (50 per
+// window) stops a guest or IoT device rotating through a /24, and nothing off
+// the LAN can touch it.
 func loginKeys(ip, username string) []string {
-	if IsLAN(ip) {
-		return []string{auth.IPKey(ip)}
+	if limiterLAN(ip) {
+		return []string{auth.IPKey(ip), auth.LANUserKey(username)}
 	}
 	return []string{auth.IPKey(ip), auth.UserKey(username)}
+}
+
+// limiterLAN is IsLAN without Tailscale, for sign-in limits only. A tailnet
+// peer may be anywhere, so its failures count with the internet's. Admin and
+// webhook gating keep IsLAN, which admits Tailscale IPv6 (a unique local
+// address), so Pete keeps reaching admin over Tailscale.
+func limiterLAN(ip string) bool {
+	return IsLAN(ip) && !auth.IsTailscale(ip)
 }
 
 func clip(s string, n int) string {

@@ -630,3 +630,65 @@ func TestLoginLockoutSparesTheLAN(t *testing.T) {
 		t.Errorf("a different /64: %d, want 200", c)
 	}
 }
+
+// A device on the LAN rotating through addresses is still limited per
+// account (50 per window), apart from the internet's count; Tailscale peers
+// count as off the LAN for sign-in limits and each is its own address.
+func TestLoginLANAccountBucketAndTailscale(t *testing.T) {
+	f := newFixture(t)
+	login := func(addr, user, pass string) int {
+		return f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": user, "password": pass}, "RemoteAddr", addr).code
+	}
+	// Five failures from each of ten guest Wi-Fi addresses: none hits its
+	// own limit of 10, but together they fill the account's LAN bucket.
+	for host := 10; host < 20; host++ {
+		for range 5 {
+			login(fmt.Sprintf("192.168.1.%d:5000", host), "pete", "wrong-guess")
+		}
+	}
+	if c := login("192.168.1.50:5000", "pete", "adminpass1"); c != 429 {
+		t.Errorf("a fresh LAN address after 50 LAN failures on the account: %d, want 429", c)
+	}
+	// The internet scope is separate: the LAN guessing did not touch it.
+	if c := login("203.0.113.7:5000", "pete", "adminpass1"); c != 200 {
+		t.Errorf("the internet scope after LAN-only failures: %d, want 200", c)
+	}
+	// 49 LAN failures are not a lockout: the LAN limit is generous.
+	for host := 10; host < 17; host++ {
+		for range 7 {
+			login(fmt.Sprintf("192.168.1.%d:5000", host), "friend", "wrong-guess")
+		}
+	}
+	if c := login("192.168.1.51:5000", "friend", "friendpass1"); c != 200 {
+		t.Errorf("49 LAN failures on an account: %d, want 200", c)
+	}
+
+	// One bad Tailscale peer locks only itself, not the tailnet.
+	for i := range 10 {
+		login("[fd7a:115c:a1e0::bad]:5000", fmt.Sprintf("nobody%d", i), "wrong-guess")
+	}
+	if c := login("[fd7a:115c:a1e0::bad]:5000", "stranger", "strangerpass1"); c != 429 {
+		t.Errorf("the guessing Tailscale peer: %d, want 429", c)
+	}
+	if c := login("[fd7a:115c:a1e0::2]:5000", "stranger", "strangerpass1"); c != 200 {
+		t.Errorf("another Tailscale peer: %d, want 200", c)
+	}
+	// Tailscale failures count in the internet scope, like any remote client.
+	for range 10 {
+		login("[fd7a:115c:a1e0::3]:5000", "stranger", "wrong-guess")
+	}
+	if c := login("198.51.100.20:5000", "stranger", "strangerpass1"); c != 429 {
+		t.Errorf("internet sign-in after 10 Tailscale failures on the account: %d, want 429", c)
+	}
+	if c := login("192.168.1.60:5000", "stranger", "strangerpass1"); c != 200 {
+		t.Errorf("LAN sign-in after Tailscale failures: %d, want 200", c)
+	}
+
+	// Admin gating is unchanged: Tailscale IPv6 reaches admin routes, as
+	// Pete does from away; Tailscale IPv4 never did.
+	for addr, want := range map[string]int{"[fd7a:115c:a1e0::2]:5000": 200, "100.100.1.2:5000": 403, "192.168.1.20:5000": 200} {
+		if r := f.do("GET", "/api/v1/admin/users", f.adminTok, nil, "RemoteAddr", addr); r.code != want {
+			t.Errorf("admin from %s: %d, want %d", addr, r.code, want)
+		}
+	}
+}
