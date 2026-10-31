@@ -17,7 +17,7 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 	if len(sums) == 0 {
 		return ItemDetail{}, ErrNotFound
 	}
-	d := ItemDetail{ItemSummary: sums[0], Genres: []string{}, Directors: []string{}, Studios: []string{}, Ratings: map[string]float64{}, Versions: []Version{}}
+	d := ItemDetail{ItemSummary: sums[0], Genres: []string{}, Directors: []string{}, Studios: []string{}, Cast: []CastMember{}, Ratings: map[string]float64{}, Versions: []Version{}}
 	var overview, tagline, rating sql.NullString
 	if err := c.DB.QueryRowContext(ctx, `SELECT overview, tagline, content_rating FROM items WHERE id = ?`, id).Scan(&overview, &tagline, &rating); err != nil {
 		return d, err
@@ -51,6 +51,28 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 		default:
 			d.Studios = append(d.Studios, value)
 		}
+		return nil
+	})
+	if err != nil {
+		return d, err
+	}
+	// Cast in billing order: an episode's own (guest) cast first, then its show's.
+	rows, err = c.DB.QueryContext(ctx, `SELECT value, role FROM item_tags WHERE item_id IN (?, ?) AND kind = 'actor'
+		ORDER BY item_id = ? DESC, position, value`, id, tagOwner, id)
+	if err != nil {
+		return d, err
+	}
+	err = each(rows, func() error {
+		var name string
+		var role sql.NullString
+		if err := rows.Scan(&name, &role); err != nil {
+			return err
+		}
+		if seen["actor\x00"+name] || len(d.Cast) >= maxCast {
+			return nil
+		}
+		seen["actor\x00"+name] = true
+		d.Cast = append(d.Cast, CastMember{Name: name, Role: strPtr(role)})
 		return nil
 	})
 	if err != nil {
@@ -216,3 +238,6 @@ func pickNext(eps []episodeState) int64 {
 	}
 	return eps[0].id
 }
+
+// maxCast is how many actors a details page lists.
+const maxCast = 20

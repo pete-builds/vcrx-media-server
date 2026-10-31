@@ -8,7 +8,7 @@ object ServerAddress {
     const val DEFAULT_PORT = 3750
 
     /**
-     * Normalizes input such as "192.168.86.20", "nix1:3750" or "https://media.example.com/vcrx"
+     * Normalizes input such as "192.168.1.20", "nix1:3750" or "https://media.example.com/vcrx"
      * into a base URL without a trailing slash. A bare host gets http and port 3750, the server's
      * default; an https URL without a port keeps 443, since that means a reverse proxy.
      * Returns null when the input cannot be an http(s) server address.

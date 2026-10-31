@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- VCRX runs on the LAN over plain HTTP (for example http://192.168.86.20:3750),
+<!-- VCRX runs on the LAN over plain HTTP (for example http://192.168.1.20:3750),
      and LAN addresses cannot be listed in advance, so cleartext is allowed for
      every host. HTTPS through a reverse proxy works unchanged with system CAs. -->
 <network-security-config xmlns:tools="http://schemas.android.com/tools">

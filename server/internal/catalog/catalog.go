@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 )
@@ -408,9 +409,7 @@ func (c *Catalog) Search(ctx context.Context, pol policy.Policy, userID int64, q
 func (c *Catalog) Home(ctx context.Context, pol policy.Policy, userID int64) ([]HomeRow, error) {
 	rows := []HomeRow{}
 	cond, args := pol.ItemCond("i")
-	ids, err := c.queryIDs(ctx, `SELECT i.id FROM items i JOIN watch_state w ON w.item_id = i.id AND w.user_id = ?
-		WHERE i.kind IN ('movie', 'episode') AND w.played = 0 AND w.position_ms > 0 AND `+cond+`
-		ORDER BY w.last_played_at DESC LIMIT 20`, append([]any{userID}, args...)...)
+	ids, err := c.continueWatching(ctx, pol, userID, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -496,6 +495,45 @@ func (c *Catalog) SetWatched(ctx context.Context, pol policy.Policy, userID, ite
 		if err != nil {
 			return err
 		}
+	}
+	return tx.Commit()
+}
+
+// ClearProgress forgets the caller's resume position on a movie or episode, so
+// it leaves Continue Watching, without marking it played or touching the play
+// count. On a show or season it clears every episode. For anything in a show
+// it also dismisses the show's next-episode card until the caller finishes
+// another episode. Only the caller's own watch state changes; an item the
+// caller cannot see is ErrNotFound.
+func (c *Catalog) ClearProgress(ctx context.Context, pol policy.Policy, userID, itemID int64, now int64) error {
+	ok, err := c.visible(ctx, pol, itemID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	tx, err := c.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `UPDATE watch_state SET position_ms = 0, updated_at = ?
+		WHERE user_id = ? AND position_ms > 0 AND item_id IN (
+			SELECT ? UNION ALL
+			SELECT id FROM items WHERE parent_id = ? AND kind = 'episode' UNION ALL
+			SELECT e.id FROM items s JOIN items e ON e.parent_id = s.id WHERE s.parent_id = ? AND e.kind = 'episode')`,
+		now, userID, itemID, itemID, itemID); err != nil {
+		return err
+	}
+	// Without this, a next-episode card (which has no position to clear) would
+	// come straight back, and so would a cleared episode, as its show's next one.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO up_next_dismissed (user_id, show_id, dismissed_at)
+		SELECT ?, CASE i.kind WHEN 'show' THEN i.id WHEN 'season' THEN i.parent_id ELSE se.parent_id END, ?
+		FROM items i LEFT JOIN items se ON se.id = i.parent_id
+		WHERE i.id = ? AND i.kind IN ('show', 'season', 'episode')
+		ON CONFLICT (user_id, show_id) DO UPDATE SET dismissed_at = excluded.dismissed_at`, userID, now, itemID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

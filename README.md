@@ -82,7 +82,7 @@ vcrx healthcheck              what the container HEALTHCHECK runs
 
 ### Configuration
 
-Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its automatic pre-migration backups and the settings file live in `/config`; resized artwork and other caches live in `/cache` and can be deleted at any time.
+Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its backups (before every migration, and a nightly snapshot kept for seven days, in `/config/backups`) and the settings file live in `/config`; resized artwork and other caches live in `/cache` and can be deleted at any time.
 
 ### TMDb posters and plots (optional)
 
@@ -101,6 +101,9 @@ This product uses the TMDB API but is not endorsed or certified by TMDB.
 Open `http://<server>:3750/` in a browser. It is part of the server: no separate install, no build step, nothing loaded from the internet.
 
 - **Browse** Home (Continue Watching, recently added), each library with sort and filters, search, and details pages for movies, shows, seasons and episodes. Mark things watched or unwatched.
+- **Continue Watching** cards have a Remove button (on hover, always on touch screens, and reachable with Tab), and a details page with a resume position has Remove from Continue Watching. Either forgets your resume position without marking the title watched, and only for you (`DELETE /api/v1/items/{id}/progress`).
+- **Search as you type:** after two characters the search box lists up to eight matching titles with poster, year or episode, and kind. Arrow keys and Enter open one; Enter with none highlighted shows every result; Escape closes the list.
+- **Keyboard:** press `?` anywhere outside a text field for the list of shortcuts, `/` to jump to search. In the player: Space or K to play or pause, the arrow keys to skip back or forward, F for full screen, M to mute, Escape to leave.
 - **Play** in the browser, resuming where any device left off. The browser tells the server what it can decode. A file it cannot play directly because of its container or its audio (most often E-AC-3, AC-3 or DTS, which browsers do not decode) plays as a converted stream: the video is copied untouched and only the audio is converted to AAC, a fraction of one CPU core, with VCRX's own seek bar. Video the browser cannot decode at all is refused with the reason until full transcoding lands; the TV app still plays it. Subtitles: pick any text track, sidecar or inside the file.
 - **Activity** for admins: now playing with a Stop button, history, stats and users.
 - **Sign-in:** with `auto_sign_in_user` set, a browser on a trusted network is signed straight in; otherwise it shows a sign-in form. The session is an HttpOnly cookie, and every change the page makes carries a header a cross-site page cannot send.
@@ -194,7 +197,7 @@ golangci-lint run
 govulncheck ./...
 ```
 
-To work on the web app or the API against a few generated test clips: `./scripts/dev-server.sh`, then open http://127.0.0.1:3751/. It builds the clips with ffmpeg on first run, serves the web files from `server/web/static` so an edit shows on reload, and signs the local browser in. `server/web/check-js.sh` is the web app's compile check, and `node scripts/web-smoke.mjs` drives every page and both playback paths in headless Chrome against the dev server; CI runs both.
+To work on the web app or the API against a few generated test clips: `./scripts/dev-server.sh`, then open http://127.0.0.1:3751/. It builds the clips with ffmpeg on first run, serves the web files from `server/web/static` so an edit shows on reload, and signs the local browser in. `server/web/check-js.sh` is the web app's compile check, and `node scripts/web-smoke.mjs` drives every page (at desktop and phone width), both playback paths, Continue Watching removal, search as you type and the shortcuts list in headless Chrome against the dev server; CI runs both.
 
 On NixOS, run `nix-shell` at the repo root first: [shell.nix](shell.nix) provides these tools, plus the Docker client and adb for the TV app. The API contract is [server/api/openapi.yaml](server/api/openapi.yaml), served at `/api/v1/openapi.yaml`; a test fails when it and the registered routes disagree. Migrations are forward-only SQL files in `server/internal/db/migrations`.
 
