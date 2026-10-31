@@ -4,6 +4,7 @@ import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -39,12 +40,57 @@ import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class HomeViewModel(private val graph: AppGraph) : ViewModel() {
     var state by mutableStateOf<LoadState<List<HomeRow>>>(LoadState.Loading)
         private set
     private var loadedAt = 0L
+
+    /** The hero's title: the day's featured one, then whichever card has focus. */
+    var hero by mutableStateOf<Item?>(null)
+        private set
+    var heroFeatured by mutableStateOf(true)
+        private set
+    private var featuredId: Long? = null
+    private val details = HashMap<Long, Item>()
+    private var heroJob: Job? = null
+
+    /**
+     * Show [item] in the hero: its summary at once, its details (plot, rating,
+     * next episode) after focus has rested a moment, so a fast scroll along a
+     * row does not ask the server about every card it passes.
+     */
+    fun showInHero(item: Item, featured: Boolean = false) {
+        heroFeatured = featured
+        hero = details[item.id] ?: item
+        heroJob?.cancel()
+        if (details.containsKey(item.id)) return
+        heroJob = viewModelScope.launch {
+            if (!featured) delay(HERO_DETAIL_DELAY_MS)
+            val full = try {
+                graph.api.item(item.id)
+            } catch (e: ApiException) {
+                return@launch
+            }
+            details[item.id] = full
+            if (hero?.id == item.id) hero = full
+        }
+    }
+
+    private fun feature(rows: List<HomeRow>) {
+        val pick = HomeRows.featured(rows, System.currentTimeMillis() / 86_400_000L)
+        if (pick == null) {
+            hero = null
+            return
+        }
+        // A refresh after playback keeps whatever the hero was showing.
+        if (pick.id == featuredId && hero != null) return
+        featuredId = pick.id
+        showInHero(pick, featured = true)
+    }
 
     init {
         load()
@@ -57,6 +103,9 @@ class HomeViewModel(private val graph: AppGraph) : ViewModel() {
             state = try {
                 LoadState.Ready(HomeRows.toShow(graph.api.home())).also {
                     loadedAt = SystemClock.elapsedRealtime()
+                    // Played since? Details come again, for resume points.
+                    details.clear()
+                    feature(it.value)
                 }
             } catch (e: ApiException) {
                 if (quiet && state is LoadState.Ready) state else LoadState.Failed(e)
@@ -89,12 +138,27 @@ fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
                 "Add a library on the server and scan it, or ask the server admin to grant you one.",
             )
         } else {
-            LazyColumn(
-                contentPadding = PaddingValues(top = 24.dp, bottom = 48.dp),
-                verticalArrangement = Arrangement.spacedBy(28.dp),
-            ) {
-                itemsIndexed(rows, key = { _, row -> row.id }) { index, row ->
-                    HomeRowView(row, focus, firstRow = index == 0)
+            val heroItem = vm.hero
+            val heroFocus = remember { FocusRequester() }
+            Column(Modifier.fillMaxSize()) {
+                if (heroItem != null) HomeHero(heroItem, vm.heroFeatured, heroFocus)
+                LazyColumn(
+                    Modifier.weight(1f),
+                    contentPadding = PaddingValues(top = if (heroItem != null) 8.dp else 24.dp, bottom = 48.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    itemsIndexed(rows, key = { _, row -> row.id }) { index, row ->
+                        HomeRowView(row, focus, firstRow = index == 0 && heroItem == null, onFocused = { vm.showInHero(it) })
+                    }
+                }
+            }
+            // The rail handed over: the hero's Play takes focus, as the first
+            // card did before Home had a hero.
+            val heroTakes = heroItem != null && focus.toContent && focus.restoreItemId == null
+            LaunchedEffect(heroTakes) {
+                if (heroTakes) {
+                    runCatching { heroFocus.requestFocus() }
+                    focus.toContent = false
                 }
             }
         }
@@ -103,20 +167,31 @@ fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
 
 private fun shapeFor(row: HomeRow): CardShape = if (HomeRows.wide(row)) CardShape.Wide else CardShape.Poster
 
+/** Home's cards, smaller than the grids' toward Plex's density: about 20 percent. */
+private val HOME_POSTER_WIDTH = 116.dp
+private val HOME_WIDE_WIDTH = 200.dp
+
+/** How long focus rests on a card before the hero asks for its details. */
+private const val HERO_DETAIL_DELAY_MS = 350L
+
 @Composable
-private fun HomeRowView(row: HomeRow, focus: BrowseFocus, firstRow: Boolean) {
+private fun HomeRowView(row: HomeRow, focus: BrowseFocus, firstRow: Boolean, onFocused: (Item) -> Unit) {
     val actions = LocalAppActions.current
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Label(row.title, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 24.dp))
         LazyRow(
             modifier = Modifier.focusRestorer(),
             contentPadding = PaddingValues(horizontal = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             itemsIndexed(row.items, key = { _, item -> item.id }) { index, item ->
+                val shape = shapeFor(row)
                 ItemCard(
                     item = item,
-                    shape = shapeFor(row),
+                    shape = shape,
+                    width = if (shape == CardShape.Poster) HOME_POSTER_WIDTH else HOME_WIDE_WIDTH,
+                    showTitle = false,
+                    onFocused = { onFocused(item) },
                     onClick = {
                         focus.restoreItemId = item.id
                         focus.restoreRowId = row.id

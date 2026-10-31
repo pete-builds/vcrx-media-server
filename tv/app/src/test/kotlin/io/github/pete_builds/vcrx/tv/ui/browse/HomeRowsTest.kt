@@ -75,4 +75,45 @@ class HomeRowsTest {
         assertEquals(listOf("trending", "seasonal"), layout.rows.map { it.key })
         assertFalse(layout.rows[0].enabled)
     }
+
+    private fun art(id: Long, kind: String = "movie", backdrop: Boolean = true) =
+        """{"id": $id, "kind": "$kind", "title": "Title $id", "has_backdrop": $backdrop}"""
+
+    private fun rows(json: String) = ApiJson.decodeFromString(HomeResponse.serializer(), json).rows
+
+    @Test
+    fun featuredMatchesTheWebPick() {
+        val home = rows(
+            """
+            {"rows": [
+              {"id": "continue_watching", "kind": "continue_watching", "title": "Continue", "items": [${art(1)}]},
+              {"id": "trending", "kind": "trending", "title": "Trending", "items": [${art(2)}, ${art(3, "episode")}, ${art(4, backdrop = false)}]},
+              {"id": "recently_added_movies:1", "kind": "recently_added_movies", "title": "New", "items": [${art(5)}, ${art(2)}]}
+            ]}
+            """.trimIndent(),
+        )
+        // Recently Added first (5, 2), then the rest (4 has no art); never
+        // Continue Watching, never an episode. Day 0 is the first choice.
+        assertEquals(5L, HomeRows.featured(home, 0)?.id)
+        assertEquals(2L, HomeRows.featured(home, 1)?.id)
+        assertEquals(5L, HomeRows.featured(home, 2)?.id)
+        // The same all day: the pick turns over by date, not by visit.
+        assertEquals(HomeRows.featured(home, 20_000)?.id, HomeRows.featured(home, 20_000)?.id)
+    }
+
+    @Test
+    fun featuredFallsBackToTitlesWithoutArtAndToNothing() {
+        val noArt = rows("""{"rows": [{"id": "a", "kind": "x", "title": "A", "items": [${art(7, backdrop = false)}]}]}""")
+        assertEquals(7L, HomeRows.featured(noArt, 3)?.id)
+        val onlyEpisodes = rows("""{"rows": [{"id": "a", "kind": "x", "title": "A", "items": [${art(8, "episode")}]}]}""")
+        assertEquals(null, HomeRows.featured(onlyEpisodes, 3))
+    }
+
+    @Test
+    fun featuredPicksFromTheFirstEightWithArt() {
+        val many = (1L..12L).joinToString(", ") { art(it) }
+        val home = rows("""{"rows": [{"id": "recently_added_movies:1", "kind": "recently_added_movies", "title": "New", "items": [$many]}]}""")
+        val picks = (0L until 40L).mapNotNull { HomeRows.featured(home, it)?.id }.toSet()
+        assertEquals((1L..8L).toSet(), picks)
+    }
 }

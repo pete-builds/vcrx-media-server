@@ -1,6 +1,7 @@
 package io.github.pete_builds.vcrx.tv.ui.browse
 
 import io.github.pete_builds.vcrx.tv.net.HomeRow
+import io.github.pete_builds.vcrx.tv.net.Item
 
 /**
  * What Home draws from the server's rows, kept free of Compose so it can be
@@ -35,4 +36,24 @@ object HomeRows {
      */
     fun restores(restoreItemId: Long?, restoreRowId: String?, itemId: Long, rowId: String?): Boolean =
         restoreItemId == itemId && (restoreRowId == null || rowId == null || restoreRowId == rowId)
+
+    /**
+     * The hero's featured title, the same pick as the web's Home (views/home.js
+     * feature()): movies and shows from the Recently Added rows first, then the
+     * rest, never Continue Watching; those with backdrop art preferred; the
+     * first eight; one per day, so Home does not reshuffle on every visit and
+     * both clients show the same title. [epochDay] is days since 1970 in UTC.
+     */
+    fun featured(rows: List<HomeRow>, epochDay: Long): Item? {
+        val recent = { r: HomeRow -> r.kind.startsWith("recently_added") }
+        val pool = LinkedHashMap<Long, Item>()
+        for (row in rows.filter(recent) + rows.filterNot(recent)) {
+            if (row.id == "continue_watching") continue
+            row.items.filter { it.kind == "movie" || it.kind == "show" }.forEach { pool.putIfAbsent(it.id, it) }
+        }
+        val withArt = pool.values.filter { it.hasBackdrop }
+        val choices = (withArt.ifEmpty { pool.values.toList() }).take(8)
+        if (choices.isEmpty()) return null
+        return choices[Math.floorMod(epochDay, choices.size.toLong()).toInt()]
+    }
 }
