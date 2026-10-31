@@ -4,6 +4,7 @@ import io.github.pete_builds.vcrx.tv.net.ApiJson
 import io.github.pete_builds.vcrx.tv.net.Marker
 import io.github.pete_builds.vcrx.tv.net.PlaybackSession
 import io.github.pete_builds.vcrx.tv.net.PlaybackSettings
+import io.github.pete_builds.vcrx.tv.settings.SkipIntroMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -96,5 +97,15 @@ class SkipMarkersTest {
         val old = ApiJson.decodeFromString(PlaybackSession.serializer(), oldBody)
         assertTrue(old.markers.isEmpty())
         assertEquals("button", old.skipMarkers)
+    }
+
+    @Test
+    fun settingsRowMapsToTheServersValue() {
+        for (mode in SkipIntroMode.entries) assertEquals(mode, skipIntroMode(mode.wire()))
+        assertEquals("button", SkipIntroMode.ShowButton.wire())
+        assertEquals("auto", SkipIntroMode.Automatic.wire())
+        assertEquals("off", SkipIntroMode.Off.wire())
+        // A value from a newer server falls back to the button.
+        assertEquals(SkipIntroMode.ShowButton, skipIntroMode("sometimes"))
     }
 }

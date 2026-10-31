@@ -17,6 +17,7 @@ import io.github.pete_builds.vcrx.tv.ui.connect.LoginScreen
 import io.github.pete_builds.vcrx.tv.ui.collection.CollectionScreen
 import io.github.pete_builds.vcrx.tv.ui.details.DetailsScreen
 import io.github.pete_builds.vcrx.tv.ui.settings.AboutScreen
+import io.github.pete_builds.vcrx.tv.ui.settings.SettingsScreen
 import io.github.pete_builds.vcrx.tv.ui.theme.BrandTheme
 
 class MainActivity : ComponentActivity() {
@@ -45,6 +46,7 @@ class MainActivity : ComponentActivity() {
                             CollectionScreen(route.collectionId, route.name)
                         }
                         composable<AboutRoute> { AboutScreen() }
+                        composable<SettingsRoute> { entry -> SettingsScreen(entry.toRoute<SettingsRoute>().page) }
                     }
                 }
             }

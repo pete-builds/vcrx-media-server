@@ -6,14 +6,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.Marker
 import io.github.pete_builds.vcrx.tv.net.PlaybackSettings
+import io.github.pete_builds.vcrx.tv.settings.SkipIntroMode
 import io.github.pete_builds.vcrx.tv.ui.components.BrandButton
+import kotlinx.coroutines.launch
 
 /**
  * What the Skip button would do now: its label, where it seeks, whether it goes
@@ -79,5 +84,39 @@ fun SkipButton(controller: PlaybackController) {
         } else {
             runCatching { focus.requestFocus() }
         }
+    }
+}
+
+/** The Settings choice as the server stores it (skip_markers), shared with the web app. */
+fun SkipIntroMode.wire(): String = when (this) {
+    SkipIntroMode.ShowButton -> PlaybackSettings.BUTTON
+    SkipIntroMode.Automatic -> PlaybackSettings.AUTO
+    SkipIntroMode.Off -> PlaybackSettings.OFF
+}
+
+/** The server's skip_markers as the Settings choice; anything unknown is the button. */
+fun skipIntroMode(wire: String): SkipIntroMode = when (wire) {
+    PlaybackSettings.AUTO -> SkipIntroMode.Automatic
+    PlaybackSettings.OFF -> SkipIntroMode.Off
+    else -> SkipIntroMode.ShowButton
+}
+
+/**
+ * For the Settings "Skip intro" row. The server's skip_markers is the one value: the
+ * web app and every playback session read it. The local preference mirrors it: the
+ * server's value is read when the row appears, and a pick is saved locally and on the
+ * server. Offline, the pick stays local and the server keeps the old value.
+ */
+@Composable
+fun rememberServerSkipIntro(current: SkipIntroMode, setLocal: (SkipIntroMode) -> Unit): (SkipIntroMode) -> Unit {
+    val api = LocalContext.current.graph.api
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        val server = runCatching { api.playbackSettings() }.getOrNull() ?: return@LaunchedEffect
+        skipIntroMode(server.skipMarkers).takeIf { it != current }?.let(setLocal)
+    }
+    return { mode ->
+        setLocal(mode)
+        scope.launch { runCatching { api.setPlaybackSettings(PlaybackSettings(mode.wire())) } }
     }
 }

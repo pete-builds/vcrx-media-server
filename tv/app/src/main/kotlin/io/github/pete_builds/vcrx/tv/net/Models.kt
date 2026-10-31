@@ -151,6 +151,8 @@ data class Item(
     @SerialName("next_episode") val nextEpisode: Item? = null,
     /** Collections this item is in, such as a film series. */
     val collections: List<CollectionRef> = emptyList(),
+    /** A short line some Home rows add, such as "3 new episodes"; null elsewhere. */
+    val note: String? = null,
     /** A movie's or show's local trailers, featurettes and the like, trailers first. */
     val extras: List<Extra> = emptyList(),
     /** What the Trailer button plays: a local extra first, else YouTube when the server offers it. */
@@ -202,16 +204,45 @@ data class ItemPage(
 @Serializable
 data class ItemsResponse(val items: List<Item> = emptyList())
 
+/**
+ * One Home row. The server decides which rows exist and their order (the
+ * user's Home layout); the app draws whatever comes. [id] is stable and is the
+ * key for GET /api/v1/rows/{id} when [seeAll] is true.
+ */
 @Serializable
 data class HomeRow(
     val id: String,
     val title: String,
+    val kind: String = "",
     @SerialName("library_id") val libraryId: Long? = null,
+    @SerialName("see_all") val seeAll: Boolean = false,
     val items: List<Item> = emptyList(),
 )
 
 @Serializable
 data class HomeResponse(val rows: List<HomeRow> = emptyList())
+
+/** One slot of the Home layout: a kind of row, whether it shows, and its place. */
+@Serializable
+data class HomeLayoutRow(
+    val key: String,
+    val title: String = "",
+    val description: String = "",
+    val enabled: Boolean = true,
+)
+
+/** The caller's Home layout; [source] is "user", "server" or "default". */
+@Serializable
+data class HomeLayout(
+    val rows: List<HomeLayoutRow> = emptyList(),
+    val source: String = "default",
+)
+
+@Serializable
+data class HomeLayoutEntry(val key: String, val enabled: Boolean)
+
+@Serializable
+data class HomeLayoutInput(val rows: List<HomeLayoutEntry>)
 
 @Serializable
 data class SetWatchedRequest(val played: Boolean)
@@ -266,6 +297,8 @@ data class SubtitleSource(
     val language: String? = null,
     val title: String? = null,
     @SerialName("is_forced") val isForced: Boolean = false,
+    /** A track inside the media file; its WebVTT copy may answer 202 while the server reads it out. */
+    val embedded: Boolean = false,
 )
 
 @Serializable
@@ -293,6 +326,11 @@ data class PlaybackSession(
     val version: Version,
     val stream: StreamInfo,
     val subtitles: List<SubtitleSource> = emptyList(),
+    /**
+     * Every text track, sidecar or embedded, as WebVTT. A converted stream carries no
+     * subtitles of its own, so the app shows these itself, timed to the file.
+     */
+    @SerialName("webvtt_subtitles") val webVttSubtitles: List<SubtitleSource> = emptyList(),
     @SerialName("resume_position_ms") val resumePositionMs: Long = 0,
     @SerialName("heartbeat_interval_ms") val heartbeatIntervalMs: Long = 10_000,
     /** Intro and credits, for Skip Intro and Skip Credits (player/SkipMarkers.kt). */

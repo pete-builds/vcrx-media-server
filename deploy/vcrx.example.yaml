@@ -30,6 +30,12 @@ server_name: VCRX
 #marker_intro_minutes: 10      # how much of the start of each episode is compared
 #marker_credits_minutes: 8     # and of the end
 
+# Subtitles from OpenSubtitles, when VCRX_OPENSUBTITLES_API_KEY is set in .env:
+# the languages searched by default, and whether to fetch them for new files
+# that have none (once per file; off by default).
+#subtitle_languages: [en]
+#subtitle_auto_fetch: true
+
 # Trailers from local files (Movie-trailer.mkv, a Trailers folder) always work,
 # offline. With a TMDb key, this also offers each title's official YouTube
 # trailer when there is no local one; playing it needs the internet.

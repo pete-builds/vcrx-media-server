@@ -5,6 +5,8 @@ import io.github.pete_builds.vcrx.tv.net.Item
 import io.github.pete_builds.vcrx.tv.net.PlaybackRequest
 import io.github.pete_builds.vcrx.tv.net.Capabilities
 import io.github.pete_builds.vcrx.tv.net.Trailer
+import io.github.pete_builds.vcrx.tv.settings.Preferences
+import io.github.pete_builds.vcrx.tv.settings.TrailerMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -62,6 +64,17 @@ class TrailersTest {
         assertEquals(TrailerSource.LocalOnly, trailerSource(null, serverOffersYouTube = false))
         assertEquals(TrailerSource.Off, trailerSource(TrailerSource.Off, serverOffersYouTube = true))
         assertEquals(TrailerSource.LocalOnly, trailerSource(TrailerSource.LocalOnly, serverOffersYouTube = true))
+    }
+
+    @Test
+    fun theSettingsRowDrivesTheChoice() {
+        // Untouched Settings: local and YouTube, so a server offering YouTube trailers gets its button.
+        assertEquals(TrailerSource.LocalAndYouTube, TrailerSettings.chosen(Preferences()))
+        assertSame(youtube, offeredTrailer(youtube, TrailerSettings.chosen(Preferences())))
+        assertEquals(TrailerSource.Off, TrailerSettings.chosen(Preferences(trailers = TrailerMode.Off)))
+        assertEquals(TrailerSource.LocalOnly, TrailerSettings.chosen(Preferences(trailers = TrailerMode.LocalOnly)))
+        assertNull(offeredTrailer(youtube, TrailerSettings.chosen(Preferences(trailers = TrailerMode.LocalOnly))))
+        assertTrue(Preferences().themeMusic)
     }
 
     @Test

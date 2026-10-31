@@ -246,3 +246,43 @@ func TestNoMarkersOnAnExtrasSession(t *testing.T) {
 		t.Errorf("trailer session (no item_id) carries the film's markers: %+v", got)
 	}
 }
+
+// The access walk's hidden episodes, each with an intro: the open friend gets
+// the markers on the episode and on its session (so the check can fail); the
+// restricted friend gets a 404 for both, so markers cannot leak through
+// either. The admin marker routes are in the walk's admin loop (403 for the
+// friend, 403 lan_only for the admin off the LAN).
+func TestAccessWalkHidesMarkers(t *testing.T) {
+	w := newWalkFixture(t)
+	hidden := []int64{w.horrorEpisode, w.strictEpisode}
+	for _, id := range hidden {
+		if err := markers.SetManual(context.Background(), w.db, id, markers.Intro, 1000, 31_000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	type withMarkers struct{ Markers []markerJSON }
+	look := func(id int64) (detail, session int, n int) {
+		var d, s withMarkers
+		r := w.do("GET", fmt.Sprintf("/api/v1/items/%d", id), w.friendTok, nil)
+		if r.code == 200 {
+			r.json(t, &d)
+		}
+		r2 := w.do("POST", "/api/v1/playback/sessions", w.friendTok, map[string]any{"item_id": id, "capabilities": tclCaps()})
+		if r2.code == 201 {
+			r2.json(t, &s)
+		}
+		return r.code, r2.code, len(d.Markers) + len(s.Markers)
+	}
+	w.open()
+	for _, id := range hidden {
+		if d, s, n := look(id); d != 200 || s != 201 || n != 2 {
+			t.Fatalf("open friend, episode %d: detail %d, session %d, %d markers; want 200, 201, 2", id, d, s, n)
+		}
+	}
+	w.restrict()
+	for _, id := range hidden {
+		if d, s, n := look(id); d != 404 || s != 404 || n != 0 {
+			t.Errorf("restricted friend, episode %d: detail %d, session %d, %d markers; want 404, 404, 0", id, d, s, n)
+		}
+	}
+}

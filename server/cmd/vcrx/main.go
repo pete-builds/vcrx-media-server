@@ -38,15 +38,18 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/config"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
+	"github.com/pete-builds/vcrx-media-server/server/internal/homelists"
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
 	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
+	"github.com/pete-builds/vcrx-media-server/server/internal/opensubtitles"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/probe"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
+	"github.com/pete-builds/vcrx-media-server/server/internal/subsearch"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 	"github.com/pete-builds/vcrx-media-server/server/internal/tmdb"
 	"github.com/pete-builds/vcrx-media-server/server/web"
@@ -116,8 +119,11 @@ func main() {
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		var ok bool
+		if ok, err = devCommand(cmd, args); !ok {
+			fmt.Fprint(os.Stderr, usage)
+			os.Exit(2)
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "vcrx:", err)
@@ -261,7 +267,11 @@ func serve() error {
 	}
 	scanner := &library.Scanner{DB: a.db, Prober: prober, Log: log.With("component", "scanner"), ProbeConcurrency: cfg.ProbeConcurrency}
 	scans := library.NewManager(scanner, log.With("component", "scans"))
-	cat := &catalog.Catalog{DB: a.db, TrailersYouTube: cfg.YouTubeTrailers()}
+	seasons, err := catalog.LoadSeasons(cfg.ConfigDir)
+	if err != nil {
+		return err
+	}
+	cat := &catalog.Catalog{DB: a.db, Seasons: seasons, Today: devHomeDate(log), TrailersYouTube: cfg.YouTubeTrailers()}
 	authStore := &auth.Store{DB: a.db, TTL: cfg.SessionTTL}
 	// Converted streams that copy the video convert at most the audio, a small
 	// fraction of a core each; four at once is well within nix1's budget.
@@ -290,6 +300,17 @@ func serve() error {
 			hooks.Send(notify.Notice{Event: notify.Added, Library: lib.Name, Titles: titles, Message: notify.AddedSummary(titles)})
 		}
 		log.Info("webhooks on", "count", len(cfg.WebhookURLs), "events", cfg.WebhookEvents)
+	}
+
+	subs := subtitleSearch(ctx, a, version)
+	if cfg.SubtitleAutoFetch && subs.CanDownload() {
+		prev := scanner.OnAdded
+		scanner.OnAdded = func(ctx context.Context, lib library.Library, run library.Run, idsAbove int64) {
+			if prev != nil {
+				prev(ctx, lib, run, idsAbove)
+			}
+			subs.Kick()
+		}
 	}
 
 	proxies, err := prefixes(cfg.TrustedProxies)
@@ -350,6 +371,7 @@ func serve() error {
 		Artwork: art, Admin: adm, Scans: scanAdapter{scans},
 		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, Remux: rmx, HLS: hls, WebDir: os.Getenv("VCRX_WEB_DIR"),
 		Subtitles:        subtitles.New(cfg.SubtitleCacheDir(), cfg.FFmpegPath, log.With("component", "subtitles")),
+		SubSearch:        subs,
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
 		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets, AllowedHosts: cfg.AllowedHosts,
@@ -392,6 +414,13 @@ func serve() error {
 		go enr.Run(ctx, 2*time.Minute, 15*time.Minute)
 	} else {
 		log.Info("TMDb enrichment is off: set VCRX_TMDB_API_KEY for posters and plots")
+	}
+	switch {
+	case cfg.TMDbHomeLists && cfg.TMDbAPIKey == "":
+		log.Warn("tmdb_home_lists is on but there is no TMDb key, so Home has no TMDb rows")
+	case cfg.TMDbHomeLists:
+		lists := &homelists.Refresher{DB: a.db, TMDb: tmdb.New(cfg.TMDbAPIKey, cfg.TMDbLanguage), Log: log.With("component", "homelists")}
+		go lists.Run(ctx, 6*time.Hour)
 	}
 	switch {
 	case cfg.YouTubeTrailers():
@@ -442,6 +471,38 @@ func serve() error {
 		log.Warn("scans did not stop cleanly", "err", err)
 	}
 	return herr
+}
+
+// subtitleSearch sets up OpenSubtitles search, off without an API key, and
+// starts the automatic fetch when it is turned on and downloads can work.
+func subtitleSearch(ctx context.Context, a *app, version string) *subsearch.Service {
+	cfg, log := a.cfg, a.log
+	var provider subsearch.Provider
+	switch {
+	case cfg.OpenSubtitlesStub:
+		provider = opensubtitles.NewStub()
+		log.Warn("subtitle search uses the offline stub (VCRX_OPENSUBTITLES_STUB): results are invented, for development only")
+	case cfg.OpenSubtitlesAPIKey != "":
+		provider = opensubtitles.New(cfg.OpenSubtitlesAPIKey, cfg.OpenSubtitlesUsername, cfg.OpenSubtitlesPassword, "VCRX v"+version)
+	}
+	subs := subsearch.New(a.db, provider, cfg.SubtitleDownloadDir(), cfg.SubtitleLanguages, log.With("component", "subsearch"))
+	switch {
+	case provider == nil:
+		log.Info("subtitle search is off: set VCRX_OPENSUBTITLES_API_KEY to search OpenSubtitles")
+		return subs
+	case !subs.CanDownload():
+		log.Warn("subtitle search is on but downloads are off: set VCRX_OPENSUBTITLES_USERNAME and VCRX_OPENSUBTITLES_PASSWORD")
+	default:
+		log.Info("subtitle search on", "languages", subs.Languages, "auto_fetch", cfg.SubtitleAutoFetch)
+	}
+	if cfg.SubtitleAutoFetch && subs.CanDownload() {
+		if err := subs.InitAuto(ctx); err != nil {
+			log.Error("automatic subtitle fetch off", "err", err)
+			return subs
+		}
+		go subs.RunAuto(ctx, 30*time.Minute)
+	}
+	return subs
 }
 
 // rootStates answers the readiness check: each library root must list, quickly.

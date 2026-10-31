@@ -4,7 +4,9 @@
 // missing its main content, a video that does not play, search as you type that
 // lists nothing, a Continue Watching Remove control that does not remove, a
 // keyboard shortcuts list that does not open, a Home feature whose Play does
-// not play, season tabs that do not switch, or a phone menu that does not open.
+// not play, season tabs that do not switch, a phone menu that does not open,
+// Home rows missing (the Halloween row, with the dev server's fixed date),
+// or a Customize Home editor that does not hide or move a row.
 //
 //   node scripts/web-smoke.mjs [base-url]      (default http://127.0.0.1:3751)
 //
@@ -179,6 +181,8 @@ async function main() {
     ["/settings", ".settings h1"],
     ["/settings/libraries", "table.list"],
     ["/settings/users", ".user-summary"],
+    ["/settings/home", ".layout-list li"],
+    ["/row/trending", ".grid .card"],
     ["/settings/newsletter", ".newsletter-form"],
     ["/settings/markers", "table.list"],
   ];
@@ -198,7 +202,10 @@ async function main() {
     if (!res.found) fail(`#${path}`, `no ${selector}`);
     if (res.error) fail(`#${path}`, `shows an error box: ${res.text.slice(0, 160).replace(/\n/g, " ")}`);
     const junk = res.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
-    if (junk) fail(`#${path}`, `shows "${junk[0]}"`);
+    if (junk) {
+      const at = res.text.slice(Math.max(0, junk.index - 60), junk.index + 20).replace(/\s+/g, " ");
+      fail(`#${path}`, `shows "${junk[0]}" in "...${at}..."`);
+    }
     if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
   }
 
@@ -286,6 +293,84 @@ async function main() {
     }
   }
   if (exceptions.length) fail("continue watching", `threw: ${exceptions[0]}`);
+
+  // Home's rows: the dev server pins Home's date to Oct 31 and seeds plays,
+  // so Halloween, Trending and the others must all be there, each with at
+  // least four titles, and See all must open a row's grid.
+  console.log("home rows");
+  exceptions = [];
+  const homeRows = async () => {
+    await s("Page.navigate", { url: `${base}/#/` });
+    return evaluate(`${wait(`document.querySelectorAll("#view .row").length > 3`)}
+      return [...document.querySelectorAll("#view .row")].map((r) => ({ id: r.dataset.row, title: r.querySelector("h2").innerText,
+        cards: r.querySelectorAll("a.card").length, notes: [...r.querySelectorAll(".sub.note")].map((n) => n.innerText),
+        titles: [...r.querySelectorAll("a.card .title")].map((t) => t.innerText),
+        more: r.querySelector(".row-head a") ? r.querySelector(".row-head a").getAttribute("href") : null }));`);
+  };
+  const rowsBefore = await homeRows();
+  const ids0 = rowsBefore.map((r) => r.id);
+  for (const want of ["seasonal:halloween", "trending", "top_rated_movies", "most_watched", "recently_released", "unwatched_gems"]) {
+    if (!ids0.includes(want)) fail("home rows", `no ${want} row; rows: ${ids0.join(" ")}`);
+  }
+  if (!ids0.some((id) => id.startsWith("because_you_watched:"))) fail("home rows", `no Because You Watched row; rows: ${ids0.join(" ")}`);
+  for (const r of rowsBefore) {
+    if (r.id !== "continue_watching" && r.cards < 4) fail("home rows", `${r.id} shows ${r.cards} titles, fewer than four`);
+  }
+  const halloween = rowsBefore.find((r) => r.id === "seasonal:halloween");
+  if (halloween && !halloween.titles.some((t) => /Hollow Pines|Lantern Hour|Grave Weather/.test(t))) {
+    fail("home rows", `the Halloween row has no horror: ${halloween.titles.join(", ")}`);
+  }
+  const tvRow = rowsBefore.find((r) => r.id.startsWith("recently_added_tv:"));
+  if (!tvRow || !tvRow.notes.some((n) => /new episode/.test(n))) fail("home rows", `Recently Added TV has no "new episodes" note: ${JSON.stringify(tvRow)}`);
+  const trendingRow = rowsBefore.find((r) => r.id === "trending");
+  if (trendingRow) {
+    if (trendingRow.more !== "#/row/trending") fail("home rows", `Trending's See all goes to ${trendingRow.more}`);
+    await s("Page.navigate", { url: `${base}/${trendingRow.more}` });
+    const grid = await evaluate(`${wait(`document.querySelectorAll(".grid .card").length`)}
+      return { n: document.querySelectorAll(".grid .card").length, h1: document.querySelector(".toolbar h1")?.innerText };`);
+    if (grid.n < trendingRow.cards || grid.h1 !== trendingRow.title) fail("home rows", `See all for Trending: ${JSON.stringify(grid)}`);
+  }
+  if (exceptions.length) fail("home rows", `threw: ${exceptions[0]}`);
+
+  // Customize Home, by keyboard: Space on a row's checkbox hides it, Enter on
+  // Move up moves it and keeps the focus on it, and Reset brings Home back.
+  console.log("customize home");
+  exceptions = [];
+  const editor = async () => {
+    await s("Page.navigate", { url: `${base}/#/settings/home` });
+    return evaluate(`${wait(`document.querySelectorAll(".layout-list li").length > 5`)}
+      return [...document.querySelectorAll(".layout-list li")].map((li) => ({ key: li.dataset.key, on: li.querySelector("input").checked }));`);
+  };
+  await editor();
+  await evaluate(`document.querySelector('.layout-list li[data-key="seasonal"] input').focus();`);
+  await press(" ", "Space", 32, " ");
+  const hidden = await evaluate(`${wait(`document.querySelector(".layout-source").innerText.includes("your own")`)}
+    return document.querySelector('.layout-list li[data-key="seasonal"] input').checked;`);
+  if (hidden) fail("customize home", "Space did not turn the seasonal row off");
+  const afterHide = (await homeRows()).map((r) => r.id);
+  if (afterHide.some((id) => id.startsWith("seasonal:"))) fail("customize home", `a hidden row still shows: ${afterHide.join(" ")}`);
+  const order0 = await editor();
+  const at = order0.findIndex((r) => r.key === "trending");
+  const above = order0[at - 1].key;
+  await evaluate(`document.querySelector('.layout-list li[data-key="trending"] [data-move="up"]').focus();`);
+  await press("Enter", "Enter", 13, "\r");
+  const moved = await evaluate(`${wait(`[...document.querySelectorAll(".layout-list li")].findIndex((li) => li.dataset.key === "trending") === ${at - 1}`)}
+    const keys = [...document.querySelectorAll(".layout-list li")].map((li) => li.dataset.key);
+    const f = document.activeElement;
+    return { at: keys.indexOf("trending"), focus: f && f.closest("li") ? f.closest("li").dataset.key + ":" + f.dataset.move : String(f && f.tagName) };`);
+  if (moved.at !== at - 1) fail("customize home", `Move up left Trending at ${moved.at}, from ${at}`);
+  if (moved.focus !== "trending:up") fail("customize home", `focus went to ${moved.focus} after moving`);
+  const kindOf = (id) => id.split(":")[0].replace(/^(genre|collection|best_of_decade)$/, "x");
+  const order1 = (await homeRows()).map((r) => kindOf(r.id));
+  const ti = order1.indexOf("trending");
+  const ai = order1.indexOf(kindOf(above));
+  if (ti < 0 || (ai >= 0 && ti > ai)) fail("customize home", `Home did not follow the new order: ${order1.join(" ")}`);
+  await editor();
+  await evaluate(`[...document.querySelectorAll(".layout-actions button")].find((b) => b.innerText.includes("Reset")).click();`);
+  await evaluate(`${wait(`!document.querySelector(".layout-source").innerText.includes("your own")`)}`);
+  const restored = (await homeRows()).map((r) => r.id);
+  if (!restored.includes("seasonal:halloween")) fail("customize home", `Reset did not bring the Halloween row back: ${restored.join(" ")}`);
+  if (exceptions.length) fail("customize home", `threw: ${exceptions[0]}`);
 
   // Search as you type: suggestions after two characters, arrow keys and Enter
   // open one, Escape closes, Enter with none highlighted goes to the results.
@@ -478,9 +563,15 @@ async function main() {
       v.play().catch(() => {});
       for (let i = 0; i < 80 && !(v.currentTime > 1.5); i++) await new Promise((r) => setTimeout(r, 150));
       const pill = document.querySelector(".player .pill");
+      // All the player's text, hidden controls included: they show on the next
+      // mouse move, so a "null" there is one the viewer will see.
+      const shell = v.closest(".player");
       return { ok: v.currentTime > 1.5, t: v.currentTime, err: v.error && v.error.code, converted: !v.controls, pill: pill ? pill.textContent : null,
+        text: shell ? shell.textContent : "",
         why: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
     if (!res.ok) fail(`play ${label}`, `video did not advance (t=${res.t}, media error ${res.err}) ${res.why || ""}`);
+    const playerJunk = (res.text || "").match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+    if (playerJunk) fail(`play ${label}`, `the player shows "${playerJunk[0]}": ${res.text.slice(0, 160).replace(/\s+/g, " ")}`);
     if (res.converted !== (wantDecision === "converted")) fail(`play ${label}`, `expected a ${wantDecision} stream`);
     if (wantPill && res.pill !== wantPill) fail(`play ${label}`, `labelled "${res.pill}", expected "${wantPill}"`);
     if (exceptions.length) fail(`play ${label}`, `threw: ${exceptions[0]}`);
@@ -492,6 +583,73 @@ async function main() {
     (await evaluate(`return document.createElement("video").canPlayType("application/vnd.apple.mpegurl") !== ""`));
   if (nativeHLS) await hlsPlayer(s, evaluate, ids);
   else await hlsMSE(evaluate, ids);
+
+  // Subtitles: "Search for subtitles…" (the dev server's offline stub, never
+  // OpenSubtitles), download and switch in one click, then the timing control,
+  // which must change the cues the server serves, and Delete on the item page.
+  if (ids.direct) {
+    console.log(`subtitles: search, download, timing (#/play/${ids.direct})`);
+    exceptions = [];
+    await s("Page.navigate", { url: `${base}/#/play/${ids.direct}?start=0` });
+    const res = await evaluate(`
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const wait = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = await fn(); if (v) return v; await sleep(150); } return null; };
+      const sel = await wait(() => document.querySelector('.player select[aria-label="Subtitles"]'));
+      if (!sel) return { why: "no subtitle menu" };
+      if (![...sel.options].some((o) => o.value === "search")) return { why: "no Search for subtitles entry in the menu" };
+      sel.value = "search";
+      sel.dispatchEvent(new Event("change"));
+      const btn = await wait(() => document.querySelector(".sub-search:not([hidden]) .sub-result button:not([disabled])"));
+      if (!btn) return { why: "no search results: " + ((document.querySelector(".sub-search") || {}).innerText || "no panel") };
+      const row = btn.closest(".sub-result").innerText;
+      if (!/Matches this file/.test(row)) return { why: "first result has no hash-match badge: " + row };
+      btn.click();
+      const picked = await wait(() => sel.selectedOptions[0] && /downloaded/.test(sel.selectedOptions[0].textContent));
+      if (!picked) return { why: "the downloaded subtitle was not selected" };
+      const v = document.querySelector("video");
+      const firstCue = () => { const t = [...v.textTracks].find((t) => t.mode === "showing"); return t && t.cues && t.cues.length ? t.cues[0] : null; };
+      const c0 = await wait(firstCue);
+      if (!c0 || !/Downloaded subtitle/.test(c0.text)) return { why: "downloaded cues not shown: " + (c0 && c0.text) };
+      const start0 = c0.startTime;
+      const item = await (await fetch("/api/v1/items/${ids.direct}")).json();
+      const track = item.versions.flatMap((x) => x.subtitle_tracks).find((t) => t.is_downloaded);
+      if (!track) return { why: "the item lists no downloaded track" };
+      const served = async () => (await (await fetch("/api/v1/subtitles/" + track.id + "?format=vtt")).text()).match(/^\\S+ --> \\S+/m)[0];
+      const before = await served();
+      const plus = document.querySelector(".sub-timing-plus");
+      if (!plus || plus.closest("[hidden]")) return { why: "no subtitle timing control" };
+      plus.click();
+      plus.click();
+      const shown = await wait(() => { const c = firstCue(); return c && Math.abs(c.startTime - start0 - 0.5) < 0.01; });
+      const after = await served();
+      document.querySelector(".sub-timing-reset").click();
+      await wait(async () => (await served()) === before);
+      const reset = await served();
+      return { ok: true, before, after, reset, shown: !!shown, label: document.querySelector(".sub-timing-value").textContent };`);
+    if (!res.ok) fail("subtitles", res.why);
+    else {
+      console.log(`  served ${res.before}, then ${res.after} at +500 ms, then ${res.reset} after Reset`);
+      // ffmpeg writes mm:ss.ttt and the shifted copy hh:mm:ss.ttt, so compare times.
+      const ms = (line) => line.split(" --> ").map((t) => t.split(":").reduce((acc, p) => acc * 60 + Number(p), 0) * 1000);
+      const [b0, b1] = ms(res.before), [a0, a1] = ms(res.after);
+      if (b0 !== 2000 || b1 !== 5000) fail("subtitles", `unexpected first cue ${res.before}`);
+      if (Math.round(a0 - b0) !== 500 || Math.round(a1 - b1) !== 500) fail("subtitles", `timing +500 ms served ${res.after}`);
+      if (!res.shown) fail("subtitles", "the player did not show the shifted cue");
+      if (res.reset !== res.before || res.label !== "0 ms") fail("subtitles", `Reset left ${res.reset} (${res.label})`);
+    }
+    if (exceptions.length) fail("subtitles", `threw: ${exceptions[0]}`);
+
+    console.log(`subtitles: delete on the item page (#/item/${ids.direct})`);
+    await s("Page.navigate", { url: `${base}/#/item/${ids.direct}` });
+    const del = await evaluate(`
+      const wait = async (fn, n = 60) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await new Promise((r) => setTimeout(r, 150)); } return null; };
+      const btn = await wait(() => document.querySelector(".sub-admin:not([hidden]) .sub-admin-row button"));
+      if (!btn) return { why: "no downloaded subtitle listed for the admin" };
+      btn.click();
+      const gone = await wait(() => document.querySelector(".sub-admin:not([hidden])") && !document.querySelector(".sub-admin-row"));
+      return gone ? { ok: true } : { why: "the subtitle was still listed after Delete" };`);
+    if (!del.ok) fail("subtitles delete", del.why);
+  }
   await s("Page.navigate", { url: `${base}/#/` });
   await sleep(500);
 
@@ -517,7 +675,10 @@ async function main() {
     if (!res.rows) fail(`#${path}`, "no History rows after playing the clip");
     if (res.error) fail(`#${path}`, "shows an error box");
     const junk = res.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
-    if (junk) fail(`#${path}`, `shows "${junk[0]}"`);
+    if (junk) {
+      const at = res.text.slice(Math.max(0, junk.index - 60), junk.index + 20).replace(/\s+/g, " ");
+      fail(`#${path}`, `shows "${junk[0]}" in "...${at}..."`);
+    }
     if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
   }
 
@@ -612,11 +773,16 @@ async function hlsPlayer(s, evaluate, ids) {
         continue;
       }
       console.log(`play ${label} as Safari (#/play/${id})`);
+      // As in the plays above: the previous clip's player can still be on the page
+      // when this one is judged, so mark its video and read only a fresh one.
+      await evaluate(`document.querySelectorAll("video").forEach((v) => { v.dataset.stale = "1"; v.pause(); });`);
       await s("Page.navigate", { url: `${base}/#/play/${id}?start=0` });
       const res = await evaluate(`
-        for (let i = 0; i < 60 && !document.querySelector("video"); i++) await new Promise((r) => setTimeout(r, 150));
-        const v = document.querySelector("video");
+        const fresh = () => document.querySelector("video:not([data-stale])");
+        for (let i = 0; i < 60 && !fresh(); i++) await new Promise((r) => setTimeout(r, 150));
+        const v = fresh();
         if (!v) return { ok: false, why: document.getElementById("view").innerText.slice(0, 200) };
+        const player = v.closest(".player") || document;
         v.muted = true;
         v.play().catch(() => {});
         const advanced = async () => {
@@ -625,15 +791,15 @@ async function hlsPlayer(s, evaluate, ids) {
         };
         const ok = await advanced();
         const src = v.currentSrc;
-        const pill = document.querySelector(".player .pill");
+        const pill = player.querySelector(".pill");
         // Seek 30 s on: a new stream, and the clock shows the new position.
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
         for (let i = 0; i < 60 && v.currentSrc === src; i++) await new Promise((r) => setTimeout(r, 100));
         const seeked = v.currentSrc !== src && await advanced();
-        const clock = document.querySelector(".pc-time") ? document.querySelector(".pc-time").textContent : "";
+        const clock = player.querySelector(".pc-time") ? player.querySelector(".pc-time").textContent : "";
         return { ok, seeked, t: v.currentTime, src, err: v.error && v.error.code, clock, converted: !v.controls,
           pill: pill ? pill.textContent : null, ua: navigator.userAgent.includes("Version/18.0 Safari"),
-          why: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
+          why: player.querySelector(".overlay:not([hidden])") ? player.querySelector(".overlay").innerText : "" };`);
       if (!res.ua) fail(`play ${label}`, "the user agent override did not take");
       if (!res.ok) fail(`play ${label}`, `video did not advance (t=${res.t}, media error ${res.err}) ${res.why || ""}`);
       if (!/\/hls\/[0-9a-f]{16}\/index\.m3u8$/.test(res.src || "")) fail(`play ${label}`, `played ${res.src}, not an HLS playlist`);
@@ -704,4 +870,4 @@ if (failures.length) {
   process.exit(1);
 }
 console.log("\nweb-smoke: every page, every playback path (HLS included), Continue Watching removal, search as you type, the shortcuts list, " +
-  "the Home feature, season tabs and the phone menu, the History section, the trailer, extras and theme music, and Skip Intro and Next Episode passed");
+  "the Home feature and rows, Customize Home, season tabs and the phone menu, the History section, the trailer, extras and theme music, and Skip Intro and Next Episode passed");

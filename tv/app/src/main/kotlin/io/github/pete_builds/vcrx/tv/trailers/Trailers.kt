@@ -3,23 +3,20 @@
 // only wire it to the screen and to Android.
 package io.github.pete_builds.vcrx.tv.trailers
 
-import io.github.pete_builds.vcrx.tv.AppGraph
 import io.github.pete_builds.vcrx.tv.net.Trailer
+import io.github.pete_builds.vcrx.tv.settings.Preferences
+import io.github.pete_builds.vcrx.tv.settings.TrailerMode
 
 /** Where trailers may come from: the viewer's "Trailers" choice in Settings. */
 enum class TrailerSource { Off, LocalOnly, LocalAndYouTube }
 
 object TrailerSettings {
-    /**
-     * The viewer's Trailers choice, or null while none is stored.
-     *
-     * The TV Settings "Trailers: off, local only, local and YouTube" row plugs in
-     * here: return its stored value (its three choices map one to one onto
-     * [TrailerSource]). Until that row exists nothing is stored, so the default
-     * in [trailerSource] applies.
-     */
-    @Suppress("UNUSED_PARAMETER")
-    fun chosen(graph: AppGraph): TrailerSource? = null
+    /** The viewer's Trailers choice in Settings (default: local and YouTube). */
+    fun chosen(prefs: Preferences): TrailerSource = when (prefs.trailers) {
+        TrailerMode.Off -> TrailerSource.Off
+        TrailerMode.LocalOnly -> TrailerSource.LocalOnly
+        TrailerMode.LocalAndYouTube -> TrailerSource.LocalAndYouTube
+    }
 }
 
 /** The viewer's choice, else "local and YouTube" when the server offers YouTube trailers, else local only. */

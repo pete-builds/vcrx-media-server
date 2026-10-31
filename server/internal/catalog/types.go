@@ -39,6 +39,9 @@ type ItemSummary struct {
 	HasThumb         bool       `json:"has_thumb"`
 	AddedAt          int64      `json:"added_at"`
 	Watch            WatchState `json:"watch"`
+	// Note is a short line some Home rows add to a card, such as
+	// "3 new episodes" or "Season 2 added".
+	Note *string `json:"note,omitempty"`
 }
 
 type Track struct {
@@ -53,6 +56,8 @@ type Track struct {
 	IsForced     bool    `json:"is_forced"`
 	IsExternal   bool    `json:"is_external"`
 	IsImageBased bool    `json:"is_image_based"`
+	// IsDownloaded marks a subtitle fetched from OpenSubtitles, stored by the server.
+	IsDownloaded bool `json:"is_downloaded"`
 }
 
 type Version struct {
@@ -111,10 +116,14 @@ type CastMember struct {
 	Role *string `json:"role"`
 }
 
+// HomeRow is one row of Home. ID names the row and is stable for its
+// See all view; Kind is its slot in the Home layout.
 type HomeRow struct {
 	ID        string        `json:"id"`
+	Kind      string        `json:"kind"`
 	Title     string        `json:"title"`
 	LibraryID *int64        `json:"library_id"`
+	SeeAll    bool          `json:"see_all"`
 	Items     []ItemSummary `json:"items"`
 }
 
