@@ -938,6 +938,14 @@ components:
             genres: { type: array, items: { type: string } }
             directors: { type: array, items: { type: string } }
             studios: { type: array, items: { type: string } }
+            cast:
+              type: array
+              description: Up to 20 actors in billing order; an episode lists its own guests before its show's cast.
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  role: { type: [string, "null"] }
             ratings: { type: object, additionalProperties: { type: number }, description: "Keyed by source: imdb, tmdb, nfo." }
             versions: { type: array, items: { $ref: "#/components/schemas/Version" }, description: Only versions the caller may play, best first. }
             collections:

@@ -1299,3 +1299,54 @@ func TestRemoveNextEpisodeStaysRemoved(t *testing.T) {
 		t.Fatalf("after finishing S01E02: %v, want [%d]", got, e3)
 	}
 }
+
+// The details page lists the cast in billing order, an episode's guests before
+// its show's regulars, each actor once.
+func TestItemDetailCast(t *testing.T) {
+	f := newFixture(t)
+	add := func(item int64, name, role string, pos int) {
+		t.Helper()
+		var r any
+		if role != "" {
+			r = role
+		}
+		if _, err := f.db.Exec(`INSERT INTO item_tags (item_id, kind, value, position, role) VALUES (?, 'actor', ?, ?, ?)`, item, name, pos, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add(f.movieID, "Second Billed", "", 1)
+	add(f.movieID, "Top Billed", "The Lead", 0)
+	add(f.showID, "Series Regular", "Neighbour", 0)
+	add(f.showID, "Shared Actor", "Regular Part", 1)
+	add(f.episodeID, "Shared Actor", "Guest Part", 0)
+	add(f.episodeID, "One-Off Guest", "", 1)
+	type member struct {
+		Name string
+		Role *string
+	}
+	cast := func(id int64) []string {
+		t.Helper()
+		var d struct{ Cast []member }
+		f.do("GET", fmt.Sprintf("/api/v1/items/%d", id), f.adminTok, nil).json(t, &d)
+		var out []string
+		for _, c := range d.Cast {
+			s := c.Name
+			if c.Role != nil {
+				s += "/" + *c.Role
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	if got, want := strings.Join(cast(f.movieID), ", "), "Top Billed/The Lead, Second Billed"; got != want {
+		t.Fatalf("movie cast: %s, want %s", got, want)
+	}
+	if got, want := strings.Join(cast(f.episodeID), ", "), "Shared Actor/Guest Part, One-Off Guest, Series Regular/Neighbour"; got != want {
+		t.Fatalf("episode cast: %s, want %s", got, want)
+	}
+	var d struct{ Cast []member }
+	f.do("GET", fmt.Sprintf("/api/v1/items/%d", f.seasonID), f.adminTok, nil).json(t, &d)
+	if d.Cast == nil {
+		t.Fatal("cast should be an empty list, never null")
+	}
+}

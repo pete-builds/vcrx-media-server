@@ -2,8 +2,9 @@
 // Drives the web app in headless Chrome and fails on anything a person would
 // notice: a page that throws, a page showing "null" or "undefined", a page
 // missing its main content, a video that does not play, search as you type that
-// lists nothing, a Continue Watching Remove control that does not remove, or a
-// keyboard shortcuts list that does not open.
+// lists nothing, a Continue Watching Remove control that does not remove, a
+// keyboard shortcuts list that does not open, a Home feature whose Play does
+// not play, season tabs that do not switch, or a phone menu that does not open.
 //
 //   node scripts/web-smoke.mjs [base-url]      (default http://127.0.0.1:3751)
 //
@@ -102,6 +103,7 @@ async function main() {
         const by = (t) => items.find((i) => i.title === t);
         out.direct = by("Copper Valley") ? by("Copper Valley").id : null;
         out.converted = by("River Line") ? by("River Line").id : null;
+        out.cast = by("Harbor Lights") ? by("Harbor Lights").id : null;
       } else {
         out.show = items[0] && items[0].id;
       }
@@ -155,6 +157,8 @@ async function main() {
     ...ids.libs.map((id) => [`/library/${id}`, ".grid .card"]),
     ...ids.libs.map((id) => [`/library/${id}/collections`, ".toolbar h1"]),
     [`/item/${ids.movie}`, ".hero h1"],
+    // Its NFO names an invented cast.
+    [`/item/${ids.cast}`, ".cast-list .cast-member .cast-role"],
     [`/item/${ids.show}`, ".hero h1"],
     ["/search?q=a", ".toolbar h1"],
     ["/activity/now", ".tiles"],
@@ -198,6 +202,28 @@ async function main() {
     if (res.scroll > res.width + 1) fail(`#${path} on a phone`, `page is ${res.scroll}px wide on a ${res.width}px screen`);
   }
   console.log(`phone width: ${pages.length} pages checked`);
+  // The phone top bar folds the library links into a menu: they must be out
+  // of the way until the menu button opens them, and reachable once it does.
+  console.log("phone menu");
+  exceptions = [];
+  await s("Page.navigate", { url: `${base}/#/` });
+  const menu = await evaluate(`${wait(`document.querySelector("#view .row")`)}
+    const btn = document.getElementById("menu-btn");
+    const shown = (el) => !!el && el.getClientRects().length > 0;
+    const link = () => document.querySelector('#nav a[href="#/settings"]');
+    const before = { btn: shown(btn), nav: shown(link()) };
+    if (btn) btn.click();
+    await new Promise((r) => setTimeout(r, 100));
+    const after = { nav: shown(link()), expanded: btn && btn.getAttribute("aria-expanded") };
+    if (link()) link().click();
+    ${wait(`location.hash === "#/settings" && !shown(link())`)}
+    return { before, after, hash: location.hash, closed: !shown(link()) };`);
+  if (!menu.before.btn) fail("phone menu", "no menu button in the top bar");
+  if (menu.before.nav) fail("phone menu", "the library links show before the menu is opened");
+  if (!menu.after.nav || menu.after.expanded !== "true") fail("phone menu", "the menu button did not open the links");
+  if (menu.hash !== "#/settings") fail("phone menu", `Settings in the menu went to ${menu.hash}`);
+  if (!menu.closed) fail("phone menu", "the menu stayed open after choosing a page");
+  if (exceptions.length) fail("phone menu", `threw: ${exceptions[0]}`);
   const phoneSuggest = await typeSearch("riv");
   if (!phoneSuggest.n) fail("search as you type on a phone", "no suggestions");
   if (phoneSuggest.right > phoneSuggest.width + 1 || phoneSuggest.scroll > phoneSuggest.width + 1) {
@@ -290,6 +316,65 @@ async function main() {
   }
   if (exceptions.length) fail("keyboard shortcuts", `threw: ${exceptions[0]}`);
 
+  // Home's featured title: a title, and a Play button that, clicked with a
+  // real mouse, opens the player.
+  console.log("home feature");
+  exceptions = [];
+  await s("Page.navigate", { url: `${base}/#/` });
+  const feat = await evaluate(`${wait(`document.querySelector(".feature .actions button")`)}
+    const f = document.querySelector(".feature");
+    const b = f && f.querySelector(".actions button.btn-primary");
+    if (!b) return { title: f ? f.querySelector("h1")?.innerText : null, text: f ? f.innerText : "" };
+    const r = b.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    return { title: f.querySelector("h1")?.innerText || "", text: f.innerText, label: b.innerText, x, y,
+      hit: document.elementFromPoint(x, y)?.closest("button") === b };`);
+  if (!feat.title) fail("home feature", "no featured title at the top of Home");
+  const featJunk = (feat.text || "").match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+  if (featJunk) fail("home feature", `shows "${featJunk[0]}"`);
+  if (!feat.label) fail("home feature", "no Play button");
+  else {
+    if (!feat.hit) fail("home feature", "the Play button is covered by something else");
+    await s("Input.dispatchMouseEvent", { type: "mouseMoved", x: feat.x, y: feat.y });
+    await s("Input.dispatchMouseEvent", { type: "mousePressed", x: feat.x, y: feat.y, button: "left", clickCount: 1 });
+    await s("Input.dispatchMouseEvent", { type: "mouseReleased", x: feat.x, y: feat.y, button: "left", clickCount: 1 });
+    const went = await evaluate(`${wait(`location.hash.startsWith("#/play/") && document.querySelector(".player")`)} return location.hash;`);
+    if (!/^#\/play\/\d+/.test(went)) fail("home feature", `Play went to ${went}`);
+  }
+  if (exceptions.length) fail("home feature", `threw: ${exceptions[0]}`);
+
+  // A show's seasons are tabs: the open one lists its episodes, and the arrow
+  // keys move to the next season and list that one's.
+  console.log(`season tabs (#/item/${ids.show})`);
+  exceptions = [];
+  await s("Page.navigate", { url: `${base}/#/item/${ids.show}` });
+  const tabs = await evaluate(`${wait(`document.querySelector(".season-panel .ep-card")`)}
+    const tabs = [...document.querySelectorAll('.season-tabs [role="tab"]')];
+    const seasons = (await (await fetch("/api/v1/items/${ids.show}/children")).json()).items;
+    const sel = () => tabs.findIndex((t) => t.getAttribute("aria-selected") === "true");
+    const eps = () => [...document.querySelectorAll(".season-panel .ep-card a")].map((a) => a.getAttribute("href"));
+    const first = { tabs: tabs.length, seasons: seasons.length, sel: sel(), eps: eps() };
+    if (tabs.length < 2) return { first };
+    tabs[sel()].focus();
+    return { first, seasonIds: seasons.map((x) => x.id) };`);
+  if (!tabs.first.tabs) fail("season tabs", "the show page has no season tabs");
+  else if (tabs.first.tabs !== tabs.first.seasons) fail("season tabs", `${tabs.first.tabs} tabs for ${tabs.first.seasons} seasons`);
+  if (!tabs.first.eps.length) fail("season tabs", "the open season lists no episodes");
+  if (tabs.seasonIds) {
+    await press("ArrowRight", "ArrowRight", 39);
+    const moved = await evaluate(`
+      const tabs = [...document.querySelectorAll('.season-tabs [role="tab"]')];
+      const sel = tabs.findIndex((t) => t.getAttribute("aria-selected") === "true");
+      const want = (await (await fetch("/api/v1/items/" + ${JSON.stringify(tabs.seasonIds)}[sel] + "/children")).json()).items.map((e) => "#/item/" + e.id);
+      ${wait(`[...document.querySelectorAll(".season-panel .ep-card a")].length && [...document.querySelectorAll(".season-panel .ep-card a")][0].getAttribute("href") === want[0]`)}
+      const got = [...document.querySelectorAll(".season-panel .ep-card a")].map((a) => a.getAttribute("href"));
+      return { sel, focused: document.activeElement === tabs[sel], same: JSON.stringify(got) === JSON.stringify(want), got };`);
+    if (moved.sel !== (tabs.first.sel + 1) % tabs.first.tabs) fail("season tabs", `ArrowRight selected tab ${moved.sel}, from ${tabs.first.sel}`);
+    if (!moved.focused) fail("season tabs", "focus did not follow the selected tab");
+    if (!moved.same) fail("season tabs", `the panel did not switch to that season's episodes: ${moved.got.join(" ")}`);
+  }
+  if (exceptions.length) fail("season tabs", `threw: ${exceptions[0]}`);
+
   // Playback: a file the browser plays directly, and one it needs converted.
   for (const [label, id, wantDecision] of [["direct play", ids.direct, "direct"], ["converted", ids.converted, "converted"]]) {
     if (!id) {
@@ -329,4 +414,5 @@ if (failures.length) {
   console.log(`\nweb-smoke: ${failures.length} failure(s)\n` + failures.map((f) => "  " + f).join("\n"));
   process.exit(1);
 }
-console.log("\nweb-smoke: every page, both playback paths, Continue Watching removal, search as you type and the shortcuts list passed");
+console.log("\nweb-smoke: every page, both playback paths, Continue Watching removal, search as you type, the shortcuts list, " +
+  "the Home feature, season tabs and the phone menu passed");
