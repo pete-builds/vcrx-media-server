@@ -171,7 +171,7 @@ class ServerApi(
             202 -> SubtitleAnswer.Preparing(answer.retryAfter)
             else -> {
                 val error = httpError(answer.status, answer.body.toString(Charsets.UTF_8), json)
-                if (error is ApiException.Unauthorized) onUnauthorized()
+                if (error is ApiException.Unauthorized) onUnauthorized(error)
                 throw error
             }
         }
@@ -189,7 +189,7 @@ class ServerApi(
                 client.newCall(request).await().use { response ->
                     if (!response.isSuccessful) {
                         val error = httpError(response.code, response.body.string(), json)
-                        if (error is ApiException.Unauthorized) onUnauthorized()
+                        if (error is ApiException.Unauthorized) onUnauthorized(error)
                         throw error
                     }
                     val source = response.body.source()
