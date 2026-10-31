@@ -35,6 +35,8 @@ jobs:
       - run: go vet ./...
       - name: Web client parses (no build step, so this is its compile)
         run: web/check-js.sh
+      - name: Deploy script refuses mid-stream and labels the build
+        run: ../deploy/deploy_test.sh
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
