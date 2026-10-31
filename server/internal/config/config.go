@@ -295,6 +295,11 @@ func (c Config) ArtworkCacheDir() string { return filepath.Join(c.CacheDir, "art
 // SubtitleCacheDir holds WebVTT copies of text subtitles for browsers.
 func (c Config) SubtitleCacheDir() string { return filepath.Join(c.CacheDir, "subtitles") }
 
+// HLSDir holds the segments of HLS streams while they play. Each session's
+// files are deleted when it ends, and the whole directory's leftovers at
+// startup.
+func (c Config) HLSDir() string { return filepath.Join(c.CacheDir, "hls") }
+
 // MetadataDir holds images downloaded from TMDb. It sits under the config dir,
 // not the cache, because downloading them again for a whole library is slow.
 func (c Config) MetadataDir() string { return filepath.Join(c.ConfigDir, "metadata", "tmdb") }

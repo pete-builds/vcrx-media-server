@@ -41,6 +41,9 @@ type Server struct {
 	Artwork    *artwork.Service
 	Subtitles  *subtitles.Service
 	Remux      *remux.Service
+	// HLS writes converted streams as HLS for clients that report
+	// hls_stream (Safari). Nil turns it off.
+	HLS *remux.HLS
 	// Arr turns Radarr and Sonarr webhooks into scans; ArrToken guards it.
 	Arr      *arr.Dispatcher
 	ArrToken string
@@ -112,6 +115,9 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/playback/sessions/{session_id}/seek", signedIn, s.convertedSeek},
 		{"GET", "/api/v1/playback/sessions/{session_id}/stream.mp4", signedIn, s.convertedStream},
 		{"HEAD", "/api/v1/playback/sessions/{session_id}/stream.mp4", signedIn, s.convertedStream},
+		{"GET", "/api/v1/playback/sessions/{session_id}/hls/{run}/index.m3u8", signedIn, s.hlsPlaylist},
+		{"HEAD", "/api/v1/playback/sessions/{session_id}/hls/{run}/index.m3u8", signedIn, s.hlsPlaylist},
+		{"GET", "/api/v1/playback/sessions/{session_id}/hls/{run}/{segment}", signedIn, s.hlsSegment},
 		{"GET", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"HEAD", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"GET", "/api/v1/subtitles/{stream_id}", signedIn, s.subtitle},

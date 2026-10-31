@@ -255,6 +255,16 @@ func serve() error {
 	rmx := remux.New(cfg.FFmpegPath, cfg.FFprobePath, 4, log.With("component", "remux"))
 	rmx.SetMaxTranscodes(cfg.MaxTranscodes)
 	pb := &playback.Service{DB: a.db, Catalog: cat, CanRemux: true, CanTranscode: canTranscode(ctx, rmx, cfg.MaxTranscodes, log)}
+	// Safari plays converted streams only as HLS, written to disk per session
+	// under the same slot limits.
+	hls, err := remux.NewHLS(rmx, cfg.HLSDir(), log.With("component", "hls"))
+	if err != nil {
+		log.Error("HLS streams are off, so Safari cannot play files that need converting", "err", err)
+	} else {
+		pb.CanHLS = true
+		defer hls.Close()
+		go hls.Run(ctx)
+	}
 	hooks := notify.New(cfg.WebhookURLs, cfg.WebhookEvents, cfg.ServerName, log.With("component", "webhooks"))
 	if len(cfg.WebhookURLs) > 0 {
 		pb.Notify = hooks.Send
@@ -299,7 +309,7 @@ func serve() error {
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
 		Artwork: art, Admin: adm, Scans: scanAdapter{scans},
-		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, Remux: rmx, WebDir: os.Getenv("VCRX_WEB_DIR"),
+		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, Remux: rmx, HLS: hls, WebDir: os.Getenv("VCRX_WEB_DIR"),
 		Subtitles:        subtitles.New(cfg.SubtitleCacheDir(), cfg.FFmpegPath, log.With("component", "subtitles")),
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,

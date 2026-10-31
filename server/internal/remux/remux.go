@@ -48,6 +48,18 @@ func MP4Audio(codec string) bool {
 	return false
 }
 
+// HLSAudio reports whether an audio codec can be copied into HLS fMP4
+// segments. Apple's HLS spec lists AAC, AC-3 and E-AC-3 there, not MP3 (MP3
+// in fMP4 segments makes Chrome's HLS player fail to parse the stream), so
+// everything else is converted to AAC.
+func HLSAudio(codec string) bool {
+	switch strings.ToLower(codec) {
+	case "aac", "ac3", "eac3":
+		return true
+	}
+	return false
+}
+
 // DefaultMaxTranscodes is how many video transcodes run at once unless the
 // operator says otherwise. Each takes one or more whole CPU cores.
 const DefaultMaxTranscodes = 2
@@ -292,7 +304,14 @@ func (s *Service) videoArgs(v Video) []string {
 	return a
 }
 
+// args runs the conversion into fragmented MP4 on stdout.
 func (s *Service) args(o Options) []string {
+	return append(s.convertArgs(o), "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-frag_duration", "2000000", "pipe:1")
+}
+
+// convertArgs are the input, mapping and codec arguments every converted
+// stream shares, whatever it is written as.
+func (s *Service) convertArgs(o Options) []string {
 	a := []string{"-nostdin", "-hide_banner", "-loglevel", "error"}
 	switch {
 	case o.StartMs > 0 && o.Video != nil:
@@ -331,8 +350,7 @@ func (s *Service) args(o Options) []string {
 			a = append(a, "-c:a", "copy")
 		}
 	}
-	return append(a, "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1", "-avoid_negative_ts", "make_zero",
-		"-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-frag_duration", "2000000", "pipe:1")
+	return append(a, "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1", "-avoid_negative_ts", "make_zero")
 }
 
 // Stream writes the converted file to w until it ends, ctx ends, or the

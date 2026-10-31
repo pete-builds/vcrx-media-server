@@ -427,6 +427,10 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.internal(w, r, err)
 	default:
+		if s.HLS != nil && (ev.Type == "stop" || ev.Type == "error") {
+			// The session is over: its HLS stream stops and its files go now.
+			s.HLS.Stop(r.PathValue("session_id"))
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
