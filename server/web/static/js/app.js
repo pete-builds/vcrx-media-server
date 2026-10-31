@@ -6,6 +6,7 @@ import { api, autoSignIn, whenSignedOut, ApiError } from "./api.js";
 import { h, errorBox } from "./dom.js";
 import { homeView } from "./views/home.js";
 import { libraryView } from "./views/library.js";
+import { libraryCollectionsView, collectionView } from "./views/collections.js";
 import { itemView } from "./views/item.js";
 import { searchView } from "./views/search.js";
 import { playerView } from "./views/player.js";
@@ -18,6 +19,8 @@ export const state = { me: null, server: null, libraries: [] };
 const routes = [
   [/^\/$/, () => homeView],
   [/^\/library\/(\d+)$/, () => libraryView],
+  [/^\/library\/(\d+)\/collections$/, () => libraryCollectionsView],
+  [/^\/collection\/(\d+)$/, () => collectionView],
   [/^\/item\/(\d+)$/, () => itemView],
   [/^\/search$/, () => searchView],
   [/^\/play\/(\d+)$/, () => playerView],

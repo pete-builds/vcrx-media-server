@@ -268,6 +268,7 @@ func (s *Server) libraryItems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	unwatched, _ := strconv.ParseBool(q.Get("unwatched"))
 	lq := catalog.ListQuery{Sort: q.Get("sort"), Order: q.Get("order"), Genre: q.Get("genre"), Year: queryInt(r, "year", 0),
+		Decade:     queryInt(r, "decade", 0),
 		Resolution: q.Get("resolution"), Unwatched: unwatched, Limit: queryInt(r, "limit", 100), Offset: queryInt(r, "offset", 0)}
 	ri := info(r)
 	items, total, err := s.Catalog.LibraryItems(r.Context(), ri.Policy, ri.Session.User.ID, id, lq)

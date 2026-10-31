@@ -32,6 +32,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/artwork"
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
+	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
 	"github.com/pete-builds/vcrx-media-server/server/internal/config"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
@@ -259,6 +260,7 @@ func serve() error {
 	if cfg.IMDbRatings {
 		go (&imdb.Syncer{DB: a.db, Log: log.With("component", "imdb")}).Run(ctx)
 	}
+	go collectionBuilder(a).Run(ctx, 30*time.Minute)
 	srv := &api.Server{
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
@@ -573,7 +575,7 @@ func newEnricher(a *app) *enrich.Enricher {
 
 func metadataCmd(args []string) error {
 	if len(args) == 0 {
-		return errors.New("metadata: want refresh, status or imdb")
+		return errors.New("metadata: want refresh, status, imdb or collections")
 	}
 	sub, args := args[0], args[1:]
 	fs := flag.NewFlagSet("metadata "+sub, flag.ContinueOnError)
@@ -590,6 +592,13 @@ func metadataCmd(args []string) error {
 	defer func() { _ = a.db.Close() }()
 	enr := newEnricher(a)
 	switch sub {
+	case "collections":
+		res, err := collectionBuilder(a).Build(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("collections: %d franchises, %d newly named, %d removed, %d waiting for a name\n", res.Collections, res.Named, res.Removed, res.Waiting)
+		return nil
 	case "imdb":
 		res, err := (&imdb.Syncer{DB: a.db, Log: a.log}).Sync(ctx, true)
 		if err != nil {
@@ -685,4 +694,21 @@ func overlays(ctx context.Context, adm *admin.Admin, specs []config.LibrarySpec,
 		}
 	}
 	return ov, len(ov.Specs), nil
+}
+
+// collectionBuilder builds franchise collections; names come from TMDb when
+// a key is set, and franchises wait for one otherwise.
+func collectionBuilder(a *app) *collections.Builder {
+	b := &collections.Builder{DB: a.db, Log: a.log.With("component", "collections")}
+	if a.cfg.TMDbAPIKey != "" {
+		client := tmdb.New(a.cfg.TMDbAPIKey, a.cfg.TMDbLanguage)
+		b.Names = func(ctx context.Context, id int64) (string, error) {
+			c, err := client.Collection(ctx, id)
+			if err != nil {
+				return "", err
+			}
+			return c.Name, nil
+		}
+	}
+	return b
 }

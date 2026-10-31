@@ -110,6 +110,7 @@ async function main() {
   const pages = [
     ["/", ".row .card"],
     ...ids.libs.map((id) => [`/library/${id}`, ".grid .card"]),
+    ...ids.libs.map((id) => [`/library/${id}/collections`, ".toolbar h1"]),
     [`/item/${ids.movie}`, ".hero h1"],
     [`/item/${ids.show}`, ".hero h1"],
     ["/search?q=a", ".toolbar h1"],
@@ -140,6 +141,21 @@ async function main() {
     if (junk) fail(`#${path}`, `shows "${junk[0]}"`);
     if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
   }
+
+  // The same pages on a phone: nothing may be wider than the screen.
+  await s("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  for (const [path, selector] of pages) {
+    await s("Page.navigate", { url: `${base}/#${path}` });
+    const res = await evaluate(`
+      for (let i = 0; i < 40 && !document.querySelector(${JSON.stringify(selector)}); i++) await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 200));
+      // Compare with the device, not innerWidth: a phone widens its layout
+      // viewport to fit overflowing content, so innerWidth always "fits".
+      return { scroll: document.documentElement.scrollWidth, width: screen.width };`);
+    if (res.scroll > res.width + 1) fail(`#${path} on a phone`, `page is ${res.scroll}px wide on a ${res.width}px screen`);
+  }
+  console.log(`phone width: ${pages.length} pages checked`);
+  await s("Emulation.clearDeviceMetricsOverride");
 
   // Playback: a file the browser plays directly, and one it needs converted.
   for (const [label, id, wantDecision] of [["direct play", ids.direct, "direct"], ["converted", ids.converted, "converted"]]) {
