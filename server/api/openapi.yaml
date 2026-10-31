@@ -525,6 +525,93 @@ paths:
                 properties:
                   sessions: { type: array, items: { $ref: "#/components/schemas/ActivitySession" } }
 
+  /api/v1/admin/metadata/unmatched:
+    get:
+      operationId: adminUnmatched
+      summary: Movies and shows TMDb matching left alone, with the reason, for Fix Match. 404 tmdb_off without a TMDb key.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [unmatched]
+                properties:
+                  unmatched:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, kind, title, year, reason]
+                      properties:
+                        id: { type: integer }
+                        kind: { type: string, enum: [movie, show] }
+                        title: { type: string }
+                        year: { type: integer, description: 0 when the file name has none. }
+                        reason: { type: string }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/items/{item_id}/match:
+    get:
+      operationId: adminMatchSearch
+      summary: TMDb results for a movie or show (the item's own title when query is empty), to pick the right one.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+        - { name: query, in: query, schema: { type: string } }
+        - { name: year, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [choices]
+                properties:
+                  choices:
+                    type: array
+                    items:
+                      type: object
+                      required: [tmdb_id, title, year]
+                      properties:
+                        tmdb_id: { type: integer }
+                        title: { type: string }
+                        year: { type: integer }
+                        overview: { type: string }
+                        popularity: { type: number }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: adminMatchSet
+      summary: >-
+        Fix Match: set the TMDb id by hand and fill the item from it now. Later enrichment passes keep the choice.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tmdb_id]
+              properties:
+                tmdb_id: { type: integer }
+      responses:
+        "200":
+          description: Matched
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [matched]
+                properties:
+                  matched: { type: boolean }
+                  episodes: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
   /api/v1/admin/activity/now:
     get:
       operationId: adminActivityNow

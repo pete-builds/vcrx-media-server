@@ -270,3 +270,12 @@ table.list td.num, table.list th.num { text-align: right; font-variant-numeric: 
 .add-user { display: grid; gap: 12px; max-width: 900px; }
 a.link { color: var(--orange); }
 a.link:hover { text-decoration: underline; }
+
+/* Fix match */
+.fix { margin-top: 20px; }
+.fix-toggle { margin-bottom: 12px; }
+.fix-form { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.fix-form input { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 7px 10px; flex: 1; min-width: 180px; }
+.fix-form input.fix-year { flex: 0 0 90px; min-width: 0; }
+.fix-choice { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
+.fix-choice p { margin: 4px 0 0; font-size: 14px; }

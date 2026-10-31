@@ -1,14 +1,16 @@
 import { api, artUrl } from "../api.js";
 import { h, card, icon, runtime, clock, size, bitrate, episodeCode, toast } from "../dom.js";
-import { go } from "../app.js";
+import { go, state } from "../app.js";
 
 // The details page for a movie, show, season or episode.
-export async function itemView({ match }) {
+export async function itemView({ match, params }) {
   const id = Number(match[1]);
   const item = await api(`/items/${id}`);
   const playable = item.kind === "movie" || item.kind === "episode";
   const children = playable ? null : await api(`/items/${id}/children`);
-  const el = h("div", {}, hero(item), playable ? techFacts(item) : null, children ? childrenSection(item, children.items || []) : null);
+  const admin = state.me && state.me.is_admin && (item.kind === "movie" || item.kind === "show");
+  const fix = admin ? fixMatch(item, params && params.get("fix") === "1") : null;
+  const el = h("div", {}, hero(item), fix, playable ? techFacts(item) : null, children ? childrenSection(item, children.items || []) : null);
   return { el, title: item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)}`.trim() : item.title };
 }
 
@@ -148,4 +150,57 @@ function childrenSection(item, children) {
         h("div", { class: "muted" }, [runtime(ep.runtime_ms), ep.watch && ep.watch.played ? "Watched" : ep.watch && ep.watch.position_ms ? `${clock(ep.watch.position_ms)} watched` : ""].filter(Boolean).join(" · ")),
         h("div", { class: "actions", style: { marginTop: "8px" } },
           h("button", { class: "btn btn-small btn-primary", type: "button", onclick: () => go(`/play/${ep.id}`) }, icon("play"), "Play")))))));
+}
+
+// Fix Match, for admins: search TMDb and pick the right title when automatic
+// matching found none or the wrong one. The server keeps the choice.
+function fixMatch(item, open) {
+  const results = h("div", { class: "fix-results" });
+  const query = h("input", { name: "query", value: item.title, "aria-label": "Title to search for" });
+  const year = h("input", { name: "year", value: item.year || "", inputmode: "numeric", placeholder: "Year", "aria-label": "Year", class: "fix-year" });
+  const form = h("form", { class: "fix-form" }, query, year, h("button", { class: "btn btn-primary btn-small", type: "submit" }, "Search TMDb"));
+  const panel = h("section", { class: "panel fix-panel", hidden: !open },
+    h("h3", {}, "Fix match"),
+    h("p", { class: "muted" }, "Pick the right title. Your own values (from an NFO or set by hand) are kept; the rest come from TMDb."),
+    form, results);
+  const search = async () => {
+    results.replaceChildren(h("p", { class: "muted" }, "Searching"));
+    try {
+      const q = new URLSearchParams({ query: query.value.trim() });
+      if (year.value.trim()) q.set("year", year.value.trim());
+      const data = await api(`/admin/items/${item.id}/match?${q}`);
+      if (!data.choices.length) {
+        results.replaceChildren(h("p", { class: "muted" }, "TMDb found nothing. Try fewer words, or no year."));
+        return;
+      }
+      results.replaceChildren(...data.choices.slice(0, 12).map((c) => {
+        const use = h("button", { class: "btn btn-small", type: "button" }, "Use this");
+        use.addEventListener("click", async () => {
+          use.disabled = true;
+          try {
+            await api(`/admin/items/${item.id}/match`, { method: "PUT", body: { tmdb_id: c.tmdb_id } });
+            toast(`Matched to ${c.title}${c.year ? ` (${c.year})` : ""}`);
+            go(`/item/${item.id}`);
+          } catch (e) {
+            toast(e.message);
+            use.disabled = false;
+          }
+        });
+        return h("div", { class: "fix-choice" },
+          h("div", {}, h("strong", {}, c.title), c.year ? h("span", { class: "muted" }, ` ${c.year}`) : null, h("span", { class: "faint" }, ` · TMDb ${c.tmdb_id}`),
+            c.overview ? h("p", { class: "muted" }, c.overview.length > 220 ? c.overview.slice(0, 220) + "…" : c.overview) : null),
+          use);
+      }));
+    } catch (e) {
+      results.replaceChildren(h("p", { class: "muted" }, e.message));
+    }
+  };
+  form.addEventListener("submit", (e) => { e.preventDefault(); search(); });
+  if (open) search();
+  const toggle = h("button", { class: "btn btn-small", type: "button" }, "Fix match");
+  toggle.addEventListener("click", () => {
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden && !results.childNodes.length) search();
+  });
+  return h("div", { class: "fix" }, h("div", { class: "fix-toggle" }, toggle), panel);
 }

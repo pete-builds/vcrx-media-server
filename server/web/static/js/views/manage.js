@@ -9,9 +9,10 @@ import { state } from "../app.js";
 export async function librariesTab(body) {
   let timer = null;
   const draw = async () => {
-    let libs, scans;
+    let libs, scans, unmatched;
     try {
-      [libs, scans] = await Promise.all([api("/admin/libraries"), api("/admin/scans?limit=15")]);
+      [libs, scans, unmatched] = await Promise.all([api("/admin/libraries"), api("/admin/scans?limit=15"),
+        api("/admin/metadata/unmatched").catch(() => null)]);
     } catch (e) {
       body.replaceChildren(errorBox("Could not load libraries", e.message));
       return;
@@ -20,7 +21,8 @@ export async function librariesTab(body) {
     clearTimeout(timer);
     if (running) timer = setTimeout(draw, 3000);
     const names = Object.fromEntries(libs.libraries.map((l) => [l.id, l.name]));
-    body.replaceChildren(
+    // replaceChildren writes null as the text "null"; drop the empty sections.
+    body.replaceChildren(...[
       h("table", { class: "list" },
         h("thead", {}, h("tr", {}, ["Library", "Type", "Titles", "Folder", "Last scan", ""].map((c, i) => h("th", { class: i === 2 ? "num" : "" }, c)))),
         h("tbody", {}, libs.libraries.map((l) => {
@@ -43,6 +45,7 @@ export async function librariesTab(body) {
             h("td", {}, scanSummary(l.last_scan)),
             h("td", {}, btn));
         }))),
+      unmatchedSection(unmatched),
       h("section", { class: "section" }, h("h2", {}, "Recent scans"),
         scans.scans.length ? h("table", { class: "list" },
           h("thead", {}, h("tr", {}, ["When", "Library", "Started by", "Result", "Seen", "Added", "Changed", "Missing", "Failed"]
@@ -53,10 +56,24 @@ export async function librariesTab(body) {
             h("td", {}, s.trigger),
             h("td", { title: s.error || "" }, s.status === "ok" ? "Done" : s.status),
             [s.files_seen, s.files_added, s.files_changed, s.files_missing, s.files_failed].map((n) => h("td", { class: "num" }, n)))))) :
-          h("p", { class: "muted" }, "No scans yet.")));
+          h("p", { class: "muted" }, "No scans yet."))].filter(Boolean));
   };
   await draw();
   return () => clearTimeout(timer);
+}
+
+// Titles TMDb could not match, each a link to its Fix Match panel. Nothing is
+// shown when TMDb is off (null) or everything matched.
+function unmatchedSection(data) {
+  if (!data || !data.unmatched.length) return null;
+  return h("section", { class: "section" }, h("h2", {}, `Unmatched titles (${data.unmatched.length})`),
+    h("p", { class: "muted" }, "TMDb found no confident match for these, so they have no plot or poster from it. Open one to pick the right title."),
+    h("table", { class: "list" },
+      h("thead", {}, h("tr", {}, ["Title", "Type", "Why"].map((c) => h("th", {}, c)))),
+      h("tbody", {}, data.unmatched.map((u) => h("tr", {},
+        h("td", {}, h("a", { class: "link", href: `#/item/${u.id}?fix=1` }, u.year ? `${u.title} (${u.year})` : u.title)),
+        h("td", {}, u.kind === "movie" ? "Movie" : "Show"),
+        h("td", { class: "muted" }, u.reason))))));
 }
 
 function scanSummary(s) {

@@ -289,6 +289,7 @@ func serve() error {
 	if cfg.TMDbAPIKey != "" {
 		enr := newEnricher(a)
 		enr.Busy = scans.Running
+		srv.Metadata = enr
 		go enr.Run(ctx, 2*time.Minute, 15*time.Minute)
 	} else {
 		log.Info("TMDb enrichment is off: set VCRX_TMDB_API_KEY for posters and plots")
