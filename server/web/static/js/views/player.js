@@ -186,7 +186,32 @@ export async function playerView({ match, params }) {
     });
   }
   video.addEventListener("timeupdate", () => { if (!video.seeking) lastPos = pos(); });
-  video.addEventListener("ended", () => { if (!ended) { ended = true; report("stop"); } });
+  video.addEventListener("ended", () => {
+    if (!ended) { ended = true; report("stop"); }
+    if (item.kind === "episode" && item.next_episode) upNext(item.next_episode);
+  });
+
+  // Up Next: after an episode, count down and play the following one.
+  let upNextTimer = null;
+  function upNext(next) {
+    let left = 10;
+    const msg = h("p", { class: "muted" });
+    const play = () => { clearInterval(upNextTimer); location.hash = `#/play/${next.id}`; };
+    const cancel = () => { clearInterval(upNextTimer); back(); };
+    const tick = () => { msg.textContent = `${episodeCode(next)} · ${next.title} starts in ${left} s.`; };
+    tick();
+    overlay.replaceChildren(h("div", { class: "error-box up-next" }, h("h2", {}, "Up next"), msg,
+      h("div", { class: "actions" },
+        h("button", { class: "btn btn-primary", type: "button", onclick: play }, icon("play"), "Play now"),
+        h("button", { class: "btn", type: "button", onclick: cancel }, "Back"))));
+    overlay.hidden = false;
+    overlay.querySelector(".btn-primary").focus();
+    upNextTimer = setInterval(() => {
+      left -= 1;
+      if (left <= 0) play();
+      else tick();
+    }, 1000);
+  }
   video.addEventListener("error", async () => {
     if (ended || !video.getAttribute("src")) return;
     // A 410 on the stream means it was stopped from Activity.
@@ -249,6 +274,7 @@ export async function playerView({ match, params }) {
       stop();
       loadSeq++;
       clearInterval(beat);
+      clearInterval(upNextTimer);
       clearTimeout(idleTimer);
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("pagehide", stop);

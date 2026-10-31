@@ -886,3 +886,61 @@ func TestTerminateCutsAnOpenStream(t *testing.T) {
 		t.Fatal("removed stream still registered")
 	}
 }
+
+func TestEpisodeNextIsTheFollowingEpisode(t *testing.T) {
+	f := newFixture(t)
+	now := time.Now().UnixMilli()
+	var tv int64
+	if err := f.db.QueryRow(`SELECT library_id FROM items WHERE id = ?`, f.showID).Scan(&tv); err != nil {
+		t.Fatal(err)
+	}
+	add := func(kind string, parent int64, season, ep any, title string) int64 {
+		t.Helper()
+		res, err := f.db.Exec(`INSERT INTO items (library_id, kind, parent_id, group_key, title, sort_title, season_number, episode_number, added_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, tv, kind, parent, title, title, title, season, ep, now, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := res.LastInsertId()
+		if kind == "episode" {
+			// Episodes without a file are hidden; give each one.
+			if _, err := f.db.Exec(`INSERT INTO media_versions (item_id, library_id, path, rel_path, size, mtime, container, probe_status, added_at, updated_at)
+				VALUES (?, ?, ?, ?, 1, 0, 'mkv', 'ok', ?, ?)`, id, tv, "/x/"+title+".mkv", title+".mkv", now, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return id
+	}
+	e2 := add("episode", f.seasonID, 1, 2, "Second")
+	s2 := add("season", f.showID, 2, nil, "Season 2")
+	s2e1 := add("episode", s2, 2, 1, "Opener")
+	sp := add("season", f.showID, 0, nil, "Specials")
+	sp1 := add("episode", sp, 0, 1, "Special one")
+	next := func(id int64) *int64 {
+		t.Helper()
+		var d struct {
+			Next *struct{ ID int64 } `json:"next_episode"`
+		}
+		r := f.do("GET", fmt.Sprintf("/api/v1/items/%d", id), f.adminTok, nil)
+		if r.code != 200 {
+			t.Fatalf("item %d: %d", id, r.code)
+		}
+		r.json(t, &d)
+		if d.Next == nil {
+			return nil
+		}
+		return &d.Next.ID
+	}
+	if n := next(f.episodeID); n == nil || *n != e2 {
+		t.Fatalf("after S01E01: %v, want %d", n, e2)
+	}
+	if n := next(e2); n == nil || *n != s2e1 {
+		t.Fatalf("after S01E02 the next season starts: %v, want %d (specials are skipped)", n, s2e1)
+	}
+	if n := next(s2e1); n != nil {
+		t.Fatalf("end of the show: %v, want none", *n)
+	}
+	if n := next(sp1); n != nil {
+		t.Fatalf("after the only special: %v, want none", *n)
+	}
+}
