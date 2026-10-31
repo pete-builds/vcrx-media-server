@@ -675,6 +675,63 @@ paths:
         "422": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
 
+  /api/v1/admin/items/{item_id}/history:
+    get:
+      operationId: adminItemHistory
+      summary: >-
+        One title's plays, newest first, like Tautulli's item page: who, when, device, how far, decision, plus totals over
+        every play. A show includes its episodes. Same plays as /admin/activity/history?item_id. Admin and LAN only.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item_id, kind, sessions, plays, users, watch_ms]
+                properties:
+                  item_id: { type: integer }
+                  kind: { type: string, enum: [movie, show, episode] }
+                  sessions: { type: array, items: { $ref: "#/components/schemas/ActivityEntry" } }
+                  plays: { type: integer, description: Every play of the title, not only this page. }
+                  users: { type: integer, description: People who played it. }
+                  watch_ms: { type: integer, description: Wall time spent playing it, summed. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/watch/export:
+    get:
+      operationId: adminWatchExport
+      summary: >-
+        Every movie and show still on disk with its files, size and watch state across all users, for a cleanup tool
+        deciding what to delete. Shows are rolled up from their episodes. Ordered by library, then title. The body is
+        streamed and its closing bracket is written last, so a cut-off response does not parse. Admin and LAN only.
+      parameters:
+        - { name: library_id, in: query, schema: { type: integer, minimum: 1 } }
+        - name: unplayed_days
+          in: query
+          schema: { type: integer, minimum: 0 }
+          description: Only titles nobody has played in this many days, titles never played included. 0 or absent means no filter.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generated_at, items, count]
+                properties:
+                  generated_at: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/TitleWatch" } }
+                  count: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /api/v1/admin/activity/now:
     get:
       operationId: adminActivityNow
@@ -1203,6 +1260,26 @@ components:
         last_event_at: { type: integer }
         ended_at: { type: [integer, "null"] }
         terminated_message: { type: [string, "null"] }
+    TitleWatch:
+      type: object
+      required: [item_id, kind, title, year, library_id, library, paths, size_bytes, added_at, last_played_at, play_count, finished_by]
+      properties:
+        item_id: { type: integer }
+        kind: { type: string, enum: [movie, show] }
+        title: { type: string }
+        year: { type: [integer, "null"] }
+        library_id: { type: integer }
+        library: { type: string }
+        paths: { type: array, items: { type: string }, description: "Absolute paths of the files on disk, as the server sees them; a show lists every episode's files." }
+        size_bytes: { type: integer }
+        added_at: { type: integer }
+        last_played_at:
+          type: [integer, "null"]
+          description: The latest play by anyone, a session in progress included. Null when nobody ever played it.
+        play_count: { type: integer, description: Times finished, summed over users (and episodes, for a show). }
+        finished_by: { type: array, items: { type: string }, description: "Users who have it marked watched; for a show, every episode on disk." }
+        episodes_total: { type: integer, description: Shows only. Episodes on disk. }
+        episodes_watched: { type: integer, description: Shows only. Episodes at least one user has watched. }
     Ranked:
       type: object
       required: [name, plays, watch_ms, users]
