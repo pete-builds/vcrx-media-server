@@ -287,11 +287,19 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		// clients never offer the profile picker.
 		Kind      string `json:"kind"`
 		ExpiresAt *int64 `json:"device_expires_at,omitempty"`
+		// Loan is a lent tape's device's loan: the one title it may play.
+		Loan *meLoan `json:"loan,omitempty"`
 	}{userJSON: toUserJSON(sess.User), Kind: sess.Kind()}
 	if sess.TokenID != 0 {
 		if d, err := s.Invites.Get(r.Context(), sess.TokenID); err == nil {
 			out.ExpiresAt = &d.Scope.ExpiresAt
 		}
+		loan, err := s.borrowerLoan(r.Context(), sess.TokenID)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		out.Loan = loan
 	}
 	writeJSON(w, http.StatusOK, out)
 }

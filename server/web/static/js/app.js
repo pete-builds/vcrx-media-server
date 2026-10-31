@@ -2,7 +2,7 @@
 // bar, and routes #/paths to views. Each view returns an optional cleanup
 // function that runs when the user leaves it.
 
-import { api, autoSignIn, whenSignedOut, ApiError } from "./api.js";
+import { api, autoSignIn, whenSignedOut, whenRewound, ApiError } from "./api.js";
 import { h, errorBox, skeleton } from "./dom.js";
 import { homeView } from "./views/home.js";
 import { libraryView } from "./views/library.js";
@@ -20,9 +20,11 @@ import { musicLibraryView, musicArtistView, musicAlbumView } from "./views/music
 import { installMusicPlayer } from "./music/player.js";
 import { pickerView, drawProfileButton } from "./views/profiles.js";
 import { pairView, inviteView } from "./views/devices.js";
+import { lendView, rewindView } from "./views/lend.js";
 import { peerItemView } from "./views/peer.js";
 
-export const state = { me: null, server: null, libraries: [] };
+// rewind is set once a lent tape's loan is over: {title, message}.
+export const state = { me: null, server: null, libraries: [], rewind: null };
 
 const routes = [
   [/^\/$/, () => homeView],
@@ -35,7 +37,7 @@ const routes = [
   [/^\/play\/(\d+)$/, () => playerView],
   [/^\/peer\/(\d+)\/item\/(\d+)$/, () => peerItemView],
   [/^\/peer\/(\d+)\/play\/(\d+)$/, () => playerView],
-  [/^\/activity(?:\/(now|history|stats|users))?$/, () => activityView],
+  [/^\/activity(?:\/(now|history|stats|users|loans))?$/, () => activityView],
   [/^\/settings(?:\/(account|home|libraries|users|devices|friends|newsletter|markers))?$/, () => settingsView],
   [/^\/login$/, () => loginView],
   [/^\/music\/(\d+)$/, () => musicLibraryView],
@@ -44,6 +46,8 @@ const routes = [
   [/^\/profiles$/, () => pickerView],
   [/^\/pair\/([A-Za-z-]{1,16})$/, () => pairView],
   [/^\/invite\/([A-Za-z2-7-]{16,64})$/, () => inviteView],
+  [/^\/lend\/(\d+)$/, () => lendView],
+  [/^\/rewind$/, () => rewindView],
 ];
 
 // An invite link opens on a device that has no session yet.
@@ -71,7 +75,11 @@ async function render() {
   }
   const { path, params } = parseHash();
   const view = document.getElementById("view");
-  if (!state.me && path !== "/login" && path !== "/profiles" && !isInvite(path)) {
+  if (!state.me && state.rewind && path !== "/rewind" && !isInvite(path)) {
+    go("/rewind");
+    return;
+  }
+  if (!state.me && path !== "/login" && path !== "/profiles" && path !== "/rewind" && !isInvite(path)) {
     go(signInPath() + "?next=" + encodeURIComponent(path));
     return;
   }
@@ -81,7 +89,7 @@ async function render() {
     if (match) { viewFn = fn(); break; }
   }
   const playing = /^\/(peer\/\d+\/)?play\//.test(path);
-  document.getElementById("topbar").hidden = !state.me || playing || path === "/profiles" || isInvite(path);
+  document.getElementById("topbar").hidden = !state.me || playing || path === "/profiles" || path === "/rewind" || isInvite(path);
   markNav(path);
   setMenu(false);
   // While a page with a hero loads, its skeleton already sits under the
@@ -179,10 +187,23 @@ function installChrome() {
 // signedIn loads who we are and the libraries, then draws the shell.
 export async function signedIn() {
   state.me = await api("/me");
+  state.rewind = null;
   const libs = await api("/libraries");
   state.libraries = libs.libraries || [];
   drawNav();
   drawProfileButton();
+  watchLoan();
+}
+
+// A borrower's browser asks again when its loan is due, so the "Be kind,
+// rewind." page comes up on time even on a page that makes no requests.
+let loanTimer = 0;
+function watchLoan() {
+  clearTimeout(loanTimer);
+  const loan = state.me && state.me.loan;
+  if (!loan) return;
+  const wait = Math.min(Math.max(0, loan.due_at - Date.now()) + 2000, 2 ** 31 - 1);
+  loanTimer = setTimeout(() => api("/me").catch(() => {}), wait);
 }
 
 // signInPath is where a signed-out browser goes: the "Who's watching?" picker
@@ -196,6 +217,12 @@ async function boot() {
     if (!state.me) return;
     state.me = null;
     go(signInPath() + "?next=" + encodeURIComponent(parseHash().path));
+  });
+  whenRewound((data) => {
+    const first = !state.rewind;
+    state.me = null;
+    state.rewind = { title: data.title || "", message: data.message || "" };
+    if (first || parseHash().path !== "/rewind") go("/rewind");
   });
   document.getElementById("search").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -215,6 +242,12 @@ async function boot() {
     await signedIn();
   } catch (err) {
     if (!(err instanceof ApiError) || err.status !== 401) throw err;
+    if (err.code === "loan_ended") {
+      // whenRewound has the page; nothing to sign in to.
+      window.addEventListener("hashchange", render);
+      render();
+      return;
+    }
     // An invite link joins as the invited device: signing this browser in as
     // the household first would only be undone.
     if (state.server.auto_sign_in && !state.server.profile_picker && !isInvite(parseHash().path)) {

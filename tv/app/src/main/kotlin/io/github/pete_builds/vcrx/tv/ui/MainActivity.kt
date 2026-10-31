@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.navigation.compose.NavHost
@@ -21,6 +23,8 @@ import io.github.pete_builds.vcrx.tv.ui.music.MusicNav
 import io.github.pete_builds.vcrx.tv.ui.music.musicScreens
 import io.github.pete_builds.vcrx.tv.ui.pair.PairScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.ProfilePickerScreen
+import io.github.pete_builds.vcrx.tv.ui.rewind.RewindScreen
+import kotlinx.coroutines.flow.filterNotNull
 import io.github.pete_builds.vcrx.tv.ui.profiles.StartScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.startScreen
 import io.github.pete_builds.vcrx.tv.ui.settings.AboutScreen
@@ -45,6 +49,8 @@ class MainActivity : ComponentActivity() {
                 val actions = remember(nav) { AppActions(nav, this) }
                 // Any 401 anywhere lands here and returns to Login with a clean back stack.
                 LaunchedEffect(nav) { graph.signedOut.collect { actions.toLogin() } }
+                // A lent tape that came back: "Be kind, rewind." rather than Login.
+                LaunchedEffect(nav) { graph.rewind.filterNotNull().collect { actions.toRewind() } }
                 val musicNav = remember(nav) { MusicNav(nav) }
                 CompositionLocalProvider(LocalAppActions provides actions, LocalMusicNav provides musicNav) {
                     NavHost(navController = nav, startDestination = start) {
@@ -60,6 +66,10 @@ class MainActivity : ComponentActivity() {
                         composable<ProfilesRoute> { ProfilePickerScreen() }
                         composable<PairRoute> { PairScreen() }
                         composable<SettingsRoute> { entry -> SettingsScreen(entry.toRoute<SettingsRoute>().page) }
+                        composable<RewindRoute> {
+                            val rewound by graph.rewind.collectAsState()
+                            RewindScreen(rewound)
+                        }
                         musicScreens()
                     }
                 }

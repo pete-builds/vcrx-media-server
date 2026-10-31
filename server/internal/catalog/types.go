@@ -108,6 +108,19 @@ type ItemDetail struct {
 	Extras     []Extra     `json:"extras"`
 	Trailer    *Trailer    `json:"trailer"`
 	ThemeMusic *ThemeMusic `json:"theme_music"`
+	// Loan is set while the movie is out on loan (milestone 10), else null.
+	Loan *LoanInfo `json:"loan"`
+}
+
+// LoanInfo is a lent movie as its detail page shows it: nobody but the
+// borrower can play it until it is due back or returned.
+type LoanInfo struct {
+	ID    int64 `json:"id"`
+	DueAt int64 `json:"due_at"`
+	// Yours is true on the borrower's own device.
+	Yours bool `json:"yours"`
+	// Borrower is the name the owner lent it to; only admins see it.
+	Borrower *string `json:"borrower"`
 }
 
 // CastMember is one actor in billing order, with the part they play when known.

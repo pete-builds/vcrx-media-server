@@ -22,6 +22,13 @@ const (
 // about 0.8 to 0.9; one heard in half of them about 0.45.
 const AutoSkipConfidence = 0.75
 
+// ShowIntroConfidence is the least confidence at which a detected intro gets
+// a button at all. A theme heard in only half the neighbouring episodes is as
+// likely a studio logo as an intro (a 0.42 on Adolescence was one), so below
+// this the player gets nothing. Credits keep their button at any confidence:
+// a press is needed, and the fallback from black or silence scores 0.3.
+const ShowIntroConfidence = 0.5
+
 // ValidMode reports whether m is button, auto or off.
 func ValidMode(m string) bool { return m == ModeButton || m == ModeAuto || m == ModeOff }
 
@@ -52,10 +59,14 @@ type PlayerMarker struct {
 }
 
 // ForPlayer marks the markers a player may skip on its own under mode: only
-// intros, only with "skip automatically" chosen, only when sure.
+// intros, only with "skip automatically" chosen, only when sure. It drops an
+// intro below ShowIntroConfidence.
 func ForPlayer(ms []Marker, mode string) []PlayerMarker {
 	out := make([]PlayerMarker, 0, len(ms))
 	for _, m := range ms {
+		if m.Kind == Intro && m.Confidence < ShowIntroConfidence {
+			continue
+		}
 		out = append(out, PlayerMarker{Marker: m, AutoSkip: mode == ModeAuto && m.Kind == Intro && m.Confidence >= AutoSkipConfidence})
 	}
 	return out

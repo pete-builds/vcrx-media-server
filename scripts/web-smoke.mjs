@@ -8,7 +8,10 @@
 // Home rows missing (the Halloween row, with the dev server's fixed date),
 // a Customize Home editor that does not hide or move a row, or an invited
 // device that is not signed in by its invite, sees past its scope, reaches
-// the profile picker, or survives being revoked, or music that stops when
+// the profile picker, or survives being revoked, or a lent tape whose card does
+// not print or decode to its invite, whose borrower sees more than the one
+// title or cannot play it, whose owner can still play it, or whose borrower
+// is not told "Be kind, rewind." when it comes back, or music that stops when
 // the page changes; and, given a second dev server, a friend's server that
 // does not link, badge its titles on Home, play through this one, or leave
 // Home when unlinked.
@@ -799,6 +802,7 @@ async function main() {
       if (page.junk) fail(`#${path}`, `shows "${page.junk}"`);
     }
   }
+  await lendLoop(s, evaluate, ids, () => exceptions, (v) => { exceptions = v; });
 }
 
 // Music: Play on a live album with a real mouse click; the bar keeps playing
@@ -1201,6 +1205,168 @@ async function inviteLoop(s, evaluate, getExceptions, setExceptions) {
   if (getExceptions().length) fail("invite", `threw: ${getExceptions()[0]}`);
 }
 
+// Lend a tape: the admin lends a movie from its page and gets the card; the
+// card fits 6 by 4 inches when printed and its QR code decodes to the invite;
+// the owner can no longer play the movie; a phone redeems the card, sees that
+// one movie and nothing else, plays it, cannot download it; the admin returns
+// it early from Activity > Loans and the phone lands on "Be kind, rewind."
+// Natural expiry runs the same ending; the Go tests cover it with a clock.
+async function lendLoop(s, evaluate, ids, getExceptions, setExceptions) {
+  console.log("lend a tape: card, print, QR, redeem, play, return, rewind");
+  setExceptions([]);
+  const movie = ids.direct || ids.movie;
+  const helpers = `
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const wait = async (sel, n = 40) => { for (let i = 0; i < n && !document.querySelector(sel); i++) await sleep(150); return document.querySelector(sel); };
+    const call = (p, method = "GET", body) => fetch("/api/v1" + p, { method, body: body && JSON.stringify(body),
+      headers: { "X-VCRX-Client": "web", "Content-Type": "application/json" } }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));`;
+  await s("Page.navigate", { url: `${base}/#/item/${movie}?lend` });
+  const card = await evaluate(`${helpers}
+    const lend = await wait(".hero a[href^='#/lend/']");
+    if (!lend) return { why: "the movie's page has no Lend this tape button: " + document.getElementById("view").innerText.slice(0, 200) };
+    lend.click();
+    const form = await wait(".lend-form");
+    if (!form) return { why: "no lend form: " + document.getElementById("view").innerText.slice(0, 200) };
+    form.elements.name.value = "Smoke Friend";
+    form.querySelector("button[type=submit]").click();
+    const img = await wait(".tape-card img.qr");
+    if (!img) return { why: "lending showed no card: " + document.getElementById("view").innerText.slice(0, 200) };
+    for (let i = 0; i < 20 && !img.naturalWidth; i++) await sleep(100);
+    let decoded = null;
+    if ("BarcodeDetector" in window) {
+      try { decoded = ((await new BarcodeDetector({ formats: ["qr_code"] }).detect(img))[0] || {}).rawValue || ""; } catch { decoded = null; }
+    }
+    const code = document.querySelector(".tape-code").textContent.split(" ").join("");
+    return { decoded, code, qr: img.naturalWidth, text: document.querySelector(".tape-card").innerText, width: document.documentElement.scrollWidth };`);
+  if (card.why) return fail("lend", card.why);
+  if (!card.qr) fail("lend", "the card's QR code image did not load");
+  if (!/Due back/i.test(card.text) || !/Smoke Friend/.test(card.text) || !/Be kind, rewind\./.test(card.text)) fail("lend", `the card reads: ${card.text}`);
+  if (/\b(null|undefined|NaN)\b/.test(card.text)) fail("lend", `the card shows junk: ${card.text}`);
+  const invite = `${base}/#/invite/${card.code}`;
+  if (card.decoded !== null && card.decoded !== invite) fail("lend", `the card's QR code reads "${card.decoded}", not its invite ${invite}`);
+  if (card.decoded !== null) console.log("  card QR code decodes to the invite link");
+  // Printed: 6 by 4 inches (576 by 384 CSS pixels), nothing else on the page.
+  await s("Emulation.setEmulatedMedia", { media: "print" });
+  const printed = await evaluate(`
+    const r = document.querySelector(".tape-inner").getBoundingClientRect();
+    const shown = (sel) => [...document.querySelectorAll(sel)].some((e) => getComputedStyle(e).display !== "none" && e.getClientRects().length);
+    return { w: Math.round(r.width), h: Math.round(r.height), topbar: shown(".topbar"), buttons: shown(".lend-page .actions") };`);
+  await s("Emulation.setEmulatedMedia", { media: "" });
+  if (printed.w !== 576 || printed.h !== 384) fail("lend print", `the printed card is ${printed.w}x${printed.h} px, not 6x4 inches (576x384)`);
+  if (printed.topbar || printed.buttons) fail("lend print", "the top bar or the buttons print with the card");
+  const pdf = await s("Page.printToPDF", { preferCSSPageSize: true, printBackground: true });
+  const pages = (Buffer.from(pdf.data, "base64").toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
+  if (pages !== 1) fail("lend print", `the card prints on ${pages} pages, not one`);
+  // The owner's copy is out: the admin cannot play it.
+  const owner = await evaluate(`${helpers}
+    const r = await call("/playback/sessions", "POST", { item_id: ${movie}, capabilities: { containers: ["mp4", "mkv"], video_codecs: [{ codec: "h264" }], audio_codecs: [{ codec: "aac" }] } });
+    location.hash = "#/item/${movie}?out";
+    const note = await wait(".loan-note");
+    return { status: r.status, error: r.body && r.body.error, note: note ? note.innerText : "", ret: !!(note && note.querySelector("button")) };`);
+  if (owner.status !== 409 || owner.error !== "on_loan") fail("lend", `the owner playing a lent tape got ${owner.status} ${owner.error}, not 409 on_loan`);
+  if (!/Out on loan/.test(owner.note) || !owner.ret) fail("lend", `the movie's page does not say it is out with a Return early button: ${owner.note}`);
+
+  // The borrower: a phone of its own.
+  const { browserContextId } = await send("Target.createBrowserContext");
+  const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId });
+  const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
+  const d = (m, p) => send(m, p, sessionId);
+  const devErrors = [];
+  listeners.push((m) => {
+    if (m.sessionId === sessionId && m.method === "Runtime.exceptionThrown") devErrors.push(m.params.exceptionDetails.text);
+  });
+  await d("Runtime.enable");
+  await d("Page.enable");
+  await d("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  const devEval = async (expr) => {
+    const r = await d("Runtime.evaluate", { expression: `(async () => { ${helpers} ${expr} })()`, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+    return r.result.value;
+  };
+  try {
+    await d("Page.navigate", { url: card.decoded || invite });
+    const joined = await devEval(`
+      const join = await wait(".invite-page button");
+      if (!join) return { why: "the card's link showed no Join button: " + document.getElementById("view").innerText.slice(0, 160) };
+      join.click();
+      for (let i = 0; i < 40 && !location.hash.startsWith("#/item/"); i++) await sleep(150);
+      await wait(".hero h1");
+      const me = (await call("/me")).body || {};
+      const libs = ((await call("/libraries")).body || {}).libraries || [];
+      let titles = [];
+      for (const l of libs) titles = titles.concat((((await call("/libraries/" + l.id + "/items")).body || {}).items || []).map((i) => i.title));
+      const others = ${JSON.stringify([ids.converted, ids.transcoded, ids.show].filter(Boolean))};
+      const guessed = [];
+      for (const id of others) guessed.push((await call("/items/" + id)).status);
+      const item = (await call("/items/${movie}")).body || {};
+      const file = (await call("/versions/" + ((item.versions || [])[0] || {}).id + "/file")).status;
+      return { hash: location.hash, me, titles, guessed, file, note: (document.querySelector(".loan-note") || {}).innerText || "",
+        width: document.documentElement.scrollWidth, screen: screen.width };`);
+    if (joined.why) fail("lend borrower", joined.why);
+    else {
+      if (joined.hash !== `#/item/${movie}`) fail("lend borrower", `the card opened ${joined.hash}, not the lent movie`);
+      if (joined.me.kind !== "token" || !joined.me.loan) fail("lend borrower", `joined as ${JSON.stringify(joined.me)}, not a borrower`);
+      if (joined.titles.length !== 1) fail("lend borrower", `the borrower's libraries list ${joined.titles.join(", ")}, not the one movie`);
+      if (joined.guessed.some((c) => c !== 404)) fail("lend borrower", `guessed ids of other titles answered ${joined.guessed.join(", ")}, not 404`);
+      if (joined.file !== 403) fail("lend borrower", `the bare file URL answered ${joined.file}, not 403: a borrower streams, never downloads`);
+      if (!/On loan to you/.test(joined.note)) fail("lend borrower", `the movie's page does not say it is on loan to them: ${joined.note}`);
+      if (joined.width > joined.screen + 1) fail("lend borrower", `the page is ${joined.width}px wide on a ${joined.screen}px phone`);
+    }
+    const played = await devEval(`
+      location.hash = "#/play/${movie}";
+      const v = await wait("video");
+      if (!v) return { why: "no video element: " + document.getElementById("view").innerText.slice(0, 160) };
+      v.muted = true;
+      v.play().catch(() => {});
+      for (let i = 0; i < 80 && !(v.currentTime > 1.5); i++) await sleep(150);
+      return { t: v.currentTime, err: v.error && v.error.code };`);
+    if (played.why) fail("lend borrower", played.why);
+    else if (!(played.t > 1.5)) fail("lend borrower", `the lent movie did not play (t=${played.t}, error ${played.err})`);
+
+    // The admin returns it early from Activity > Loans; the phone, still
+    // playing, is told "Be kind, rewind."
+    await s("Page.navigate", { url: `${base}/#/activity/loans` });
+    const returned = await evaluate(`${helpers}
+      window.confirm = () => true;
+      let row = null;
+      for (let i = 0; i < 40 && !row; i++) {
+        row = [...document.querySelectorAll("table.loans tbody tr")].find((r) => r.innerText.includes("Smoke Friend") && r.dataset.state === "out");
+        if (!row) await sleep(150);
+      }
+      if (!row) return { why: "Activity > Loans does not list the loan as out: " + document.getElementById("view").innerText.slice(0, 200) };
+      const scanned = row.innerText;
+      row.querySelector("button").click();
+      let state = "";
+      for (let i = 0; i < 40 && state !== "returned"; i++) {
+        await sleep(150);
+        const r = [...document.querySelectorAll("table.loans tbody tr")].find((x) => x.innerText.includes("Smoke Friend"));
+        state = r ? r.dataset.state : "";
+      }
+      const again = await call("/playback/sessions", "POST", { item_id: ${movie}, capabilities: { containers: ["mp4", "mkv"], video_codecs: [{ codec: "h264" }], audio_codecs: [{ codec: "aac" }] } });
+      return { state, scanned, again: again.status };`);
+    if (returned.why) fail("lend return", returned.why);
+    else {
+      if (returned.state !== "returned") fail("lend return", `after Return early the loan shows ${returned.state}`);
+      if (!/Scanned/.test(returned.scanned)) fail("lend return", `the loan does not say its card was scanned: ${returned.scanned}`);
+      if (returned.again !== 201) fail("lend return", `the owner after the return got ${returned.again}, not 201: the tape is not back on the shelf`);
+    }
+    const rewound = await devEval(`
+      for (let i = 0; i < 140 && location.hash !== "#/rewind"; i++) await sleep(150);
+      const page = await wait(".rewind-page", 20);
+      return { hash: location.hash, text: page ? page.innerText : document.getElementById("view").innerText.slice(0, 160),
+        me: (await call("/me")).body, width: document.documentElement.scrollWidth, screen: screen.width };`);
+    if (rewound.hash !== "#/rewind" || !/Be kind, rewind\./.test(rewound.text)) fail("lend rewind", `the borrower did not land on "Be kind, rewind." (${rewound.hash}): ${rewound.text}`);
+    if (!rewound.me || rewound.me.error !== "loan_ended") fail("lend rewind", `the borrower's next request answered ${JSON.stringify(rewound.me)}, not loan_ended`);
+    if (/\b(null|undefined|NaN)\b/.test(rewound.text)) fail("lend rewind", `the rewind page shows junk: ${rewound.text}`);
+    if (rewound.width > rewound.screen + 1) fail("lend rewind", `the rewind page is ${rewound.width}px wide on a ${rewound.screen}px phone`);
+    if (devErrors.length) fail("lend borrower", `the borrower's page threw: ${devErrors[0]}`);
+  } finally {
+    await send("Target.closeTarget", { targetId }).catch(() => {});
+    await send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
+  }
+  if (getExceptions().length) fail("lend", `threw: ${getExceptions()[0]}`);
+}
+
 // Friends' servers (milestone 9, item 3), against a second dev server: its
 // admin mints a server invite (over its API: that server signs this machine
 // in without a password), this server's admin pastes it into Settings >
@@ -1336,5 +1502,5 @@ if (failures.length) {
 }
 console.log("\nweb-smoke: every page, every playback path (HLS included), Continue Watching removal, search as you type, the shortcuts list, " +
   "the Home feature and rows, Customize Home, season tabs and the phone menu, the History section, the trailer, extras and theme music, " +
-  "Skip Intro and Next Episode, the invite and pairing loop, music (playing across pages, gapless hand-over, Space)" +
+  "Skip Intro and Next Episode, the invite and pairing loop, lending a tape, music (playing across pages, gapless hand-over, Space)" +
   (peer ? ", and linking, badging, playing and unlinking a friend's server" : "") + " passed");
