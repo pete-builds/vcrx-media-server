@@ -40,6 +40,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
+	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
@@ -327,6 +328,10 @@ func serve() error {
 		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets, AllowedHosts: cfg.AllowedHosts,
 	}
 	srv.SmartCollections = smart
+	// The weekly newsletter checks once a minute whether its time has come; it
+	// does nothing until switched on in Settings.
+	srv.Newsletter = &newsletter.Service{DB: a.db, Hooks: hooks, Log: log.With("component", "newsletter")}
+	go srv.Newsletter.Run(ctx)
 	if users, err := authStore.CountUsers(ctx); err == nil && users == 0 {
 		log.Warn("no users yet: create the admin with `docker compose exec vcrx vcrx user add -username <name> -admin`")
 	}
