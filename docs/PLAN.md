@@ -80,6 +80,20 @@ The reference says to group files into one item only when they share a folder an
 
    The first change that adds a peer-facing route also adds the check that enforces this: a test over the registered routes that fails if any peer-facing route serves a whole file for storage (a full-file response, a download disposition, or a range request covering the whole file outside a playback session), with a control that proves the test fails when such a route is added.
 
+10. **The video store you and your friends own** (Pete, 2026-10-31: "take it to the next level, be bold, never quit"). Plex imitates Netflix; VCRX imitates the video store and the tape-trading scene, which streaming services cannot do because they have no friends. In priority order:
+    1. **Lend a tape.** A VHS-style card with a QR code: an invite token (milestone 9 item 1) scoped to ONE title for 72 hours that expires on its own. One loan per copy: while it is out, nobody else can stream the owner's copy. The expiry screen says "Be kind, rewind."
+    2. **Legal tape trading.** A title may be marked shareable ONLY from a verifiable source: the band's taping policy (etree or Internet Archive Live Music Archive metadata), a Creative Commons or public-domain licence, or "my own recording" set by an admin for files in a home-video library. Shareable titles may replicate between peers, torrent style; everything else stays stream-only. This is the ONLY exception to milestone 9's no-copy line, never a free-form toggle on arbitrary titles, and milestone 9's route test must enforce it. **Status: needs Pete's direct sign-off before any design work,** because it relaxes a non-negotiable constraint and arrived through a relay. Open question for that review: "my own recording" must not become a free-form toggle in practice by moving any file into a home-video library, so it needs its own provenance check. The shareable-provenance model is designed and security-reviewed BEFORE any replication code.
+    3. **Jam band mode.** Concert videos get per-song chapters from setlist data; "play every Tweezer" works across the friend network.
+    4. **The video store.** Home as shelves: a new-release wall from what was recently added across friends' servers, a Staff Picks shelf per friend, and late fees as a joke.
+    5. **Friend channels.** Scheduled linear channels per server ("Mark's 90s Action"), flipped through like cable, everyone tuned in at the same moment.
+    6. **"Who has it?"** Ask the network for a title; a friend who owns it answers with one tap.
+    7. **Taste signals,** opt-in and off by default per friend, from friends' watch history ("3 finished, 2 bailed at minute 40").
+    8. **Federated skip-intro and credits markers:** computed once and shared between peers as metadata, never media.
+    9. **A built-in MCP endpoint** so Claude can manage the library (collections, profiles, labels), with an admin-scoped token, read-only by default.
+    10. **A built-in-public page:** every PR explained in plain English, live.
+
+    Build order: 1, 8, 4, then 2 (only after its sign-off and review), then the rest.
+
 ### Merge order for the 2026-10-30 overnight stack
 
 Server: #3, #4, #5, #6, #7, #8, #10, #11, #12, #13, each based on the one before; do not deploy #3 without #12. TV: #9, based on #3 only. After the stack is merged and deployed, add to nix1's `deploy/data/config/vcrx.yaml`: `auto_sign_in_user: pete`, `trusted_networks` naming the home LAN and TV subnets plus the Tailscale IPs of Pete's own devices (the exact list lives in the workspace, not this public repo), `imdb_ratings: true`, and the overlays from #7's description. The APK has to be signed on the NixOS box, which holds `tv/signing/`.
