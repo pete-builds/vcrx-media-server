@@ -16,6 +16,10 @@ Written 2026-10-30. `docs/REFERENCE.md` holds the verified facts and governs whe
 | APK build | A pinned Android build image (`tv/Dockerfile`), run on any Docker host. From this NixOS box: `DOCKER_HOST=ssh://nix1`. Avoids the NixOS `aapt2` and SDK patching problems entirely. |
 | FFmpeg audio extension | Google publishes no binary of `media3-decoder-ffmpeg`, so the build image compiles it from the androidx/media source at the same tag as the Media3 libraries, with vanilla FFmpeg. No third party builds. |
 | Token storage on the TV | Android Keystore AES-GCM key encrypting the token in private preferences. `androidx.security:security-crypto` is deprecated, so it is not used. |
+| Sign-in at home | Pete, 2026-10-30: "on lan there should be no auth". `auto_sign_in_user` signs clients on `trusted_networks` (loopback, RFC 1918, Tailscale by default) in as that user, judged by the TCP peer, never a forwarded header from an untrusted proxy. Off by default. |
+| Web client | Served by the server itself on 3750; vanilla ES modules, no framework, no build step, nothing from the internet. Browser sessions are an HttpOnly SameSite=Strict cookie because media elements cannot send a bearer header; changes need the `X-VCRX-Client` header. |
+| Browser playback | Browsers decode H.264, HEVC (Chrome on a Mac) and AV1 but not AC-3, E-AC-3, DTS or TrueHD, which are most first audio tracks on nix1. So the server copies video and converts only audio (#8) rather than transcoding video. |
+| Overlays | Baked into the served poster (like Kometa into Plex), so every client gets them unchanged. VCRX lettering, not third-party logos. Kometa's ribbon lists (IMDb Top 250, RT) have no source here; the ribbon is an IMDb rating and votes rule. |
 
 ## Server shape
 
@@ -56,11 +60,16 @@ The reference says to group files into one item only when they share a folder an
 
 1. **Server slice** (this session): compose up on nix1, config, migrations, a read-only library, incremental scan with ffprobe, filename and NFO metadata, local artwork, local accounts, `/api/v1` with the OpenAPI drift test, direct play with Range, the playback event log, watch state, health checks, CI.
 2. **TV slice** (this session): Compose for TV app, connect by IP, login, home rows, library grid, details, season and episode picker, search, Media3 direct play with capabilities, seek, stop, resume, progress sync, error and disconnected states, one-command APK build, ADB steps. **Acceptance test passes here.**
-3. **Playback breadth:** remux and HLS (fMP4) with an FFmpeg job manager, audio-only transcode, image subtitle burn-in, manual version merge and split.
-4. **Activity:** live sessions, history, stats, playback policy before stream start (no 4K transcodes for non-admins), webhooks.
-5. **Collections and overlays:** YAML in `/config/collections`, smart rules, auto collections, overlays. Optional TMDb enrichment with the user's key shipped early (2026-10-30); still to come: manual match fixes and matching versions by TMDb id.
+3. **Playback breadth:** converted streams shipped 2026-10-30 for clients that ask (`fmp4_stream`): video copied, audio copied or converted to AAC, fragmented MP4, seek by keyframe (#8). Text subtitles as WebVTT, sidecar and embedded (#4). Still to come: video transcoding (HLS), image subtitle burn-in, manual version merge and split.
+4. **Activity:** shipped 2026-10-30 (#5): now playing, history, stats, per-user totals, stop a stream with a message, webhooks (Discord-shaped for Discord URLs). Playback policy before stream start already existed. Still to come: IP to location, a newsletter.
+5. **Collections and overlays:** poster overlays shipped 2026-10-30 (#7): rating, resolution with HDR and DV, ribbon, drawn into the served poster like Kometa; IMDb ratings from IMDb's public file (opt-in). TMDb enrichment shipped earlier. Still to come: collections (YAML and automatic: franchise from `tmdb_collection_id`, decade, genre, director, studio), manual match fixes, matching versions by TMDb id.
 6. **Access policies and VA-API** hardware transcoding.
 7. **Ecosystem hooks:** Radarr and Sonarr import webhooks, watch state for media-reclaim.
+8. **Web app** (pulled forward from "Comes later", 2026-10-30, #6, #10, #11): browse, details, search, browser playback with subtitles and Up Next, Activity, Settings for libraries and users, sign-in without a password on trusted networks (#3) by cookie with a CSRF header rule. Plain ES modules embedded in the binary, no build step. Gates: `server/web/check-js.sh` and `scripts/web-smoke.mjs` (headless Chrome) in CI.
+
+### Merge order for the 2026-10-30 overnight stack
+
+Server: #3, #4, #5, #6, #7, #8, #10, #11, each based on the one before. TV: #9, based on #3 only. After the stack is merged and deployed, add to nix1's `deploy/data/config/vcrx.yaml`: `auto_sign_in_user: pete`, `imdb_ratings: true`, and the overlays from #7's description. The APK has to be signed on the NixOS box, which holds `tv/signing/`.
 
 ## Acceptance test
 
