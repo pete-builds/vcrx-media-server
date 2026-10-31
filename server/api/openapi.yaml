@@ -917,6 +917,7 @@ paths:
                         last_title: { type: [string, "null"] }
                         last_device: { type: [string, "null"] }
                         last_ip: { type: [string, "null"] }
+                        last_location: { $ref: "#/components/schemas/Location" }
         "403": { $ref: "#/components/responses/Error" }
 
   /api/v1/admin/activity/sessions/{session_id}/terminate:
@@ -943,6 +944,65 @@ paths:
               schema: { $ref: "#/components/schemas/ActivityEntry" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/newsletter:
+    get:
+      operationId: adminNewsletter
+      summary: >-
+        The weekly newsletter's settings and state: a digest of the movies and episodes added in the last 7 days,
+        posted through the webhooks at a weekday and hour in the server's time zone. Off by default.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewsletterStatus" }
+        "403": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: adminSetNewsletter
+      summary: >-
+        Switch the newsletter on or off, set when it goes out and whose view it uses. A change takes effect from the
+        next scheduled time; it never sends a past week's digest straight away. 400 when the audience is an admin,
+        disabled or missing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewsletterSettings" }
+      responses:
+        "200":
+          description: The settings and state as they now stand.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewsletterStatus" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/newsletter/preview:
+    post:
+      operationId: adminPreviewNewsletter
+      summary: >-
+        Send the last 7 days' digest to every webhook now, marked as a preview. Works while the newsletter is off and
+        does not count as the week's send. Built under the audience setting, like the weekly one. 409 no_webhooks when
+        no webhook takes the newsletter event, 409 bad_audience when the audience account is no longer valid,
+        409 nothing_added when the audience has nothing new, 502 webhook_failed when no webhook accepted it.
+      responses:
+        "200":
+          description: Sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sent, failed, movies, shows, episodes]
+                properties:
+                  sent: { type: integer, description: Webhooks that accepted it. }
+                  failed: { type: integer }
+                  movies: { type: integer }
+                  shows: { type: integer }
+                  episodes: { type: integer }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
 
 components:
   securitySchemes:
@@ -1336,6 +1396,7 @@ components:
         client: { type: [string, "null"] }
         client_version: { type: [string, "null"] }
         ip: { type: [string, "null"] }
+        location: { $ref: "#/components/schemas/Location" }
         start_position_ms: { type: integer }
         position_ms: { type: integer }
         duration_ms: { type: [integer, "null"] }
@@ -1377,7 +1438,7 @@ components:
         users: { type: integer }
     ActivityStats:
       type: object
-      required: [days, since, plays, watch_ms, users, refused, top_movies, top_shows, top_users, platforms, devices, decisions, by_day, by_hour, by_weekday]
+      required: [days, since, plays, watch_ms, users, refused, top_movies, top_shows, top_users, platforms, devices, decisions, by_day, by_hour, by_weekday, playback_types, platform_types, peak_streams, peak_at]
       properties:
         days: { type: integer }
         since: { type: integer }
@@ -1402,6 +1463,48 @@ components:
               watch_ms: { type: integer }
         by_hour: { type: array, items: { type: integer }, minItems: 24, maxItems: 24 }
         by_weekday: { type: array, items: { type: integer }, minItems: 7, maxItems: 7, description: Sunday first. }
+        playback_types:
+          type: array
+          items: { $ref: "#/components/schemas/Ranked" }
+          description: Counted plays by decision (direct_play, remux, audio_transcode, transcode), most first.
+        platform_types:
+          type: array
+          items: { $ref: "#/components/schemas/Ranked" }
+          description: Counted plays by kind of device, such as "Google TV" or "Web (Chrome)".
+        peak_streams: { type: integer, description: The most counted plays at once in the range. }
+        peak_at: { type: integer, description: When that peak began; 0 when there were no plays. }
+    Location:
+      type: string
+      enum: ["", This server, Tailscale, Local network, Internet]
+      description: >-
+        The kind of network an address is on, worked out offline. Public addresses are not placed on a map.
+    NewsletterSettings:
+      type: object
+      required: [enabled, weekday, hour]
+      properties:
+        enabled: { type: boolean }
+        weekday: { type: integer, minimum: 0, maximum: 6, description: 0 is Sunday. }
+        hour: { type: integer, minimum: 0, maximum: 23, description: In the server's time zone. }
+        audience_user_id:
+          type: integer
+          default: 0
+          description: >-
+            Whose view the digest is built from: an enabled account that is not an admin. It lists only what that
+            account may see (granted libraries, label rules). 0, the default, means only titles every enabled
+            non-admin account can see.
+    NewsletterStatus:
+      allOf:
+        - { $ref: "#/components/schemas/NewsletterSettings" }
+        - type: object
+          required: [time_zone, audience, webhooks, last_sent, next_send]
+          properties:
+            time_zone: { type: string }
+            audience: { type: string, description: Whose view the digest uses, in words. }
+            webhooks:
+              type: integer
+              description: How many webhook URLs take the newsletter; 0 when none is set or webhook_events leaves newsletter out.
+            last_sent: { type: [integer, "null"], description: When the last week was handled, or the settings last saved. }
+            next_send: { type: [integer, "null"], description: Null while off. }
     ActivitySession:
       type: object
       required: [id, decision, decision_reason, state, started_at]

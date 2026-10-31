@@ -176,6 +176,7 @@ async function main() {
     ["/settings", ".settings h1"],
     ["/settings/libraries", "table.list"],
     ["/settings/users", ".add-user"],
+    ["/settings/newsletter", ".newsletter-form"],
   ];
   for (const [path, selector] of pages) {
     console.log(`page #${path}`);
