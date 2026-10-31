@@ -63,3 +63,10 @@ func TestText(t *testing.T) {
 		t.Fatalf("stop text: %q", got)
 	}
 }
+
+func TestAddedText(t *testing.T) {
+	n := Notice{Event: Added, Library: "Movies", Message: AddedSummary([]string{"A (2001)", "B", "C", "D", "E", "F", "G"})}
+	if got := n.Text(); got != "＋ New in Movies: A (2001), B, C, D, E and 2 more" {
+		t.Fatalf("%q", got)
+	}
+}

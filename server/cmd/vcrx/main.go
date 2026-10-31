@@ -231,6 +231,13 @@ func serve() error {
 	hooks := notify.New(cfg.WebhookURLs, cfg.WebhookEvents, cfg.ServerName, log.With("component", "webhooks"))
 	if len(cfg.WebhookURLs) > 0 {
 		pb.Notify = hooks.Send
+		scanner.OnAdded = func(ctx context.Context, lib library.Library, run library.Run, idsAbove int64) {
+			titles, err := library.AddedTitles(ctx, a.db, lib.ID, idsAbove)
+			if err != nil || len(titles) == 0 {
+				return
+			}
+			hooks.Send(notify.Notice{Event: notify.Added, Library: lib.Name, Titles: titles, Message: notify.AddedSummary(titles)})
+		}
 		log.Info("webhooks on", "count", len(cfg.WebhookURLs), "events", cfg.WebhookEvents)
 	}
 
