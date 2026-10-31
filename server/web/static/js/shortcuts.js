@@ -23,6 +23,7 @@ const GROUPS = [
     [["←", "→"], "Back or forward 10 seconds (30 on a converted stream)"],
     [["F"], "Full screen"],
     [["M"], "Mute or unmute"],
+    [["C"], "Subtitles on or off"],
     [["Esc"], "Leave the player"],
   ]],
 ];

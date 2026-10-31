@@ -3,7 +3,8 @@
 // notice: a page that throws, a page showing "null" or "undefined", a page
 // missing its main content, a details panel without its writers, release date
 // or votes, a video that does not play, search as you type that
-// lists nothing, a Continue Watching Remove control that does not remove, a
+// lists nothing, a C key or CC button that does not toggle captions, a
+// Continue Watching Remove control that does not remove, a
 // keyboard shortcuts list that does not open, a Home feature whose Play does
 // not play, season tabs that do not switch, a phone menu that does not open,
 // Home rows missing (the Halloween row, with the dev server's fixed date),
@@ -691,6 +692,30 @@ async function main() {
       if (res.reset !== res.before || res.label !== "0 ms") fail("subtitles", `Reset left ${res.reset} (${res.label})`);
     }
     if (exceptions.length) fail("subtitles", `threw: ${exceptions[0]}`);
+
+    // CC: C turns the track just downloaded on in one press (it is the only
+    // one, and this profile chose its language last), and off with the next.
+    console.log(`subtitles: C toggles captions (#/play/${ids.direct})`);
+    // Home first: the same URL again would keep the player above, captions on.
+    await s("Page.navigate", { url: `${base}/#/` });
+    await sleep(500);
+    await s("Page.navigate", { url: `${base}/#/play/${ids.direct}?start=0` });
+    const cc = await evaluate(`
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const wait = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = await fn(); if (v) return v; await sleep(150); } return null; };
+      const btn = await wait(() => document.querySelector(".player .cc-btn"));
+      if (!btn) return { why: "no CC button beside the subtitle menu" };
+      const v = document.querySelector("video");
+      const showing = () => [...v.textTracks].some((t) => t.mode === "showing" && t.cues && t.cues.length);
+      const press = () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true }));
+      press();
+      if (!(await wait(() => showing() && btn.getAttribute("aria-pressed") === "true"))) return { why: "C did not turn captions on" };
+      press();
+      if (!(await wait(() => !showing() && btn.getAttribute("aria-pressed") === "false"))) return { why: "C did not turn captions off" };
+      btn.click();
+      if (!(await wait(() => showing()))) return { why: "the CC button did not turn captions on" };
+      return { ok: true };`);
+    if (!cc.ok) fail("captions toggle", cc.why);
 
     console.log(`subtitles: delete on the item page (#/item/${ids.direct})`);
     await s("Page.navigate", { url: `${base}/#/item/${ids.direct}` });
