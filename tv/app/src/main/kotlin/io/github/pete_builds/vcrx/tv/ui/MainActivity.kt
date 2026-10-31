@@ -20,6 +20,7 @@ import io.github.pete_builds.vcrx.tv.ui.profiles.ProfilePickerScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.StartScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.startScreen
 import io.github.pete_builds.vcrx.tv.ui.settings.AboutScreen
+import io.github.pete_builds.vcrx.tv.ui.settings.SettingsScreen
 import io.github.pete_builds.vcrx.tv.ui.theme.BrandTheme
 
 class MainActivity : ComponentActivity() {
@@ -50,6 +51,7 @@ class MainActivity : ComponentActivity() {
                         }
                         composable<AboutRoute> { AboutScreen() }
                         composable<ProfilesRoute> { ProfilePickerScreen() }
+                        composable<SettingsRoute> { entry -> SettingsScreen(entry.toRoute<SettingsRoute>().page) }
                     }
                 }
             }

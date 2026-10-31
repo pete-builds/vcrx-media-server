@@ -102,6 +102,24 @@ type Config struct {
 	// TMDbCountry picks the content rating shown, e.g. US for PG-13.
 	TMDbCountry string `yaml:"tmdb_country"`
 
+	// OpenSubtitlesAPIKey turns on subtitle search (opensubtitles.com, REST API
+	// v1). Downloads also need OpenSubtitlesUsername and OpenSubtitlesPassword,
+	// because the daily quota belongs to an account. The key and password are
+	// secrets: VCRX_OPENSUBTITLES_API_KEY and VCRX_OPENSUBTITLES_PASSWORD, or
+	// their *_FILE forms, never the YAML file.
+	OpenSubtitlesAPIKey   string `yaml:"-"`
+	OpenSubtitlesUsername string `yaml:"opensubtitles_username"`
+	OpenSubtitlesPassword string `yaml:"-"`
+	// OpenSubtitlesStub answers searches with invented results and never
+	// touches the network. For the dev server and its browser test only.
+	OpenSubtitlesStub bool `yaml:"-"`
+	// SubtitleLanguages are the languages searched when a client names none,
+	// and the ones the automatic fetch looks for. Default: English.
+	SubtitleLanguages []string `yaml:"subtitle_languages"`
+	// SubtitleAutoFetch downloads the preferred languages for files added from
+	// now on that have no subtitle in them, once per file. Off by default.
+	SubtitleAutoFetch bool `yaml:"subtitle_auto_fetch"`
+
 	Libraries []LibrarySpec `yaml:"libraries"`
 
 	// CollectionsDir holds the smart collection YAML files. Empty means
@@ -111,22 +129,23 @@ type Config struct {
 
 func defaults() Config {
 	return Config{
-		ServerName:       "VCRX",
-		Bind:             "0.0.0.0",
-		Port:             3750,
-		ConfigDir:        "/config",
-		CacheDir:         "/cache",
-		MediaRoots:       []string{"/media"},
-		FFprobePath:      "ffprobe",
-		FFmpegPath:       "ffmpeg",
-		ProbeConcurrency: 4,
-		MaxTranscodes:    2,
-		ScanOnStartup:    true,
-		LogLevel:         "info",
-		LogFormat:        "json",
-		SessionTTL:       90 * 24 * time.Hour,
-		TMDbLanguage:     "en-US",
-		TMDbCountry:      "US",
+		ServerName:        "VCRX",
+		Bind:              "0.0.0.0",
+		Port:              3750,
+		ConfigDir:         "/config",
+		CacheDir:          "/cache",
+		MediaRoots:        []string{"/media"},
+		FFprobePath:       "ffprobe",
+		FFmpegPath:        "ffmpeg",
+		ProbeConcurrency:  4,
+		MaxTranscodes:     2,
+		ScanOnStartup:     true,
+		LogLevel:          "info",
+		LogFormat:         "json",
+		SessionTTL:        90 * 24 * time.Hour,
+		TMDbLanguage:      "en-US",
+		TMDbCountry:       "US",
+		SubtitleLanguages: []string{"en"},
 	}
 }
 
@@ -235,6 +254,25 @@ func Load() (Config, error) {
 	if t := c.ArrWebhookToken; t != "" && len(t) < 16 {
 		errs = append(errs, errors.New("VCRX_ARR_WEBHOOK_TOKEN must be at least 16 characters"))
 	}
+	secret := func(key string, dst *string) {
+		str(key, dst)
+		if v := os.Getenv(key + "_FILE"); v != "" && *dst == "" {
+			b, err := os.ReadFile(v) //nolint:gosec // the operator chooses this path
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s_FILE: %w", key, err))
+			} else {
+				*dst = strings.TrimSpace(string(b))
+			}
+		}
+		*dst = strings.TrimSpace(*dst)
+	}
+	secret("VCRX_OPENSUBTITLES_API_KEY", &c.OpenSubtitlesAPIKey)
+	secret("VCRX_OPENSUBTITLES_PASSWORD", &c.OpenSubtitlesPassword)
+	str("VCRX_OPENSUBTITLES_USERNAME", &c.OpenSubtitlesUsername)
+	boolean("VCRX_OPENSUBTITLES_STUB", &c.OpenSubtitlesStub)
+	list("VCRX_SUBTITLE_LANGUAGES", &c.SubtitleLanguages)
+	boolean("VCRX_SUBTITLE_AUTO_FETCH", &c.SubtitleAutoFetch)
+
 	ttlDays := int(c.SessionTTL / (24 * time.Hour))
 	integer("VCRX_SESSION_TTL_DAYS", &ttlDays)
 	c.SessionTTL = time.Duration(ttlDays) * 24 * time.Hour
@@ -321,6 +359,11 @@ func (c Config) SubtitleCacheDir() string { return filepath.Join(c.CacheDir, "su
 // files are deleted when it ends, and the whole directory's leftovers at
 // startup.
 func (c Config) HLSDir() string { return filepath.Join(c.CacheDir, "hls") }
+
+// SubtitleDownloadDir holds subtitles downloaded from OpenSubtitles. It is
+// under the config dir, beside the database that lists them, and never under
+// a library: the media mounts are read-only.
+func (c Config) SubtitleDownloadDir() string { return filepath.Join(c.ConfigDir, "subtitles") }
 
 // MetadataDir holds images downloaded from TMDb. It sits under the config dir,
 // not the cache, because downloading them again for a whole library is slow.

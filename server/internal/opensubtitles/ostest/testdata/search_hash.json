@@ -1,0 +1,37 @@
+{
+  "total_pages": 1,
+  "total_count": 1,
+  "per_page": 60,
+  "page": 1,
+  "data": [
+    {
+      "id": "7000001",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "7000001",
+        "language": "en",
+        "download_count": 812,
+        "new_download_count": 4,
+        "hearing_impaired": false,
+        "hd": true,
+        "fps": 23.976,
+        "votes": 2,
+        "ratings": 7.5,
+        "from_trusted": false,
+        "foreign_parts_only": false,
+        "upload_date": "2024-03-01T10:00:00Z",
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "The.Film.2001.1080p.BluRay.x264-GROUP",
+        "comments": "",
+        "legacy_subtitle_id": 3000001,
+        "uploader": { "uploader_id": 11, "name": "fileowner", "rank": "bronze member" },
+        "feature_details": { "feature_id": 100, "feature_type": "Movie", "year": 2001, "title": "The Film", "movie_name": "2001 - The Film", "imdb_id": 1234567, "tmdb_id": 7654321 },
+        "url": "https://www.opensubtitles.com/en/subtitles/legacy/3000001",
+        "related_links": [],
+        "files": [ { "file_id": 8000001, "cd_number": 1, "file_name": "The.Film.2001.1080p.BluRay.x264-GROUP.srt" } ],
+        "moviehash_match": true
+      }
+    }
+  ]
+}
