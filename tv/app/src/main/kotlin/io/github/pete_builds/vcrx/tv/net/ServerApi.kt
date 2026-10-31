@@ -70,6 +70,10 @@ class ServerApi(
 
     suspend fun item(itemId: Long): Item = get("/api/v1/items/$itemId", Item.serializer())
 
+    /** A collection, such as a film series, and its titles in order. */
+    suspend fun collection(collectionId: Long): CollectionResponse =
+        get("/api/v1/collections/$collectionId", CollectionResponse.serializer())
+
     suspend fun children(itemId: Long): List<Item> = get("/api/v1/items/$itemId/children", ItemsResponse.serializer()).items
 
     suspend fun setWatched(itemId: Long, played: Boolean) {

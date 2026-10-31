@@ -19,6 +19,9 @@ object BrowseRoute
 data class DetailsRoute(val itemId: Long)
 
 @Serializable
+data class CollectionRoute(val collectionId: Long, val name: String)
+
+@Serializable
 object AboutRoute
 
 /** Navigation any screen may need, without threading callbacks through every layer. */
@@ -33,6 +36,8 @@ class AppActions(private val nav: NavController, private val activity: Activity)
     }
 
     fun openDetails(itemId: Long) = nav.navigate(DetailsRoute(itemId))
+
+    fun openCollection(collectionId: Long, name: String) = nav.navigate(CollectionRoute(collectionId, name))
 
     fun openAbout() = nav.navigate(AboutRoute) { launchSingleTop = true }
 
