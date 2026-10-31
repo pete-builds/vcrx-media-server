@@ -43,6 +43,7 @@ func (f *fixture) detect(t *testing.T, kind string, start, end int64, confidence
 // Markers come with the episode and with the playback session, to anyone who
 // may see the episode, and to nobody else.
 func TestMarkersFollowTheEpisodesPolicy(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.detect(t, "intro", 60_000, 90_000, 0.9)
 	f.detect(t, "credits", 5_800_000, 6_000_000, 0.85)
@@ -98,6 +99,7 @@ func TestMarkersFollowTheEpisodesPolicy(t *testing.T) {
 // Skip automatically acts only on a confident intro; credits always wait for
 // a press. The choice is the user's own and lives on the server.
 func TestSkipAutomaticallyOnlyWhenSure(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	var got struct {
 		SkipMarkers string `json:"skip_markers"`
@@ -143,6 +145,7 @@ func TestSkipAutomaticallyOnlyWhenSure(t *testing.T) {
 }
 
 func TestAdminSetsAndClearsMarkers(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.detect(t, "intro", 60_000, 90_000, 0.9)
 	path := fmt.Sprintf("/api/v1/admin/items/%d/markers/", f.episodeID)
@@ -216,6 +219,7 @@ func TestAdminSetsAndClearsMarkers(t *testing.T) {
 // session carries none of the film's markers, so "skip automatically" can
 // never jump inside a trailer.
 func TestNoMarkersOnAnExtrasSession(t *testing.T) {
+	t.Parallel()
 	f := newExtraFixture(t)
 	if err := markers.SetManual(context.Background(), f.db, f.movieID, markers.Intro, 1000, 31_000); err != nil {
 		t.Fatal(err)
@@ -253,6 +257,7 @@ func TestNoMarkersOnAnExtrasSession(t *testing.T) {
 // either. The admin marker routes are in the walk's admin loop (403 for the
 // friend, 403 lan_only for the admin off the LAN).
 func TestAccessWalkHidesMarkers(t *testing.T) {
+	t.Parallel()
 	w := newWalkFixture(t)
 	hidden := []int64{w.horrorEpisode, w.strictEpisode}
 	for _, id := range hidden {

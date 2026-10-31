@@ -52,6 +52,8 @@ fun streamRefusal(status: Int, body: ByteArray?, json: Json): String {
     val error = httpError(status, body?.toString(Charsets.UTF_8), json)
     return when {
         error is ApiException.Http && error.code == "session_terminated" -> "Playback was stopped on the server: ${error.message}"
+        // A lent tape that came back: the server's "Be kind, rewind." line.
+        error is ApiException.Unauthorized && error.code == LOAN_ENDED -> error.message.orEmpty()
         error is ApiException.Http && error.code == BUSY -> BUSY_MESSAGE
         else -> "The server refused the stream (HTTP $status)."
     }
@@ -59,6 +61,9 @@ fun streamRefusal(status: Int, body: ByteArray?, json: Json): String {
 
 /** True for the server's 503 busy answer: it is converting as many streams as it allows. */
 fun isBusy(error: ApiException): Boolean = error is ApiException.Http && error.status == 503 && error.code == BUSY
+
+/** The 401 code for a lent tape's device once the loan is over: "Be kind, rewind." */
+const val LOAN_ENDED = "loan_ended"
 
 /** The error code of a 503 from a converted stream when every slot is taken. */
 const val BUSY = "busy"

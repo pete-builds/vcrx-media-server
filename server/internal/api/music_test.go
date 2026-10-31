@@ -102,6 +102,7 @@ func musicBrowserCaps() map[string]any {
 // as for a video library they are not granted, and search finds nothing.
 // With the grant, the same routes answer.
 func TestMusicFollowsLibraryGrants(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	ids := withMusic(t, f)
 	routes := []struct{ method, path string }{
@@ -175,6 +176,7 @@ func TestMusicFollowsLibraryGrants(t *testing.T) {
 // Direct play with Range, a listen recorded in Activity with its events, and
 // a stop from Activity cutting the stream off.
 func TestMusicDirectPlayAndListens(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	ids := withMusic(t, f)
 	var album music.AlbumDetail
@@ -234,6 +236,7 @@ func TestMusicDirectPlayAndListens(t *testing.T) {
 // A track the client cannot decode is converted with the real ffmpeg, and an
 // account that may not have files converted is refused, as for video.
 func TestMusicConvertsWhatTheClientCannotDecode(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	ids := withMusic(t, f)
 	var q struct {

@@ -221,6 +221,7 @@ func filesHolding(t *testing.T, dir string, needle []byte) []string {
 func fixtureDir(f *fixture) string { return filepath.Dir(filepath.Dir(f.root)) }
 
 func TestFederationLinkBrowseAndPlay(t *testing.T) {
+	t.Parallel()
 	p := newPeerPair(t, nil)
 	// Both admins see the link, and B's list never carries A's token.
 	var token string
@@ -344,6 +345,7 @@ func TestFederationLinkBrowseAndPlay(t *testing.T) {
 // A's policy for B decides what B gets, exactly as for a local user: no 4K,
 // no converting, only the Movies library.
 func TestFederationPeerScopeAppliesOnTheServingSide(t *testing.T) {
+	t.Parallel()
 	p := newPeerPair(t, map[string]any{"max_resolution": "1080p", "allow_transcode": false,
 		"library_ids": []int64{newFixtureLibraryID(t, "Movies")}})
 	h, _ := p.home(p.b.adminTok)
@@ -380,6 +382,7 @@ func newFixtureLibraryID(t *testing.T, name string) int64 {
 // Revoking from either side cuts an open stream at once, and the next
 // request fails.
 func TestFederationRevokeMidStream(t *testing.T) {
+	t.Parallel()
 	for _, side := range []string{"the serving side revokes", "the watching side unlinks"} {
 		t.Run(side, func(t *testing.T) {
 			// A slow cap keeps the stream open long enough to cut it.
@@ -443,6 +446,7 @@ func TestFederationRevokeMidStream(t *testing.T) {
 // The serving side's per-peer bandwidth cap covers every stream the linked
 // server has open at once.
 func TestFederationBandwidthCap(t *testing.T) {
+	t.Parallel()
 	p := newPeerPair(t, map[string]any{"bandwidth_kbps": 64}) // 8,000 bytes a second
 	play := func() string {
 		s, r := p.start(p.b.adminTok, map[string]any{"item_id": p.a.movieID, "version_id": p.a.v1080, "capabilities": tclCaps()})
@@ -496,6 +500,7 @@ func TestFederationBandwidthCap(t *testing.T) {
 // A friend's server that is down or hangs shows as such, and never breaks
 // Home: the other peer's titles and the local rows still come back, fast.
 func TestFederationOfflinePeerNeverBreaksHome(t *testing.T) {
+	t.Parallel()
 	p := newPeerPair(t, nil, func(b *fixture) {
 		// Longer than Home's own two-second wait, so that wait is what bounds it.
 		b.srv.PeerClient.JSON.Timeout = 10 * time.Second
@@ -563,6 +568,7 @@ func linkAnswer(w http.ResponseWriter, name string) {
 // serves it a whole file for storage. It streams inside its own playback
 // sessions and nowhere else.
 func TestNoPeerRouteServesAWholeFile(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	l := f.linkServer(map[string]any{"allow_transcode": true})
 	if got := wholeFileRoutes(t, f, f.srv.Routes(), l.token); len(got) > 0 {
@@ -606,6 +612,7 @@ func TestNoPeerRouteServesAWholeFile(t *testing.T) {
 // Peer tokens are hashed: the serving side keeps only SHA-256 of the server
 // invite and of the session token it hands back.
 func TestFederationTokensAreHashed(t *testing.T) {
+	t.Parallel()
 	p := newPeerPair(t, nil)
 	var token string
 	if err := p.b.db.QueryRow(`SELECT token FROM peers WHERE id = ?`, p.peerID).Scan(&token); err != nil {
@@ -640,6 +647,7 @@ func TestFederationTokensAreHashed(t *testing.T) {
 // its users row flipped to admin, and it cannot redeem its invite as a
 // device or a device invite as a server.
 func TestLinkedServerIsNeverAnAdmin(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	l := f.linkServer(nil)
 	check := func(when string) {
@@ -756,6 +764,7 @@ func jpegBytes(t *testing.T) []byte {
 
 // What a malicious peer sends is bounded, checked, and never served as HTML.
 func TestMaliciousPeerAnswersAreBoundedAndChecked(t *testing.T) {
+	t.Parallel()
 	b := newFixture(t)
 	fp := newFakePeer(t)
 	internal, hits := counter(t)
@@ -882,6 +891,7 @@ func homeOf(t *testing.T, b *fixture) (peerHome, resp) {
 
 // A playlist from a peer may name only plain segment files beside it.
 func TestPeerPlaylistsNameOnlyTheirOwnSegments(t *testing.T) {
+	t.Parallel()
 	for pl, want := range map[string]bool{
 		"#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:2.0,\nseg-00001.m4s\n#EXT-X-ENDLIST\n": true,
 		"#EXTM3U\n#EXTINF:2.0,\nhttp://192.168.1.1/admin\n":                                   false,
@@ -900,6 +910,7 @@ func TestPeerPlaylistsNameOnlyTheirOwnSegments(t *testing.T) {
 // SSRF: an address an admin enters, or a peer's invite carries, cannot make
 // this server fetch anything but that peer's own API.
 func TestPeerAddressCannotReachInternalURLs(t *testing.T) {
+	t.Parallel()
 	b := newFixture(t)
 	b.srv.PeerClient = federation.NewClient(federation.Guard{AllowLoopback: false}, "test")
 	internal, hits := counter(t)
@@ -979,6 +990,7 @@ func TestPeerAddressCannotReachInternalURLs(t *testing.T) {
 // DNS rebinding: the routes a linked server calls refuse a Host this server
 // does not answer to, as every route does.
 func TestPeerRoutesCheckTheHost(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	l := f.linkServer(nil)
 	for _, c := range []struct{ method, path, tok string }{
@@ -1001,6 +1013,7 @@ func TestPeerRoutesCheckTheHost(t *testing.T) {
 // profile with a PG-13 ceiling is refused a peer's R-rated film everywhere,
 // and a 1080p profile plays the 1080p copy.
 func TestPeerTitlesFollowTheCallersPolicy(t *testing.T) {
+	t.Parallel()
 	p := newPeerPair(t, nil)
 	if _, err := p.a.db.Exec(`UPDATE items SET content_rating = 'R' WHERE id IN (?, ?)`, p.a.movieID, p.a.showID); err != nil {
 		t.Fatal(err)
@@ -1085,6 +1098,7 @@ func TestPeerTitlesFollowTheCallersPolicy(t *testing.T) {
 
 // Converted streams and HLS play through the proxy, under the peer's policy.
 func TestFederationConvertedAndHLSThroughTheProxy(t *testing.T) {
+	t.Parallel()
 	ff, err1 := osexec.LookPath("ffmpeg")
 	fpb, err2 := osexec.LookPath("ffprobe")
 	if err1 != nil || err2 != nil {

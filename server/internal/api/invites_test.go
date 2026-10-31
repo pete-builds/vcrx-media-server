@@ -137,6 +137,7 @@ func queryRows(t *testing.T, f *fixture, q string, each func([]any)) {
 
 // The secret: random, at least 128 bits, stored only as a hash, shown once.
 func TestInviteSecretIsRandomHashedAndShownOnce(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	id, secret, r := f.mint(nil)
 	raw, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(secret))
@@ -181,6 +182,7 @@ func TestInviteSecretIsRandomHashedAndShownOnce(t *testing.T) {
 // A redeemed invite link is single-use: a replay fails, and the first device
 // keeps working.
 func TestInviteRedeemIsSingleUse(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	d := f.invite(nil)
 	var me struct {
@@ -209,6 +211,7 @@ func TestInviteRedeemIsSingleUse(t *testing.T) {
 
 // Wrong invites count against the address, like wrong passwords.
 func TestInviteGuessingIsRateLimited(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, secret, _ := f.mint(nil)
 	for i := range 10 {
@@ -223,6 +226,7 @@ func TestInviteGuessingIsRateLimited(t *testing.T) {
 // A token never widens past its scope: libraries, resolution, converting.
 // And its scope cannot be widened afterwards through the user routes.
 func TestInviteScopeIsEnforcedAndCannotBeWidened(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	movies := f.libraryID("Movies")
 	d := f.invite(map[string]any{"library_ids": []int64{movies}, "max_resolution": "1080p", "allow_transcode": false})
@@ -271,6 +275,7 @@ func TestInviteScopeIsEnforcedAndCannotBeWidened(t *testing.T) {
 // Expiry is enforced by the server on every request, and a session never
 // outlives its token.
 func TestInviteExpiryIsEnforcedServerSide(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	d := f.invite(map[string]any{"expires_in_days": 1})
 	var sessExp, tokExp int64
@@ -310,6 +315,7 @@ func TestInviteExpiryIsEnforcedServerSide(t *testing.T) {
 
 // An expired device's stream that is already open stops within the minute.
 func TestExpiredDeviceStreamIsCut(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	d := f.invite(nil)
 	r := f.do("POST", "/api/v1/playback/sessions", d.token, map[string]any{"item_id": f.movieID, "version_id": f.v1080, "capabilities": tclCaps()})
@@ -339,6 +345,7 @@ func TestExpiredDeviceStreamIsCut(t *testing.T) {
 // Revoking a device takes effect on its next request and on a stream it has
 // open, over a real connection, through the stream registry.
 func TestRevokeCutsTheNextRequestAndAnOpenStream(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	d := f.invite(nil)
 	other := f.invite(map[string]any{"name": "Another device"})
@@ -414,6 +421,7 @@ func TestRevokeCutsTheNextRequestAndAnOpenStream(t *testing.T) {
 // can never switch into a profile (a kid's included), and cannot be added to
 // the household.
 func TestInvitedDeviceNeverReachesThePicker(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	f.picker(true)
 	d := f.invite(nil)
@@ -452,6 +460,7 @@ func TestInvitedDeviceNeverReachesThePicker(t *testing.T) {
 // Rule 2: only admins mint. Accounts, household profiles (kids' above all) and
 // invited devices cannot mint an invite, approve a pairing, or list devices.
 func TestOnlyAdminsMint(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	d := f.invite(nil)
 	kid := tokenOf(t, f.switchTo(f.login("pete", "adminpass1"), f.robin, nil))
@@ -498,6 +507,7 @@ func (f *fixture) poll(code string, hdr ...string) resp {
 // TV pairing: the TV shows a code, the admin's phone approves it with a
 // scope, and the TV's next poll gets its session, once.
 func TestPairingFlow(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	r, p := f.startPairing(t)
 	if r.code != 200 || len(invites.NormalizeCode(p.UserCode)) != 8 || p.ExpiresIn != 600 || p.Interval != 5 {
@@ -562,6 +572,7 @@ func TestPairingFlow(t *testing.T) {
 
 // The pairing code is short-lived and rate limited.
 func TestPairingCodeIsShortLivedAndRateLimited(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	now := time.Now()
 	f.srv.Pairings.Now = func() time.Time { return now }
@@ -605,6 +616,7 @@ func TestPairingCodeIsShortLivedAndRateLimited(t *testing.T) {
 
 // Every new route is behind the DNS-rebinding Host check.
 func TestInviteRoutesCheckTheHost(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	for _, rt := range f.srv.Routes() {
 		if !strings.Contains(rt.Path, "/invites") && !strings.Contains(rt.Path, "/pair") && !strings.Contains(rt.Path, "/devices") {
@@ -624,6 +636,7 @@ func TestInviteRoutesCheckTheHost(t *testing.T) {
 // Redeeming into a cookie is a cookie write: it needs the client header, and
 // a refused attempt leaves the invite unspent.
 func TestRedeemCookieNeedsTheClientHeader(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, secret, _ := f.mint(nil)
 	body := map[string]any{"invite": secret, "cookie": true}
@@ -644,6 +657,7 @@ func TestRedeemCookieNeedsTheClientHeader(t *testing.T) {
 // Rule 5: every playback row records who played, and Pete can revoke a
 // friend's device from Activity.
 func TestPlaybackRecordsThePrincipal(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	d := f.invite(map[string]any{"name": "Mark's TV"})
 	sam := tokenOf(t, f.switchTo(f.login("pete", "adminpass1"), f.sam, map[string]any{"pin": "2468"}))
@@ -718,6 +732,7 @@ func TestPlaybackRecordsThePrincipal(t *testing.T) {
 // Range covering the whole file, and fails if any of them serves a media file
 // whole or offers it as a download. A route added later is walked too.
 func TestNoTokenRouteServesAWholeFile(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	d := f.invite(map[string]any{"allow_transcode": true})
 	// A local trailer beside the film: extras are files too.

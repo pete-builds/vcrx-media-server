@@ -21,6 +21,7 @@ type layoutJSON struct {
 // order and hidden rows are theirs alone, and the admin's default covers
 // everyone without their own.
 func TestHomeLayoutAPI(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	get := func(tok, path string) layoutJSON {
 		t.Helper()
@@ -115,6 +116,7 @@ func TestHomeLayoutAPI(t *testing.T) {
 // See all answers for a row id, encoded as the web app sends it, and 404s for
 // rows that do not exist or that the caller cannot see.
 func TestHomeRowSeeAll(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	var lib int64
 	if err := f.db.QueryRow(`SELECT library_id FROM items WHERE id = ?`, f.movieID).Scan(&lib); err != nil {

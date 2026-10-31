@@ -104,6 +104,9 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 		if d.Versions, err = c.Versions(ctx, pol, id); err != nil {
 			return d, err
 		}
+		if d.Loan, err = c.loan(ctx, pol, id); err != nil {
+			return d, err
+		}
 		if d.Kind == "episode" {
 			if d.NextEpisode, err = c.FollowingEpisode(ctx, pol, userID, id); err != nil {
 				return d, err
@@ -254,3 +257,23 @@ func pickNext(eps []episodeState) int64 {
 
 // maxCast is how many actors a details page lists.
 const maxCast = 20
+
+// loan is the item's loan while it is out, for its detail page.
+func (c *Catalog) loan(ctx context.Context, pol policy.Policy, id int64) (*LoanInfo, error) {
+	var l LoanInfo
+	var borrower string
+	var user sql.NullInt64
+	err := c.DB.QueryRowContext(ctx, `SELECT id, due_at, borrower, borrower_user_id FROM loans
+		WHERE item_id = ? AND ended_at IS NULL AND due_at > ?`, id, pol.AsOf).Scan(&l.ID, &l.DueAt, &borrower, &user)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	l.Yours = user.Valid && user.Int64 == pol.UserID
+	if pol.IsAdmin {
+		l.Borrower = &borrower
+	}
+	return &l, nil
+}

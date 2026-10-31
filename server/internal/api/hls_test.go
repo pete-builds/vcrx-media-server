@@ -47,6 +47,7 @@ type hlsSession struct {
 }
 
 func TestHLSDecision(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.srv.Playback.CanRemux = true
 	f.srv.Remux = remux.New("ffmpeg", "ffprobe", 2, nil)
@@ -177,6 +178,7 @@ func sum(ds []float64) float64 {
 // from the start and after a seek, as HLS with the video copied and the audio
 // converted to AAC; owner-only, traversal-proof, and cleaned up at the end.
 func TestHLSEndToEnd(t *testing.T) {
+	t.Parallel()
 	ff, err1 := osexec.LookPath("ffmpeg")
 	fp, err2 := osexec.LookPath("ffprobe")
 	if err1 != nil || err2 != nil {
@@ -338,6 +340,7 @@ func TestHLSEndToEnd(t *testing.T) {
 // browser decodes and an MP4 stream would copy, is converted to AAC, since
 // HLS fMP4 segments cannot carry MP3.
 func TestHLSTranscodeEndToEnd(t *testing.T) {
+	t.Parallel()
 	ff, err1 := osexec.LookPath("ffmpeg")
 	fp, err2 := osexec.LookPath("ffprobe")
 	if err1 != nil || err2 != nil {
@@ -399,6 +402,7 @@ func TestHLSTranscodeEndToEnd(t *testing.T) {
 
 // HLS streams take the same conversion slots as fMP4 streams.
 func TestHLSSlotLimit(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("needs /bin/sh")
 	}

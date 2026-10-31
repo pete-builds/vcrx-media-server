@@ -9,6 +9,7 @@ import (
 
 // The FFT agrees with a plain DFT.
 func TestFFTMatchesDFT(t *testing.T) {
+	t.Parallel()
 	const n = 64
 	r := rand.New(rand.NewPCG(1, 2))
 	re, im := make([]float64, n), make([]float64, n)
@@ -30,6 +31,7 @@ func TestFFTMatchesDFT(t *testing.T) {
 }
 
 func TestFrameTimes(t *testing.T) {
+	t.Parallel()
 	for _, ms := range []int64{0, 46, 1000, 47_000, 599_999} {
 		if got := FrameMs(MsFrame(ms)); got-ms > 50 || ms-got > 50 {
 			t.Errorf("FrameMs(MsFrame(%d)) = %d", ms, got)
@@ -43,6 +45,7 @@ func TestFrameTimes(t *testing.T) {
 // Music is valid; digital silence and a steady tone are not, so they can
 // never make a match however long they last.
 func TestValidFrames(t *testing.T) {
+	t.Parallel()
 	share := func(fp Fingerprint) float64 {
 		n := 0
 		for _, v := range fp.Valid {
@@ -69,6 +72,7 @@ func TestValidFrames(t *testing.T) {
 
 // The same audio fingerprints the same way at any loudness.
 func TestLoudnessDoesNotMatter(t *testing.T) {
+	t.Parallel()
 	th := theme(3, 20)
 	quiet := make([]float64, len(th))
 	for i, v := range th {

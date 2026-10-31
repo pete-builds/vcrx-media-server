@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewsletterSettingsAndPreview(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	var mu sync.Mutex
 	var posts []map[string]any

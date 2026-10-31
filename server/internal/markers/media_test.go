@@ -33,12 +33,20 @@ const (
 )
 
 // rendered holds the theme and credits rendered once to WAV: evaluating the
-// expressions is the slow part of making an episode.
+// expressions is the slow part of making an episode. Tests run in parallel,
+// so each key renders under its own Once and nobody reads a half-written file.
 var (
-	rendered   sync.Map // kind and length -> path
+	rendered   sync.Map // kind and length -> *renderJob
 	renderDir  string
 	renderOnce sync.Once
 )
+
+type renderJob struct {
+	once sync.Once
+	path string
+	err  error
+	out  []byte
+}
 
 func TestMain(m *testing.M) {
 	code := m.Run()
@@ -51,18 +59,19 @@ func TestMain(m *testing.M) {
 func render(t *testing.T, kind, expr string, secs float64) string {
 	t.Helper()
 	key := fmt.Sprintf("%s-%g", kind, secs)
-	if p, ok := rendered.Load(key); ok {
-		return p.(string)
+	v, _ := rendered.LoadOrStore(key, &renderJob{})
+	j := v.(*renderJob)
+	j.once.Do(func() {
+		renderOnce.Do(func() { renderDir, _ = os.MkdirTemp("", "vcrx-markers-test-") })
+		j.path = filepath.Join(renderDir, key+".wav")
+		cmd := exec.CommandContext(context.Background(), "ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i",
+			fmt.Sprintf("aevalsrc=exprs='%s':s=44100:d=%g", expr, secs), "-y", j.path)
+		j.out, j.err = cmd.CombinedOutput()
+	})
+	if j.err != nil {
+		t.Fatalf("render %s: %v\n%s", key, j.err, j.out)
 	}
-	renderOnce.Do(func() { renderDir, _ = os.MkdirTemp("", "vcrx-markers-test-") })
-	p := filepath.Join(renderDir, key+".wav")
-	cmd := exec.CommandContext(context.Background(), "ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i",
-		fmt.Sprintf("aevalsrc=exprs='%s':s=44100:d=%g", expr, secs), "-y", p)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("render %s: %v\n%s", key, err, out)
-	}
-	rendered.Store(key, p)
-	return p
+	return j.path
 }
 
 // input is the part's ffmpeg input arguments.

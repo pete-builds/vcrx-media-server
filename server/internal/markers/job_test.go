@@ -119,6 +119,7 @@ func near(t *testing.T, what string, got, want int64) {
 // repeats a scene of the episode before, the same end credits everywhere,
 // a post-credits scene in two episodes and a silent tail in one.
 func TestDetectsIntroAndCreditsInASyntheticSeason(t *testing.T) {
+	t.Parallel()
 	d := needFFmpeg(t)
 	l := newLib(t)
 	theme := part{"theme", 30, 0}
@@ -248,6 +249,7 @@ func (l *lib) seasonID(episode int64) int64 {
 // No shared audio but digital silence and a steady tone, the same in every
 // episode: nothing may be detected. False positives are worse than misses.
 func TestNoIntroWhereNothingIsShared(t *testing.T) {
+	t.Parallel()
 	d := needFFmpeg(t)
 	l := newLib(t)
 	ids, _ := l.season(d,

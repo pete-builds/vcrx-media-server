@@ -1,0 +1,106 @@
+/* Lend a tape: the lend page, the printable card, the loan notes on a movie's
+   page and in Activity, and the "Be kind, rewind." page. */
+.lend-page { display: grid; gap: 16px; }
+.lend-page > p { margin: 0; max-width: 40em; }
+.lend-item { display: flex; gap: 12px; align-items: center; }
+.lend-poster { position: relative; width: 48px; aspect-ratio: 2 / 3; flex: none; border-radius: 4px; overflow: hidden; background: var(--surface-2); }
+.lend-poster img { width: 100%; height: 100%; object-fit: cover; }
+.lend-poster .placeholder { position: absolute; inset: 0; display: grid; place-items: center; font: 700 9px/1 Rajdhani, sans-serif; text-align: center; padding: 2px; }
+
+/* The card. On paper it is 6 by 4 inches (a 4x6 index card); on screen it is
+   the page's width at the same proportions. Every size inside is in cqw, a
+   hundredth of the card's width, so the two look alike. A cream label with
+   black ink and VCRX orange, so it prints on any printer without a black
+   flood of toner. */
+.tape-card { width: min(100%, 6in); container-type: inline-size; }
+.tape-inner {
+  aspect-ratio: 3 / 2; display: grid; grid-template-columns: 26cqw minmax(0, 1fr) 25cqw; grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "head head head" "poster body qr" "foot foot foot";
+  gap: 2.2cqw 2.6cqw; padding: 3cqw 3.2cqw 2.6cqw; background: #f5f0e6; color: #121212;
+  border: .5cqw solid #121212; border-radius: 1.6cqw; overflow: hidden; font-family: Inter, system-ui, sans-serif;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.tape-head { grid-area: head; display: flex; align-items: baseline; gap: 2.4cqw; padding-bottom: 1.4cqw; border-bottom: .5cqw solid #121212; }
+.tape-brand { font: 700 6.2cqw/.9 Rajdhani, sans-serif; letter-spacing: .05em; color: var(--orange); }
+.tape-kind { font: 700 2.5cqw/1 Rajdhani, sans-serif; letter-spacing: .32em; text-transform: uppercase; }
+.tape-no { margin-left: auto; font: 600 2.2cqw/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tape-poster {
+  grid-area: poster; position: relative; align-self: start; aspect-ratio: 2 / 3; overflow: hidden;
+  border-radius: 1cqw; background: #222; box-shadow: 0 0 0 .4cqw #121212;
+}
+.tape-poster img { width: 100%; height: 100%; object-fit: cover; }
+.tape-poster .placeholder {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 1.5cqw; text-align: center;
+  font: 700 3cqw/1.1 Rajdhani, sans-serif; color: #f5f0e6; background: #121212;
+}
+.tape-body { grid-area: body; display: grid; align-content: start; gap: 1.6cqw; }
+.tape-title {
+  margin: 0; font: 700 6cqw/1 Rajdhani, sans-serif; letter-spacing: .02em; text-transform: uppercase; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.tape-meta { margin: 0; font-size: 2.3cqw; color: #4a4a4a; }
+.tape-due {
+  justify-self: start; display: grid; padding: 1cqw 2.2cqw; border: .55cqw solid var(--orange); border-radius: 1cqw; transform: rotate(-2deg);
+}
+.tape-due span { font: 700 1.9cqw/1.2 Rajdhani, sans-serif; letter-spacing: .32em; text-transform: uppercase; color: var(--orange); }
+.tape-due strong { font: 700 3.5cqw/1.1 Rajdhani, sans-serif; }
+.tape-how { margin: 0; font-size: 1.8cqw; line-height: 1.35; color: #4a4a4a; }
+.tape-qr { grid-area: qr; display: grid; align-content: start; justify-items: center; gap: 1cqw; }
+.tape-qr .qr { width: 100%; height: auto; border-radius: 0; background: #fff; image-rendering: pixelated; }
+.tape-code { font: 600 1.7cqw/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; overflow-wrap: anywhere; color: #121212; }
+.tape-foot { grid-area: foot; display: flex; align-items: center; gap: 2.4cqw; }
+/* Three bands, darkest on top: a label stripe in the brand's oranges. */
+.tape-stripes {
+  flex: 1; height: 3cqw; border-radius: .4cqw;
+  background: linear-gradient(#121212 0 25%, var(--orange) 25% 50%, #ff8a3d 50% 75%, #ffb27a 75%);
+}
+.tape-rewind { font: 700 3cqw/1 Rajdhani, sans-serif; letter-spacing: .06em; white-space: nowrap; }
+
+@media print {
+  @page { size: 6in 4in; margin: 0; }
+  html, body { background: #fff !important; min-height: 0; }
+  .topbar, .skip-link, .toast, .no-print, .lend-page > .link { display: none !important; }
+  main { padding: 0 !important; }
+  #view > * { animation: none !important; }
+  .lend-page { display: block; max-width: none; }
+  .tape-card { width: 6in; }
+  .tape-inner { height: 4in; border-radius: 0; border-width: 0; }
+}
+
+/* A movie out on loan, on its page. */
+.loan-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 10px 14px; border: 1px solid var(--orange); border-radius: var(--radius); background: rgba(255, 95, 0, .08); }
+.loan-note p { margin: 0; }
+.loan-note strong { color: var(--orange); }
+p.loan-note.yours { display: block; flex-basis: 100%; }
+
+/* Activity > Loans. */
+.loan-state.out { color: var(--orange); border-color: var(--orange); }
+.loan-state.returned, .loan-state.expired { color: var(--faint); }
+
+/* Be kind, rewind: a cassette whose reels turn backwards. */
+.rewind-page {
+  min-height: calc(100vh - 88px); display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px; text-align: center; padding: 24px 0;
+}
+.rewind-page h1 { font-size: clamp(36px, 9vw, 72px); color: var(--orange); }
+.rewind-page p { margin: 0; max-width: 30em; }
+.rewind-tape {
+  width: min(260px, 70vw); aspect-ratio: 8 / 5; display: flex; align-items: center; justify-content: center; gap: 22%;
+  border: 3px solid var(--line); border-radius: 12px; background: var(--surface);
+}
+.rewind-tape span {
+  width: 24%; aspect-ratio: 1; border-radius: 50%; border: 6px dotted var(--orange);
+  animation: rewind 1.6s linear infinite;
+}
+@keyframes rewind { to { transform: rotate(-360deg); } }
+@media (prefers-reduced-motion: reduce) { .rewind-tape span { animation: none; } }
+/* On a phone each loan is a small card rather than a row too wide to read. */
+@media (max-width: 700px) {
+  table.loans thead { display: none; }
+  table.loans, table.loans tbody, table.loans tr, table.loans td { display: block; width: auto; }
+  table.loans tr { padding: 12px 0; border-bottom: 1px solid var(--line); }
+  table.loans td { padding: 2px 0; border: 0; }
+  table.loans td:first-child { font-weight: 600; }
+  table.loans td:last-child:not(:empty) { padding-top: 8px; }
+}
+.lend-form .form-error:empty { display: none; }

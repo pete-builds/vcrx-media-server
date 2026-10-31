@@ -16,6 +16,11 @@ export class ApiError extends Error {
 let onSignedOut = () => {};
 export function whenSignedOut(fn) { onSignedOut = fn; }
 
+// A lent tape's browser, once the loan is over, is told "Be kind, rewind."
+// (401 loan_ended) rather than signed out.
+let onRewind = () => {};
+export function whenRewound(fn) { onRewind = fn; }
+
 export async function api(path, { method = "GET", body, signal, keepalive } = {}) {
   const opts = { method, headers: { ...CLIENT_HEADER }, credentials: "same-origin", signal, keepalive };
   if (body !== undefined) {
@@ -27,7 +32,8 @@ export async function api(path, { method = "GET", body, signal, keepalive } = {}
   const isJSON = (r.headers.get("content-type") || "").includes("json");
   const data = isJSON ? await r.json().catch(() => null) : null;
   if (!r.ok) {
-    if (r.status === 401 && !path.startsWith("/auth/")) onSignedOut();
+    if (r.status === 401 && data && data.error === "loan_ended") onRewind(data);
+    else if (r.status === 401 && !path.startsWith("/auth/")) onSignedOut();
     throw new ApiError(r.status, data && data.error, data && data.message);
   }
   return data;

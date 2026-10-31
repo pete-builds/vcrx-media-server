@@ -15,6 +15,7 @@ import (
 )
 
 func TestFixMatchAPI(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	// TMDb is off: the routes say so.
 	if r := f.do("GET", "/api/v1/admin/metadata/unmatched", f.adminTok, nil); r.code != 404 || !strings.Contains(string(r.body), "tmdb_off") {

@@ -212,11 +212,12 @@ export async function inviteView({ match }) {
     join.disabled = true;
     err.textContent = "";
     try {
-      await api("/invites/redeem", { method: "POST", body: { invite: secret, device: device(), cookie: true } });
+      const out = await api("/invites/redeem", { method: "POST", body: { invite: secret, device: device(), cookie: true } });
       // The secret is spent; keep it out of history and the address bar.
       history.replaceState(null, "", location.pathname + "#/");
       await signedIn();
-      go("/");
+      // A lent tape's card opens on its movie.
+      go(out.loan && out.loan.item_id ? `/item/${out.loan.item_id}` : "/");
     } catch (e) {
       err.textContent = e instanceof ApiError ? e.message : "Could not reach the server.";
       join.disabled = false;

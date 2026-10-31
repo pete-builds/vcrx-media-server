@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Resolutions in ascending order; the index is the rank.
@@ -60,6 +61,14 @@ type Policy struct {
 	DenyLabels       []string
 	AllowTranscode   bool
 	Allow4KTranscode bool
+	// Borrower is set for a device that came from a lent tape's card: it sees
+	// and plays LoanItemID and nothing else, whatever its library grants say.
+	// LoanItemID is 0 when the lent movie is gone, and then it sees nothing.
+	Borrower   bool
+	LoanItemID int64
+	// AsOf is when the policy was loaded, in Unix milliseconds: a loan past
+	// its due date at that moment no longer holds the owner's copy.
+	AsOf int64
 	// AllowSubtitleDownload lets a non-admin spend the server's OpenSubtitles
 	// quota. Off unless an admin turns it on.
 	AllowSubtitleDownload bool
@@ -68,9 +77,20 @@ type Policy struct {
 // Load reads a user's grants and policy row. A missing policy row means no extra
 // restrictions beyond library grants.
 func Load(ctx context.Context, conn *sql.DB, userID int64, isAdmin bool) (Policy, error) {
-	p := Policy{UserID: userID, IsAdmin: isAdmin, AllowTranscode: true, Allow4KTranscode: isAdmin}
+	p := Policy{UserID: userID, IsAdmin: isAdmin, AllowTranscode: true, Allow4KTranscode: isAdmin, AsOf: time.Now().UnixMilli()}
 	var err error
 	if p.LibraryIDs, err = grants(ctx, conn, userID); err != nil {
+		return p, err
+	}
+	// A borrower stays one even after its loan ends: its token is refused by
+	// then anyway, and if anything still asks, the answer is the one title or
+	// nothing, never the whole library its grant names.
+	var loanItem sql.NullInt64
+	err = conn.QueryRowContext(ctx, `SELECT item_id FROM loans WHERE borrower_user_id = ? ORDER BY id DESC LIMIT 1`, userID).Scan(&loanItem)
+	switch {
+	case err == nil:
+		p.Borrower, p.LoanItemID = true, loanItem.Int64
+	case !errors.Is(err, sql.ErrNoRows):
 		return p, err
 	}
 	var maxRes, maxRating sql.NullString
@@ -192,6 +212,15 @@ func (p Policy) ItemCond(i string) (string, []any) {
 	var conds []string
 	var args []any
 	conds = append(conds, i+".missing_since IS NULL")
+	if p.Borrower && !p.IsAdmin {
+		// A lent tape's card opens one title. A guessed id of any other
+		// title, in the same library or not, is as hidden as an ungranted one.
+		if p.LoanItemID == 0 {
+			return "0", nil
+		}
+		conds = append(conds, i+".id = ?")
+		args = append(args, p.LoanItemID)
+	}
 	if !p.IsAdmin {
 		if len(p.LibraryIDs) == 0 {
 			return "0", nil
@@ -244,6 +273,17 @@ func (p Policy) ItemCond(i string) (string, []any) {
 		}
 	}
 	return "(" + strings.Join(conds, " AND ") + ")", args
+}
+
+// LoanCond returns a SQL condition on an items alias: the title is not out on
+// loan to someone else. One loan per copy (milestone 10): while a tape is lent,
+// nobody but its borrower may play the owner's copy, admins and the owner
+// included. It is not part of ItemCond, because a lent title stays on the
+// shelf ("Out on loan, due back..."); every way to play a file applies it
+// (catalog.CanPlay, catalog.VersionForPlayback and playback.Start).
+func (p Policy) LoanCond(i string) (string, []any) {
+	return `NOT EXISTS (SELECT 1 FROM loans ln WHERE ln.item_id = ` + i + `.id AND ln.ended_at IS NULL AND ln.due_at > ?
+		AND ln.borrower_user_id IS NOT ?)`, []any{p.AsOf, p.UserID}
 }
 
 // episodeCond is the extra condition, starting " AND", on an episode alias pe

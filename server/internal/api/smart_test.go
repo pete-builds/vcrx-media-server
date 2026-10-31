@@ -74,6 +74,7 @@ func (f *fixture) friendSees() bool {
 // title the moment a rebuild finds it matches the horror rule, and sees it
 // again when it stops matching. No one labels anything by hand.
 func TestSmartLabelPolicy(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.exec(`UPDATE user_policies SET deny_labels = '["horror"]' WHERE user_id = (SELECT id FROM users WHERE username = 'friend')`)
 	b := f.smart()
@@ -107,6 +108,7 @@ func TestSmartLabelPolicy(t *testing.T) {
 // TestSmartHiddenCollections: a label-only collection is never listed, never
 // named on a title, and cannot be opened; a visible one is all three.
 func TestSmartHiddenCollections(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.exec(`INSERT INTO item_tags (item_id, kind, value) VALUES (?, 'genre', 'Horror')`, f.movieID)
 	f.exec(`UPDATE items SET content_rating = 'R' WHERE id = ?`, f.movieID)
@@ -147,6 +149,7 @@ func TestSmartHiddenCollections(t *testing.T) {
 // TestAdminSmartCollections: the admin route reports definitions and refused
 // files; it is admin-only.
 func TestAdminSmartCollections(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	var out struct {
 		Built       bool

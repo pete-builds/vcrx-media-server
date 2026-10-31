@@ -36,6 +36,10 @@ object PairRoute
 @Serializable
 data class SettingsRoute(val page: String)
 
+/** "Be kind, rewind.": a lent tape's loan is over. */
+@Serializable
+object RewindRoute
+
 /** Navigation any screen may need, without threading callbacks through every layer. */
 class AppActions(private val nav: NavController, private val activity: Activity) {
     /** Connect on top of the current screen; Back returns to it. */
@@ -91,6 +95,12 @@ class AppActions(private val nav: NavController, private val activity: Activity)
     }
 
     fun toLogin() = nav.navigate(LoginRoute) {
+        popUpTo(nav.graph.id) { inclusive = true }
+        launchSingleTop = true
+    }
+
+    /** "Be kind, rewind." as the only screen. */
+    fun toRewind() = nav.navigate(RewindRoute) {
         popUpTo(nav.graph.id) { inclusive = true }
         launchSingleTop = true
     }

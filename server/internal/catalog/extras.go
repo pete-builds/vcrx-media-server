@@ -66,9 +66,12 @@ func (c *Catalog) extras(ctx context.Context, pol policy.Policy, d *ItemDetail) 
 		return nil
 	}
 	cond, args := extraCond(pol, "x")
-	rows, err := c.DB.QueryContext(ctx, `SELECT x.id, x.kind, x.title, x.duration_ms, x.container, x.resolution FROM item_extras x
-		WHERE x.item_id = ? AND `+cond+` ORDER BY `+extraOrder+`, x.title = 'Trailer' DESC, x.title COLLATE NOCASE, x.id`,
-		append([]any{d.ID}, args...)...)
+	// A lent movie's extras go with the tape: only its borrower sees them.
+	lc, largs := pol.LoanCond("i")
+	rows, err := c.DB.QueryContext(ctx, `SELECT x.id, x.kind, x.title, x.duration_ms, x.container, x.resolution
+		FROM item_extras x JOIN items i ON i.id = x.item_id
+		WHERE x.item_id = ? AND `+cond+` AND `+lc+` ORDER BY `+extraOrder+`, x.title = 'Trailer' DESC, x.title COLLATE NOCASE, x.id`,
+		append(append([]any{d.ID}, args...), largs...)...)
 	if err != nil {
 		return err
 	}
@@ -129,6 +132,9 @@ func (c *Catalog) extras(ctx context.Context, pol policy.Policy, d *ItemDetail) 
 func (c *Catalog) ExtraForPlayback(ctx context.Context, pol policy.Policy, extraID int64) (ExtraFile, error) {
 	cond, cargs := pol.ItemCond("i")
 	xc, xargs := extraCond(pol, "x")
+	// One loan per copy covers the tape's extras too (policy.LoanCond).
+	lc, largs := pol.LoanCond("i")
+	cond, cargs = cond+" AND "+lc, append(cargs, largs...)
 	var f ExtraFile
 	var container, codec, profile, res, hdr sql.NullString
 	var bitrate, dur, level, depth, w, h sql.NullInt64
@@ -192,4 +198,22 @@ func nonEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// ExtraOnLoan reports whether an extra the caller could otherwise see belongs
+// to a movie out on loan to someone else, and when it is due back, so starting
+// it is refused as the film is ("Out on loan") rather than with a bare 404.
+func (c *Catalog) ExtraOnLoan(ctx context.Context, pol policy.Policy, extraID int64) (bool, int64, error) {
+	var item int64
+	err := c.DB.QueryRowContext(ctx, `SELECT item_id FROM item_extras WHERE id = ?`, extraID).Scan(&item)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, 0, nil
+	}
+	if err != nil {
+		return false, 0, err
+	}
+	if ok, err := c.Visible(ctx, pol, item); err != nil || !ok {
+		return false, 0, err
+	}
+	return c.OnLoan(ctx, pol, item)
 }
