@@ -2685,7 +2685,7 @@ components:
         id: { type: integer }
         name: { type: string }
         kind: { type: string, enum: [movie, show, music] }
-        item_count: { type: integer, description: Top-level titles; 0 for a music library, which the music routes list. }
+        item_count: { type: integer, description: Top-level titles, or a music library's albums. }
     WatchState:
       type: object
       required: [position_ms, played, play_count]
