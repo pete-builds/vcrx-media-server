@@ -102,3 +102,32 @@ func TestChooseVersionPrefersDirectPlay(t *testing.T) {
 		t.Fatalf("only version: chose %d (%s)", v.ID, d.Kind)
 	}
 }
+
+func TestTranscodeVideo(t *testing.T) {
+	v := version("mkv", "hevc", "main 10", 3840, 2160, 10, "eac3")
+	v.HDRType = sp("hdr10")
+	fps := 23.976
+	v.FrameRate = &fps
+	// A browser on an SDR screen: its H.264 limits bind, and HDR is tone mapped.
+	browser := Capabilities{MaxWidth: 3840, MaxHeight: 2160, MaxBitrate: 8_000_000,
+		VideoCodecs: []VideoCodecCap{{Codec: "h264", MaxWidth: 1920, MaxHeight: 1080, MaxFPS: 60}}}
+	got := TranscodeVideo(v, browser)
+	if got.SrcWidth != 3840 || got.SrcHeight != 2160 || got.MaxWidth != 1920 || got.MaxHeight != 1080 || got.MaxFPS != 60 ||
+		got.FPS != fps || got.MaxBitrate != 8_000_000 || got.HDR != "hdr10" || !got.ToneMap {
+		t.Fatalf("SDR browser: %+v", got)
+	}
+	// Any HDR on the display: no tone mapping. No H.264 limits: the overall ones.
+	browser.HDRTypes = []string{"hdr10"}
+	browser.VideoCodecs[0].MaxWidth, browser.VideoCodecs[0].MaxHeight = 0, 0
+	if got = TranscodeVideo(v, browser); got.ToneMap || got.MaxWidth != 3840 || got.MaxHeight != 2160 {
+		t.Fatalf("HDR browser: %+v", got)
+	}
+	// Dolby Vision decodes as its base layer: SDR needs nothing, HLG is HLG.
+	v.HDRType = sp("dolby_vision")
+	for compat, want := range map[int64]string{1: "dolby_vision", 2: "", 4: "hlg"} {
+		v.DVCompatID = ip(compat)
+		if got := TranscodeVideo(v, Capabilities{}); got.HDR != want || got.ToneMap != (want != "") {
+			t.Errorf("Dolby Vision compat %d: %+v", compat, got)
+		}
+	}
+}

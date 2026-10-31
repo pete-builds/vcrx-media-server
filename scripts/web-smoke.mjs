@@ -6,7 +6,8 @@
 //   node scripts/web-smoke.mjs [base-url]      (default http://127.0.0.1:3751)
 //
 // Run it against ./scripts/dev-server.sh, which signs the local browser in and
-// has the sample clips this expects (one plays directly, one is converted).
+// has the sample clips this expects (one plays directly, one has its audio
+// converted, one has its video transcoded).
 // CHROME may name the browser binary. Talks to Chrome over --remote-debugging-pipe,
 // so it needs nothing beyond Node 20 and Chrome.
 
@@ -92,7 +93,7 @@ async function main() {
   const ids = await evaluate(`
     const j = (p) => fetch("/api/v1" + p).then((r) => r.json());
     const libs = (await j("/libraries")).libraries;
-    const out = { libs: libs.map((l) => l.id), movie: null, show: null, direct: null, converted: null };
+    const out = { libs: libs.map((l) => l.id), movie: null, show: null, direct: null, converted: null, transcoded: null };
     for (const l of libs) {
       const items = (await j("/libraries/" + l.id + "/items?limit=50")).items;
       if (l.kind === "movie") {
@@ -100,6 +101,7 @@ async function main() {
         const by = (t) => items.find((i) => i.title === t);
         out.direct = by("Copper Valley") ? by("Copper Valley").id : null;
         out.converted = by("River Line") ? by("River Line").id : null;
+        out.transcoded = by("Tin Kettle Road") ? by("Tin Kettle Road").id : null;
       } else {
         out.show = items[0] && items[0].id;
       }
@@ -157,8 +159,11 @@ async function main() {
   console.log(`phone width: ${pages.length} pages checked`);
   await s("Emulation.clearDeviceMetricsOverride");
 
-  // Playback: a file the browser plays directly, and one it needs converted.
-  for (const [label, id, wantDecision] of [["direct play", ids.direct, "direct"], ["converted", ids.converted, "converted"]]) {
+  // Playback: a file the browser plays directly, one whose audio it needs
+  // converted, and one whose video it cannot decode at all. The pill says
+  // which conversion the server chose.
+  for (const [label, id, wantDecision, wantPill] of [["direct play", ids.direct, "direct", null],
+    ["converted", ids.converted, "converted", "Audio converted"], ["transcoded", ids.transcoded, "converted", "Video converted"]]) {
     if (!id) {
       fail(`play ${label}`, "sample clip not found (run against scripts/dev-server.sh)");
       continue;
@@ -173,10 +178,12 @@ async function main() {
       v.muted = true;
       v.play().catch(() => {});
       for (let i = 0; i < 80 && !(v.currentTime > 1.5); i++) await new Promise((r) => setTimeout(r, 150));
-      return { ok: v.currentTime > 1.5, t: v.currentTime, err: v.error && v.error.code, converted: !v.controls,
+      const pill = document.querySelector(".player .pill");
+      return { ok: v.currentTime > 1.5, t: v.currentTime, err: v.error && v.error.code, converted: !v.controls, pill: pill ? pill.textContent : null,
         why: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
     if (!res.ok) fail(`play ${label}`, `video did not advance (t=${res.t}, media error ${res.err}) ${res.why || ""}`);
     if (res.converted !== (wantDecision === "converted")) fail(`play ${label}`, `expected a ${wantDecision} stream`);
+    if (wantPill && res.pill !== wantPill) fail(`play ${label}`, `labelled "${res.pill}", expected "${wantPill}"`);
     if (exceptions.length) fail(`play ${label}`, `threw: ${exceptions[0]}`);
   }
   await s("Page.navigate", { url: `${base}/#/` });
@@ -196,4 +203,4 @@ if (failures.length) {
   console.log(`\nweb-smoke: ${failures.length} failure(s)\n` + failures.map((f) => "  " + f).join("\n"));
   process.exit(1);
 }
-console.log("\nweb-smoke: every page and both playback paths passed");
+console.log("\nweb-smoke: every page and all three playback paths passed");

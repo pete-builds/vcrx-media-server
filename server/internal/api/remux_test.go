@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -140,5 +142,188 @@ func TestConvertedStreamEndToEnd(t *testing.T) {
 	}
 	if r := f.do("GET", fmt.Sprintf("/api/v1/playback/sessions/%s/seek", "nope"), f.adminTok, nil); r.code != 404 {
 		t.Fatalf("unknown session: %d", r.code)
+	}
+}
+
+// firefoxCaps is a browser with H.264 but no HEVC decoder, as Firefox
+// reports on most systems.
+func firefoxCaps(fmp4 bool) map[string]any {
+	c := browserCaps(fmp4)
+	c["video_codecs"] = []map[string]any{{"codec": "h264", "max_width": 1920, "max_height": 1080}}
+	return c
+}
+
+func TestTranscodeDecision(t *testing.T) {
+	f := newFixture(t)
+	f.srv.Playback.CanRemux = true
+	f.srv.Remux = remux.New("ffmpeg", "ffprobe", 2, nil)
+	start := func(tok string, version int64, caps map[string]any) resp {
+		t.Helper()
+		return f.do("POST", "/api/v1/playback/sessions", tok, map[string]any{"item_id": f.movieID, "version_id": version, "capabilities": caps})
+	}
+	// The 1080p film is HEVC: a browser without an HEVC decoder needs the video
+	// transcoded. Before transcoding existed (and with an ffmpeg that lacks
+	// libx264) that is refused, for every client.
+	before := map[bool]resp{}
+	for _, fmp4 := range []bool{false, true} {
+		before[fmp4] = start(f.adminTok, f.v1080, firefoxCaps(fmp4))
+		if before[fmp4].code != 422 || !strings.Contains(string(before[fmp4].body), "transcode_unavailable") {
+			t.Fatalf("no libx264, fmp4 %v: %d %s", fmp4, before[fmp4].code, before[fmp4].body)
+		}
+	}
+	f.srv.Playback.CanTranscode = true
+	var sess struct {
+		SessionID string `json:"session_id"`
+		Decision  string
+		Stream    struct {
+			URL, Protocol string
+			SeekURL       string `json:"seek_url"`
+		}
+	}
+	r := start(f.adminTok, f.v1080, firefoxCaps(true))
+	if r.code != 201 {
+		t.Fatalf("start: %d %s", r.code, r.body)
+	}
+	r.json(t, &sess)
+	if sess.Decision != "transcode" || sess.Stream.Protocol != "fmp4" || !strings.HasSuffix(sess.Stream.URL, "/stream.mp4") || sess.Stream.SeekURL == "" {
+		t.Fatalf("transcode session: %+v", sess)
+	}
+	// A transcoded stream starts exactly where it is asked to, not on a keyframe.
+	var seek struct {
+		StartMs int64 `json:"start_ms"`
+		URL     string
+	}
+	r = f.do("GET", sess.Stream.SeekURL+"?position_ms=12700", f.adminTok, nil)
+	r.json(t, &seek)
+	if r.code != 200 || seek.StartMs != 12700 || !strings.HasSuffix(seek.URL, "start_ms=12700") {
+		t.Fatalf("seek: %d %s", r.code, r.body)
+	}
+	// The TV app does not send fmp4_stream: refused exactly as before.
+	r = start(f.adminTok, f.v1080, firefoxCaps(false))
+	if r.code != before[false].code || string(r.body) != string(before[false].body) {
+		t.Fatalf("without fmp4_stream: %d %s\nbefore: %d %s", r.code, r.body, before[false].code, before[false].body)
+	}
+	// A transcode makes H.264, so a client without it gains nothing.
+	noH264 := firefoxCaps(true)
+	noH264["video_codecs"] = []map[string]any{{"codec": "vp9"}}
+	if r := start(f.adminTok, f.v1080, noH264); r.code != 422 || !strings.Contains(string(r.body), "transcode_unavailable") {
+		t.Fatalf("client without H.264: %d %s", r.code, r.body)
+	}
+	// Policy applies as to every conversion: allow_transcode, then 4K.
+	var friendID int64
+	if err := f.db.QueryRow(`SELECT id FROM users WHERE username = 'friend'`).Scan(&friendID); err != nil {
+		t.Fatal(err)
+	}
+	if r := start(f.friendTok, f.v1080, firefoxCaps(true)); r.code != 201 || !strings.Contains(string(r.body), `"decision":"transcode"`) {
+		t.Fatalf("friend allowed to transcode: %d %s", r.code, r.body)
+	}
+	if _, err := f.db.Exec(`UPDATE user_policies SET allow_transcode = 0 WHERE user_id = ?`, friendID); err != nil {
+		t.Fatal(err)
+	}
+	if r := start(f.friendTok, f.v1080, firefoxCaps(true)); r.code != 403 || !strings.Contains(string(r.body), "not allowed") {
+		t.Fatalf("friend not allowed to transcode: %d %s", r.code, r.body)
+	}
+	if _, err := f.db.Exec(`UPDATE user_policies SET allow_transcode = 1, max_resolution = '4K', allow_4k_transcode = 0 WHERE user_id = ?`, friendID); err != nil {
+		t.Fatal(err)
+	}
+	if r := start(f.friendTok, f.v4k, firefoxCaps(true)); r.code != 403 || !strings.Contains(string(r.body), "4K files cannot be converted") {
+		t.Fatalf("friend transcoding 4K: %d %s", r.code, r.body)
+	}
+}
+
+func TestTranscodeEndToEnd(t *testing.T) {
+	ff, err1 := osexec.LookPath("ffmpeg")
+	fp, err2 := osexec.LookPath("ffprobe")
+	if err1 != nil || err2 != nil {
+		t.Skip("ffmpeg or ffprobe not on PATH")
+	}
+	rmx := remux.New(ff, fp, 2, nil)
+	if feat, err := rmx.Detect(context.Background()); err != nil || !feat.X264 {
+		t.Skipf("ffmpeg has no libx264: %v", err)
+	}
+	f := newFixture(t)
+	f.srv.Playback.CanRemux, f.srv.Playback.CanTranscode = true, true
+	f.srv.Remux = rmx
+	// The episode becomes a real 30 s MPEG-4 Part 2 file, which no browser
+	// decodes, with AAC audio and a keyframe only every 10 s.
+	var epPath string
+	if err := f.db.QueryRow(`SELECT path FROM media_versions WHERE id = ?`, f.episodeVerID).Scan(&epPath); err != nil {
+		t.Fatal(err)
+	}
+	if msg, err := osexec.Command(ff, "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=30",
+		"-f", "lavfi", "-i", "sine=duration=30", "-c:v", "mpeg4", "-g", "240", "-c:a", "aac", "-y", epPath+".tmp.mkv").CombinedOutput(); err != nil {
+		t.Skipf("fixture needs the mpeg4 and aac encoders: %v %s", err, msg)
+	}
+	if err := os.Rename(epPath+".tmp.mkv", epPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Exec(`UPDATE media_versions SET video_codec = 'mpeg4', video_profile = 'simple profile', bit_depth = 8,
+			width = 640, height = 360, resolution = '480p', frame_rate = 24, duration_ms = 30000 WHERE id = ?`, f.episodeVerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Exec(`INSERT INTO media_streams (version_id, stream_index, kind, codec, channels, is_default) VALUES (?, 1, 'audio', 'aac', 1, 1)`, f.episodeVerID); err != nil {
+		t.Fatal(err)
+	}
+	// A small screen, so the picture is scaled down too.
+	caps := browserCaps(true)
+	caps["max_width"], caps["max_height"] = 320, 240
+	var sess struct {
+		SessionID string `json:"session_id"`
+		Decision  string
+		Stream    struct {
+			Protocol string
+			SeekURL  string `json:"seek_url"`
+		}
+	}
+	r := f.do("POST", "/api/v1/playback/sessions", f.adminTok, map[string]any{"item_id": f.episodeID, "capabilities": caps})
+	r.json(t, &sess)
+	if r.code != 201 || sess.Decision != "transcode" || sess.Stream.Protocol != "fmp4" {
+		t.Fatalf("start: %d %s", r.code, r.body)
+	}
+	var seek struct {
+		StartMs int64 `json:"start_ms"`
+		URL     string
+	}
+	r = f.do("GET", sess.Stream.SeekURL+"?position_ms=12700", f.adminTok, nil)
+	r.json(t, &seek)
+	if r.code != 200 || seek.StartMs != 12700 {
+		t.Fatalf("seek: %d %s", r.code, r.body)
+	}
+	r = f.do("GET", seek.URL, f.adminTok, nil)
+	if r.code != 200 || r.hdr.Get("Content-Type") != "video/mp4" || len(r.body) < 10000 {
+		t.Fatalf("stream: %d %s %d bytes %.200s", r.code, r.hdr.Get("Content-Type"), len(r.body), r.body)
+	}
+	out := filepath.Join(t.TempDir(), "s.mp4")
+	if err := os.WriteFile(out, r.body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := osexec.Command(fp, "-v", "error", "-show_entries", "stream=codec_name,width,height,duration", "-of", "csv=p=0", out).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "h264,320,180,") || !strings.HasPrefix(lines[1], "aac,") {
+		t.Fatalf("streams in the output: %q", got)
+	}
+	// Both streams run the 17.3 s from 12.7 s to the end: output time 0 is
+	// start_ms, so the player's start_ms plus currentTime is the true position.
+	for _, l := range lines {
+		fs := strings.Split(l, ",")
+		d, _ := strconv.ParseFloat(fs[len(fs)-1], 64)
+		if d < 17.0 || d > 17.6 {
+			t.Errorf("%s runs %.2f s, want about 17.3 (stream started at the wrong place)", fs[0], d)
+		}
+	}
+	// Activity shows it as converting, with the transcode decision.
+	if r := f.do("POST", "/api/v1/playback/sessions/"+sess.SessionID+"/events", f.adminTok, map[string]any{"type": "start", "position_ms": 12700}); r.code != 204 {
+		t.Fatalf("start event: %d %s", r.code, r.body)
+	}
+	var now struct {
+		Converting int
+		Sessions   []struct{ Decision string }
+	}
+	f.do("GET", "/api/v1/admin/activity/now", f.adminTok, nil).json(t, &now)
+	if now.Converting != 1 || len(now.Sessions) != 1 || now.Sessions[0].Decision != "transcode" {
+		t.Fatalf("now playing: %+v", now)
 	}
 }

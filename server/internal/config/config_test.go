@@ -28,6 +28,18 @@ func TestDefaultsAndEnv(t *testing.T) {
 	if c.Port != 4000 || len(c.MediaRoots) != 2 || c.MediaRoots[1] != "/srv/more" || c.SessionTTL != 7*24*time.Hour {
 		t.Fatalf("env: %+v", c)
 	}
+	if c.MaxTranscodes != 2 {
+		t.Fatalf("max transcodes default %d", c.MaxTranscodes)
+	}
+	t.Setenv("VCRX_MAX_TRANSCODES", "0")
+	if c, err = Load(); err != nil || c.MaxTranscodes != 0 {
+		t.Fatalf("transcoding off: %d %v", c.MaxTranscodes, err)
+	}
+	t.Setenv("VCRX_MAX_TRANSCODES", "-1")
+	if _, err := Load(); err == nil {
+		t.Fatal("negative max transcodes accepted")
+	}
+	t.Setenv("VCRX_MAX_TRANSCODES", "")
 	t.Setenv("VCRX_PORT", "seventy")
 	if _, err := Load(); err == nil {
 		t.Fatal("bad port accepted")

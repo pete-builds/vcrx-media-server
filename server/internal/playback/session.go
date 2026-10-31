@@ -116,8 +116,10 @@ type Service struct {
 	DB        *sql.DB
 	Catalog   *catalog.Catalog
 	Heartbeat time.Duration
-	// CanTranscode is false until the HLS job manager lands; non-direct decisions
-	// are then refused with a clear message instead of failing on the TV.
+	// CanTranscode turns on video transcoding to H.264 inside a converted
+	// stream, for clients that report fmp4_stream and decode H.264. It needs an
+	// ffmpeg with libx264. Every other client that needs its video converted
+	// (the TV app today) is still refused with a clear message.
 	CanTranscode bool
 	// CanRemux turns on converted streams (video copied, audio copied or
 	// converted) for clients that report fmp4_stream.
@@ -191,8 +193,8 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 		return nil, nil, err
 	}
 
-	converted := s.CanRemux && req.Capabilities.FMP4Stream && (d.Kind == Remux || d.Kind == AudioTranscode) &&
-		remux.MP4Video(s2(v.VideoCodec))
+	converted := s.CanRemux && req.Capabilities.FMP4Stream && (((d.Kind == Remux || d.Kind == AudioTranscode) &&
+		remux.MP4Video(s2(v.VideoCodec))) || (d.Kind == Transcode && s.CanTranscode && decodesH264(req.Capabilities)))
 	var refusal *Refusal
 	if d.Kind != DirectPlay {
 		switch {
@@ -200,7 +202,7 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 			refusal = &Refusal{Status: 403, Code: "playback_refused", Message: "This needs converting on the server, and your account is not allowed to do that. Reason: " + d.Reason + "."}
 		case !pol.IsAdmin && !pol.Allow4KTranscode && policy.ResolutionRank(s2(v.Resolution)) >= policy.ResolutionRank("4K"):
 			refusal = &Refusal{Status: 403, Code: "playback_refused", Message: "4K files cannot be converted for your account. Ask for a 1080p version. Reason: " + d.Reason + "."}
-		case !s.CanTranscode && !converted:
+		case !converted:
 			refusal = &Refusal{Status: 422, Code: "transcode_unavailable", Message: "This file needs " + describeKind(d.Kind) + " for this device, which VCRX cannot do yet. Reason: " + d.Reason + "."}
 		}
 	}

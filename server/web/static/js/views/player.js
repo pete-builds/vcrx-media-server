@@ -8,10 +8,12 @@ import { capabilities } from "../caps.js";
 //
 // Two kinds of stream:
 // - progressive: the file itself, seekable by range; native controls.
-// - fmp4: a converted stream (video copied, audio converted) that cannot be
-//   seeked by range. Seeking asks the server for a new stream; the server says
-//   where it starts (a keyframe), and the position is that start plus the
-//   element's own time. These get VCRX controls.
+// - fmp4: a converted stream (video copied or transcoded, audio copied or
+//   converted) that cannot be seeked by range. Seeking asks the server for a
+//   new stream; the server says where it starts (the keyframe before the
+//   position when the video is copied, the position itself when it is
+//   transcoded), and the position is that start plus the element's own time.
+//   These get VCRX controls.
 export async function playerView({ match, params }) {
   const itemId = Number(match[1]);
   const body = { item_id: itemId, capabilities: capabilities() };
@@ -179,7 +181,7 @@ export async function playerView({ match, params }) {
   }
 
   shell.append(video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title), audioSel,
-    converted ? h("span", { class: "pill", title: session.reason }, session.decision === "audio_transcode" ? "Audio converted" : "Repackaged") : null,
+    converted ? h("span", { class: "pill", title: session.reason }, convertedLabel(session.decision)) : null,
     subSel), controls, status, overlay);
 
   video.addEventListener("loadedmetadata", () => {
@@ -357,4 +359,9 @@ async function fetchVTT(url, onWait) {
     try { msg = (await r.json()).message || msg; } catch { /* keep default */ }
     throw new Error(msg);
   }
+}
+
+function convertedLabel(decision) {
+  if (decision === "transcode") return "Video converted";
+  return decision === "audio_transcode" ? "Audio converted" : "Repackaged";
 }

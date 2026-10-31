@@ -180,6 +180,30 @@ func migrateOnly() error {
 	return nil
 }
 
+// canTranscode reports whether video transcoding is on: allowed by the
+// config and possible with this ffmpeg, which needs libx264. It logs which.
+func canTranscode(ctx context.Context, rmx *remux.Service, limit int, log *slog.Logger) bool {
+	if limit == 0 {
+		log.Info("video transcoding is off (max_transcodes is 0): clients that cannot decode a file's video are refused")
+		return false
+	}
+	f, err := rmx.Detect(ctx)
+	switch {
+	case err != nil:
+		log.Error("video transcoding is off: cannot ask ffmpeg for its encoders", "ffmpeg", rmx.FFmpeg, "err", err)
+		return false
+	case !f.X264:
+		log.Warn("video transcoding is off: this ffmpeg has no libx264 encoder", "ffmpeg", rmx.FFmpeg)
+		return false
+	case !f.ToneMap:
+		log.Info("video transcoding is on, without HDR tone mapping: this ffmpeg has no zscale filter, so HDR sent to an SDR browser looks washed out",
+			"max_transcodes", limit)
+	default:
+		log.Info("video transcoding is on, with HDR tone mapping", "max_transcodes", limit)
+	}
+	return true
+}
+
 // scanAdapter lets the API start scans without depending on the library package.
 type scanAdapter struct{ m *library.Manager }
 
@@ -225,10 +249,12 @@ func serve() error {
 	scans := library.NewManager(scanner, log.With("component", "scans"))
 	cat := &catalog.Catalog{DB: a.db}
 	authStore := &auth.Store{DB: a.db, TTL: cfg.SessionTTL}
-	// Converted streams copy the video and convert at most the audio, a small
+	// Converted streams that copy the video convert at most the audio, a small
 	// fraction of a core each; four at once is well within nix1's budget.
+	// Video transcodes cost whole cores and have their own, smaller limit.
 	rmx := remux.New(cfg.FFmpegPath, cfg.FFprobePath, 4, log.With("component", "remux"))
-	pb := &playback.Service{DB: a.db, Catalog: cat, CanRemux: true}
+	rmx.SetMaxTranscodes(cfg.MaxTranscodes)
+	pb := &playback.Service{DB: a.db, Catalog: cat, CanRemux: true, CanTranscode: canTranscode(ctx, rmx, cfg.MaxTranscodes, log)}
 	hooks := notify.New(cfg.WebhookURLs, cfg.WebhookEvents, cfg.ServerName, log.With("component", "webhooks"))
 	if len(cfg.WebhookURLs) > 0 {
 		pb.Notify = hooks.Send

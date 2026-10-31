@@ -3,10 +3,15 @@
 // fragmented MP4 to the response while ffmpeg reads the file. Converting audio
 // costs a fraction of one core, so this needs no GPU.
 //
+// When the client cannot decode the video at all, the same stream carries the
+// video re-encoded to H.264 with libx264 instead. That costs one or more whole
+// cores per stream, so transcodes have their own, smaller limit.
+//
 // A stream like this cannot be seeked by byte range, so a client seeks by
 // asking for a new stream at a position. Copied video can only start on a
 // keyframe, so the server first finds the keyframe at or before the position
-// and tells the client where the stream really starts.
+// and tells the client where the stream really starts. Re-encoded video starts
+// exactly where it is asked to.
 package remux
 
 import (
@@ -15,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -42,13 +48,23 @@ func MP4Audio(codec string) bool {
 	return false
 }
 
+// DefaultMaxTranscodes is how many video transcodes run at once unless the
+// operator says otherwise. Each takes one or more whole CPU cores.
+const DefaultMaxTranscodes = 2
+
 type Service struct {
 	FFmpeg, FFprobe string
 	Log             *slog.Logger
 	sem             chan struct{}
+	// tsem limits video transcodes, which do not count against sem.
+	tsem chan struct{}
+	// ToneMap is true when ffmpeg has the zscale and tonemap filters, so HDR
+	// can be converted to SDR. Detect sets it.
+	ToneMap bool
 }
 
-// New allows up to max concurrent streams.
+// New allows up to maxStreams concurrent converted streams that copy the
+// video, and DefaultMaxTranscodes that re-encode it.
 func New(ffmpeg, ffprobe string, maxStreams int, log *slog.Logger) *Service {
 	if maxStreams < 1 {
 		maxStreams = 1
@@ -56,7 +72,55 @@ func New(ffmpeg, ffprobe string, maxStreams int, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{FFmpeg: ffmpeg, FFprobe: ffprobe, Log: log, sem: make(chan struct{}, maxStreams)}
+	return &Service{FFmpeg: ffmpeg, FFprobe: ffprobe, Log: log, sem: make(chan struct{}, maxStreams),
+		tsem: make(chan struct{}, DefaultMaxTranscodes)}
+}
+
+// SetMaxTranscodes changes how many video transcodes may run at once. Call it
+// before the first stream.
+func (s *Service) SetMaxTranscodes(n int) {
+	s.tsem = make(chan struct{}, max(1, n))
+}
+
+// Features is what the ffmpeg build can do for converted streams.
+type Features struct {
+	// X264: the libx264 encoder is there, so video can be transcoded.
+	X264 bool
+	// ToneMap: zscale and tonemap are there, so HDR becomes SDR properly.
+	ToneMap bool
+}
+
+// Detect asks ffmpeg which encoders and filters it has, and remembers whether
+// it can tone map.
+func (s *Service) Detect(ctx context.Context) (Features, error) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	var f Features
+	enc, err := exec.CommandContext(ctx, s.FFmpeg, "-hide_banner", "-encoders").Output()
+	if err != nil {
+		return f, fmt.Errorf("list ffmpeg encoders: %w", err)
+	}
+	filt, err := exec.CommandContext(ctx, s.FFmpeg, "-hide_banner", "-filters").Output()
+	if err != nil {
+		return f, fmt.Errorf("list ffmpeg filters: %w", err)
+	}
+	encoders, filters := listed(string(enc)), listed(string(filt))
+	f.X264 = encoders["libx264"]
+	f.ToneMap = filters["zscale"] && filters["tonemap"]
+	s.ToneMap = f.ToneMap
+	return f, nil
+}
+
+// listed collects the names in ffmpeg's -encoders or -filters output, where
+// each entry is a flags column followed by the name.
+func listed(out string) map[string]bool {
+	names := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Fields(line); len(f) >= 2 {
+			names[f[1]] = true
+		}
+	}
+	return names
 }
 
 // KeyframeAt returns the time of the keyframe at or before ms in the file's
@@ -95,7 +159,8 @@ func (s *Service) KeyframeAt(ctx context.Context, path string, ms int64) (int64,
 // Options describe one stream.
 type Options struct {
 	Path string
-	// StartMs should be a time KeyframeAt returned.
+	// StartMs should be a time KeyframeAt returned when the video is copied.
+	// When it is transcoded, the stream starts exactly at StartMs.
 	StartMs int64
 	// AudioIndex is the stream index of the audio track, or -1 for none.
 	AudioIndex int
@@ -103,11 +168,138 @@ type Options struct {
 	TranscodeAudio bool
 	// HEVC tags the video hvc1, which Safari and Chrome require in MP4.
 	HEVC bool
+	// Video, when set, re-encodes the video to H.264 instead of copying it.
+	Video *Video
+	// Wait is how long to wait for a free slot before giving up with ErrBusy.
+	Wait time.Duration
+}
+
+// Video is how to re-encode the video for a client that cannot decode it.
+type Video struct {
+	// SrcWidth and SrcHeight are the source's size, 0 when unknown.
+	SrcWidth, SrcHeight int
+	// MaxWidth and MaxHeight bound the output; 0 means no bound. The picture
+	// is scaled down to fit, keeping its shape, and never scaled up.
+	MaxWidth, MaxHeight int
+	// FPS is the source frame rate (0 when unknown); MaxFPS caps the output.
+	FPS, MaxFPS float64
+	// MaxBitrate is the client's limit in bits per second, 0 for none.
+	MaxBitrate int64
+	// HDR is the source's HDR type (hdr10, hlg, ...), empty for SDR.
+	HDR string
+	// ToneMap converts HDR to SDR, for a display that reports no HDR.
+	ToneMap bool
+}
+
+// Fit returns the output size for a source of srcW x srcH within maxW x maxH
+// (0 means unbounded): scaled down to fit with its shape kept, never up, and
+// rounded down to even numbers, which 4:2:0 H.264 needs. It returns 0, 0 when
+// the source size is unknown.
+func Fit(srcW, srcH, maxW, maxH int) (int, int) {
+	if srcW <= 0 || srcH <= 0 {
+		return 0, 0
+	}
+	f := 1.0
+	if maxW > 0 {
+		f = math.Min(f, float64(maxW)/float64(srcW))
+	}
+	if maxH > 0 {
+		f = math.Min(f, float64(maxH)/float64(srcH))
+	}
+	even := func(x float64) int { return max(2, int(x)/2*2) }
+	return even(float64(srcW) * f), even(float64(srcH) * f)
+}
+
+// videoBitrate is the cap for the encoder's rate control at an output height:
+// generous for CRF 21, so it only bites on very busy scenes, and never above
+// what the client said it takes (less room for the audio).
+func videoBitrate(height int, clientMax int64) int64 {
+	var b int64
+	switch {
+	case height > 0 && height <= 480:
+		b = 2_500_000
+	case height > 0 && height <= 720:
+		b = 5_000_000
+	case height > 0 && height <= 1080:
+		b = 10_000_000
+	default:
+		b = 25_000_000
+	}
+	if clientMax > 0 {
+		b = max(500_000, min(b, clientMax-256_000))
+	}
+	return b
+}
+
+// videoArgs are the filter and encoder arguments for a transcoded video.
+func (s *Service) videoArgs(v Video) []string {
+	var filters []string
+	w, h := Fit(v.SrcWidth, v.SrcHeight, v.MaxWidth, v.MaxHeight)
+	switch {
+	case w > 0:
+		filters = append(filters, fmt.Sprintf("scale=%d:%d", w, h))
+	default:
+		// Size unknown: let ffmpeg fit it, still never larger than the source.
+		mw, mh := "iw", "ih"
+		if v.MaxWidth > 0 {
+			mw = fmt.Sprintf("min(iw\\,%d)", v.MaxWidth)
+		}
+		if v.MaxHeight > 0 {
+			mh = fmt.Sprintf("min(ih\\,%d)", v.MaxHeight)
+		}
+		filters = append(filters, "scale="+mw+":"+mh+":force_original_aspect_ratio=decrease:force_divisible_by=2")
+	}
+	toneMapped := false
+	if v.HDR != "" && v.ToneMap {
+		if s.ToneMap {
+			tin := "smpte2084"
+			if v.HDR == "hlg" {
+				tin = "arib-std-b67"
+			}
+			// Linear light, BT.709 primaries, Hable's curve, then back to BT.709.
+			filters = append(filters, "zscale=tin="+tin+":min=bt2020nc:pin=bt2020:rin=tv:t=linear:npl=100",
+				"format=gbrpf32le", "zscale=p=bt709", "tonemap=tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv")
+			toneMapped = true
+		}
+		// Without zscale the HDR picture goes out as 8-bit with its HDR tags
+		// kept, so a browser that tone maps by itself still can. Detect's
+		// caller logs this once at startup.
+	}
+	filters = append(filters, "format=yuv420p")
+	a := []string{"-vf", strings.Join(filters, ","),
+		"-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-profile:v", "high", "-pix_fmt", "yuv420p"}
+	if toneMapped {
+		a = append(a, "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709")
+	}
+	outH := h
+	if outH == 0 {
+		outH = v.MaxHeight
+	}
+	rate := videoBitrate(outH, v.MaxBitrate)
+	a = append(a, "-maxrate", strconv.FormatInt(rate, 10), "-bufsize", strconv.FormatInt(2*rate, 10))
+	fps := v.FPS
+	if v.MaxFPS > 0 && (fps == 0 || fps > v.MaxFPS+0.5) {
+		a = append(a, "-fpsmax", strconv.FormatFloat(v.MaxFPS, 'f', -1, 64))
+		if fps > 0 {
+			fps = v.MaxFPS
+		}
+	}
+	// A keyframe every 2 s, so a fragment ends there and a seek starts on one.
+	a = append(a, "-force_key_frames", "expr:gte(t,n_forced*2)")
+	if fps > 0 {
+		a = append(a, "-g", strconv.Itoa(int(math.Round(2*fps))))
+	}
+	return a
 }
 
 func (s *Service) args(o Options) []string {
 	a := []string{"-nostdin", "-hide_banner", "-loglevel", "error"}
-	if o.StartMs > 0 {
+	switch {
+	case o.StartMs > 0 && o.Video != nil:
+		// Decoding from the keyframe before StartMs and dropping frames up to
+		// it, so the stream starts exactly at StartMs.
+		a = append(a, "-accurate_seek", "-ss", strconv.FormatFloat(float64(o.StartMs)/1000, 'f', 3, 64))
+	case o.StartMs > 0:
 		// Without accurate seek, ffmpeg steps back 3/23 s before seeking, so
 		// asking for exactly the keyframe lands on the one before it. Half a
 		// second past the keyframe lands on it, and video and audio start
@@ -118,9 +310,19 @@ func (s *Service) args(o Options) []string {
 	if o.AudioIndex >= 0 {
 		a = append(a, "-map", "0:"+strconv.Itoa(o.AudioIndex))
 	}
-	a = append(a, "-c:v", "copy")
-	if o.HEVC {
-		a = append(a, "-tag:v", "hvc1")
+	switch {
+	case o.Video != nil:
+		a = append(a, s.videoArgs(*o.Video)...)
+		if o.StartMs > 0 && o.AudioIndex >= 0 && !o.TranscodeAudio {
+			// Copied audio would otherwise start at the demuxer's seek point,
+			// seconds early, and drag the whole stream's time 0 back with it.
+			a = append(a, "-copypriorss", "0")
+		}
+	default:
+		a = append(a, "-c:v", "copy")
+		if o.HEVC {
+			a = append(a, "-tag:v", "hvc1")
+		}
 	}
 	if o.AudioIndex >= 0 {
 		if o.TranscodeAudio {
@@ -136,12 +338,14 @@ func (s *Service) args(o Options) []string {
 // Stream writes the converted file to w until it ends, ctx ends, or the
 // client stops reading. ffmpeg only reads as fast as w accepts.
 func (s *Service) Stream(ctx context.Context, w io.Writer, o Options) error {
-	select {
-	case s.sem <- struct{}{}:
-		defer func() { <-s.sem }()
-	default:
+	sem := s.sem
+	if o.Video != nil {
+		sem = s.tsem
+	}
+	if !acquire(ctx, sem, o.Wait) {
 		return ErrBusy
 	}
+	defer func() { <-sem }()
 	cmd := exec.CommandContext(ctx, s.FFmpeg, s.args(o)...)
 	cmd.Stdout = w
 	var stderr strings.Builder
@@ -156,6 +360,28 @@ func (s *Service) Stream(ctx context.Context, w io.Writer, o Options) error {
 		return fmt.Errorf("ffmpeg after %s: %w: %s", time.Since(started).Round(time.Second), err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+// acquire takes a slot, waiting up to wait for one to free up.
+func acquire(ctx context.Context, sem chan struct{}, wait time.Duration) bool {
+	select {
+	case sem <- struct{}{}:
+		return true
+	default:
+	}
+	if wait <= 0 {
+		return false
+	}
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case sem <- struct{}{}:
+		return true
+	case <-t.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // limited keeps the first n bytes of ffmpeg's error output.

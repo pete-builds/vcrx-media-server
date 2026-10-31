@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/fsafe"
@@ -34,7 +35,7 @@ func (s *Server) convertedSource(w http.ResponseWriter, r *http.Request) (playba
 		writeError(w, http.StatusConflict, "session_ended", "That playback session has already ended. Start a new one.")
 		return ss, catalog.Version{}, "", false
 	}
-	if (ss.Decision != playback.Remux && ss.Decision != playback.AudioTranscode) || s.Remux == nil {
+	if (ss.Decision != playback.Remux && ss.Decision != playback.AudioTranscode && ss.Decision != playback.Transcode) || s.Remux == nil {
 		writeError(w, http.StatusNotFound, "not_found", "This session plays the file directly; use its file URL.")
 		return ss, catalog.Version{}, "", false
 	}
@@ -52,17 +53,22 @@ func (s *Server) convertedSource(w http.ResponseWriter, r *http.Request) (playba
 }
 
 // convertedSeek answers where a stream asked for at position_ms starts: the
-// keyframe at or before it, since copied video can only start on one.
+// keyframe at or before it when the video is copied, since copied video can
+// only start on one, or position_ms itself when the video is transcoded.
 func (s *Server) convertedSeek(w http.ResponseWriter, r *http.Request) {
-	_, _, path, ok := s.convertedSource(w, r)
+	ss, _, path, ok := s.convertedSource(w, r)
 	if !ok {
 		return
 	}
-	pos := int64(queryInt(r, "position_ms", 0))
-	start, err := s.Remux.KeyframeAt(r.Context(), path, max(0, pos))
-	if err != nil {
-		s.Log.Warn("keyframe lookup failed; starting from the beginning", "session", r.PathValue("session_id"), "err", err)
-		start = 0
+	pos := max(0, int64(queryInt(r, "position_ms", 0)))
+	start := pos
+	if ss.Decision != playback.Transcode {
+		var err error
+		start, err = s.Remux.KeyframeAt(r.Context(), path, pos)
+		if err != nil {
+			s.Log.Warn("keyframe lookup failed; starting from the beginning", "session", r.PathValue("session_id"), "err", err)
+			start = 0
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"start_ms": start,
@@ -100,6 +106,15 @@ func (s *Server) convertedStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("session_id")
+	opts := remux.Options{Path: path, StartMs: max(0, int64(queryInt(r, "start_ms", 0))), AudioIndex: audio, TranscodeAudio: transcode,
+		HEVC: deref(v.VideoCodec) == "hevc"}
+	if ss.Decision == playback.Transcode {
+		video := playback.TranscodeVideo(v, ss.Caps)
+		opts.Video, opts.HEVC = &video, false
+		// A seek asks for the next stream as the player drops the last one,
+		// whose transcode slot frees a moment later.
+		opts.Wait = 3 * time.Second
+	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	s.streams.add(id, &cancel)
@@ -108,8 +123,6 @@ func (s *Server) convertedStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Accept-Ranges", "none")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	opts := remux.Options{Path: path, StartMs: max(0, int64(queryInt(r, "start_ms", 0))), AudioIndex: audio, TranscodeAudio: transcode,
-		HEVC: deref(v.VideoCodec) == "hevc"}
 	err := s.Remux.Stream(ctx, &flushWriter{w: w}, opts)
 	switch {
 	case errors.Is(err, remux.ErrBusy):

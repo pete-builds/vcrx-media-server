@@ -307,7 +307,12 @@ paths:
         with the device's capabilities, records the decision and its reason, and
         returns where to stream from. A policy refusal is 403 and a file this server
         cannot yet adapt for the device is 422; both carry a message to show on screen
-        and are still recorded in the activity history.
+        and are still recorded in the activity history. A client that reports
+        fmp4_stream gets files it cannot play directly as a converted stream (protocol
+        fmp4): video copied, or transcoded to H.264 when the device cannot decode it
+        (decision transcode; needs an ffmpeg with libx264 and a client that decodes
+        H.264). Any other client is refused with transcode_unavailable when its
+        video needs converting.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackRequest" } } }
@@ -338,9 +343,10 @@ paths:
     get:
       operationId: seekConvertedStream
       summary: >-
-        For a session with protocol fmp4: where a stream asked for at position_ms starts (the keyframe at or before
-        it, since copied video starts only on one) and the URL to play. The player's position is start_ms plus the
-        media element's own time.
+        For a session with protocol fmp4: where a stream asked for at position_ms starts and the URL to play. When
+        the video is copied that is the keyframe at or before position_ms, since copied video starts only on one;
+        when it is transcoded (decision transcode) it is position_ms itself. The player's position is start_ms plus
+        the media element's own time.
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
         - { name: position_ms, in: query, schema: { type: integer, minimum: 0 } }
@@ -362,9 +368,13 @@ paths:
     get:
       operationId: getConvertedStream
       summary: >-
-        The file as fragmented MP4 from start_ms: video copied, audio copied when the device decodes a track MP4 can
-        carry, otherwise the default track converted to stereo AAC. Not seekable by byte range; seek by asking the seek
-        endpoint for a new stream. audio picks a track by its stream index.
+        The file as fragmented MP4 from start_ms: video copied, or for a transcode session re-encoded to H.264
+        (High profile, 8-bit 4:2:0, scaled down to fit the device's reported size and never up, a keyframe every
+        2 s, HDR tone mapped to SDR for a device that reports no HDR when ffmpeg has zscale); audio copied when the
+        device decodes a track MP4 can carry, otherwise the default track converted to stereo AAC. Not seekable by
+        byte range; seek by asking the seek endpoint for a new stream. audio picks a track by its stream index. 503
+        (busy) when the server is already running as many converted streams, or as many transcodes
+        (VCRX_MAX_TRANSCODES, default 2), as it allows.
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
         - { name: start_ms, in: query, schema: { type: integer, minimum: 0 } }
@@ -998,7 +1008,7 @@ components:
         max_width: { type: integer }
         max_height: { type: integer }
         max_bitrate: { type: integer }
-        fmp4_stream: { type: boolean, description: "The client plays a fragmented MP4 stream that seeks by asking for a new one. Only then are files it cannot play directly converted (video copied, audio converted)." }
+        fmp4_stream: { type: boolean, description: "The client plays a fragmented MP4 stream that seeks by asking for a new one. Only then are files it cannot play directly converted (video copied or transcoded to H.264, audio copied or converted)." }
         default_audio_only: { type: boolean, description: "The client plays only the default audio track (a browser), so that track is the one that has to decode." }
     PlaybackRequest:
       type: object
