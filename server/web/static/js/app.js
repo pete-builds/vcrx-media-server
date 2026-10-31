@@ -16,6 +16,8 @@ import { settingsView } from "./views/settings.js";
 import { loginView } from "./views/login.js";
 import { searchSuggest } from "./suggest.js";
 import { installShortcuts } from "./shortcuts.js";
+import { musicLibraryView, musicArtistView, musicAlbumView } from "./views/music.js";
+import { installMusicPlayer } from "./music/player.js";
 import { pickerView, drawProfileButton } from "./views/profiles.js";
 import { pairView, inviteView } from "./views/devices.js";
 import { peerItemView } from "./views/peer.js";
@@ -36,6 +38,9 @@ const routes = [
   [/^\/activity(?:\/(now|history|stats|users))?$/, () => activityView],
   [/^\/settings(?:\/(account|home|libraries|users|devices|friends|newsletter|markers))?$/, () => settingsView],
   [/^\/login$/, () => loginView],
+  [/^\/music\/(\d+)$/, () => musicLibraryView],
+  [/^\/music\/artist\/(\d+)$/, () => musicArtistView],
+  [/^\/music\/album\/(\d+)$/, () => musicAlbumView],
   [/^\/profiles$/, () => pickerView],
   [/^\/pair\/([A-Za-z-]{1,16})$/, () => pairView],
   [/^\/invite\/([A-Za-z2-7-]{16,64})$/, () => inviteView],
@@ -120,11 +125,16 @@ function markNav(path) {
 export function drawNav() {
   const nav = document.getElementById("nav");
   const links = [h("a", { class: "nav-link", href: "#/" }, "Home")];
-  for (const lib of state.libraries) links.push(h("a", { class: "nav-link", href: `#/library/${lib.id}` }, lib.name));
+  for (const lib of state.libraries) links.push(h("a", { class: "nav-link", href: libraryHref(lib) }, lib.name));
   if (state.me && state.me.is_admin) links.push(h("a", { class: "nav-link", href: "#/activity" }, "Activity"));
   // On a phone the top bar has no room for Settings, so the menu carries it.
   links.push(h("a", { class: "nav-link nav-phone-only", href: "#/settings" }, "Settings"));
   nav.replaceChildren(...links);
+}
+
+// A music library has its own pages.
+export function libraryHref(lib) {
+  return lib.kind === "music" ? `#/music/${lib.id}` : `#/library/${lib.id}`;
 }
 
 // The top bar is see-through over a page's hero art until the page scrolls.
@@ -194,6 +204,7 @@ async function boot() {
   });
   searchSuggest(document.getElementById("search"));
   installShortcuts();
+  installMusicPlayer();
   installChrome();
   try {
     state.server = await api("/server");

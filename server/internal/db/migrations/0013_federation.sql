@@ -7,9 +7,6 @@
 -- invite is stored only as a SHA-256 hash and works once, exactly as a
 -- device's does. bandwidth_kbps caps everything it streams at once; NULL is
 -- no cap.
---
--- Migrations must run 1..n without gaps: this follows 0007 to 0012, which
--- other open pull requests hold.
 ALTER TABLE device_tokens ADD COLUMN peer INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE device_tokens ADD COLUMN bandwidth_kbps INTEGER;
 

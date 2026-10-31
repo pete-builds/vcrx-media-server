@@ -14,6 +14,9 @@ const GROUPS = [
     [["Enter"], "Open the highlighted title, or all results"],
     [["Esc"], "Close the list of titles"],
   ]],
+  ["Music", [
+    [["Space"], "Play or pause the music, on any page"],
+  ]],
   ["Player", [
     [["Space"], "Play or pause"],
     [["K"], "Play or pause"],

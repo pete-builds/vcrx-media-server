@@ -8,9 +8,10 @@
 // Home rows missing (the Halloween row, with the dev server's fixed date),
 // a Customize Home editor that does not hide or move a row, or an invited
 // device that is not signed in by its invite, sees past its scope, reaches
-// the profile picker, or survives being revoked; and, given a second dev
-// server, a friend's server that does not link, badge its titles on Home,
-// play through this one, or leave Home when unlinked.
+// the profile picker, or survives being revoked, or music that stops when
+// the page changes; and, given a second dev server, a friend's server that
+// does not link, badge its titles on Home, play through this one, or leave
+// Home when unlinked.
 //
 //   node scripts/web-smoke.mjs [base-url]      (default http://127.0.0.1:3751)
 //   VCRX_SMOKE_PEER=http://127.0.0.1:3752 node scripts/web-smoke.mjs ...
@@ -113,8 +114,19 @@ async function main() {
   const ids = await evaluate(`
     const j = (p) => fetch("/api/v1" + p).then((r) => r.json());
     const libs = (await j("/libraries")).libraries;
-    const out = { libs: libs.map((l) => l.id), movie: null, show: null, direct: null, converted: null, transcoded: null };
+    const out = { libs: libs.filter((l) => l.kind !== "music").map((l) => l.id), movie: null, show: null, direct: null, converted: null,
+      transcoded: null, music: null, liveAlbum: null, alacAlbum: null, artist: null };
     for (const l of libs) {
+      if (l.kind === "music") {
+        out.music = l.id;
+        const albums = (await j("/music/libraries/" + l.id + "/albums?limit=50")).albums;
+        const live = albums.find((a) => a.live);
+        out.liveAlbum = live ? live.id : null;
+        out.artist = live ? live.artist_id : null;
+        const alac = albums.find((a) => a.title === "Low Orbit");
+        out.alacAlbum = alac ? alac.id : null;
+        continue;
+      }
       const items = (await j("/libraries/" + l.id + "/items?limit=50")).items;
       if (l.kind === "movie") {
         out.movie = items[0] && items[0].id;
@@ -195,6 +207,16 @@ async function main() {
     ["/settings/home", ".layout-list li"],
     ["/row/trending", ".grid .card"],
     ["/settings/newsletter", ".newsletter-form"],
+    // Music: artists, albums, live shows, an album's tracklist, an artist, and
+    // music in search results.
+    ...(ids.music ? [
+      [`/music/${ids.music}`, ".music-grid .artist-card"],
+      [`/music/${ids.music}?view=albums`, ".music-grid .music-card"],
+      [`/music/${ids.music}?view=live`, ".music-grid .live-badge"],
+      [`/music/album/${ids.liveAlbum}`, ".tracklist .track .track-btn"],
+      [`/music/artist/${ids.artist}`, ".music-head h1"],
+      ["/search?q=tide", ".music-results .tracklist .track"],
+    ] : []),
     ["/settings/devices", ".scope-form"],
     ["/settings/friends", ".link-form"],
     ["/settings/markers", "table.list"],
@@ -486,6 +508,7 @@ async function main() {
   }
   if (exceptions.length) fail("season tabs", `threw: ${exceptions[0]}`);
 
+  await music(s, evaluate, press, ids, { reset: () => { exceptions = []; }, first: () => exceptions[0] });
   // Extras: Harbor Lights has a -trailer file and two extras folders, and Quiet
   // Street a theme.mp3 (scripts/dev-server.sh). None may become a title of its
   // own. The film's page shows an Extras row and a Trailer button; the trailer,
@@ -776,6 +799,100 @@ async function main() {
       if (page.junk) fail(`#${path}`, `shows "${page.junk}"`);
     }
   }
+}
+
+// Music: Play on a live album with a real mouse click; the bar keeps playing
+// across a page change (it lives outside the routed view); the next track was
+// loaded before the first ended, so the hand-over is near gapless; Space
+// pauses and plays; the lock screen gets the track; the listen reaches
+// Activity; a track Chrome cannot decode (ALAC) plays converted.
+async function music(s, evaluate, press, ids, ex) {
+  if (!ids.music || !ids.liveAlbum) {
+    fail("music", "no music library with a live show (run against scripts/dev-server.sh)");
+    return;
+  }
+  const wait = (cond, n = 60) => `for (let i = 0; i < ${n} && !(${cond}); i++) await new Promise((r) => setTimeout(r, 150));`;
+  console.log(`music: play #/music/album/${ids.liveAlbum}`);
+  ex.reset();
+  await s("Page.navigate", { url: `${base}/#/music/album/${ids.liveAlbum}` });
+  const btn = await evaluate(`${wait(`document.querySelector(".music-head .btn-primary")`)}
+    const b = document.querySelector(".music-head .btn-primary");
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    return { x, y, hit: document.elementFromPoint(x, y)?.closest("button") === b };`);
+  if (!btn) {
+    fail("music", "the album page has no Play button");
+    return;
+  }
+  if (!btn.hit) fail("music", "the Play button is covered by something else");
+  await s("Input.dispatchMouseEvent", { type: "mouseMoved", x: btn.x, y: btn.y });
+  await s("Input.dispatchMouseEvent", { type: "mousePressed", x: btn.x, y: btn.y, button: "left", clickCount: 1 });
+  await s("Input.dispatchMouseEvent", { type: "mouseReleased", x: btn.x, y: btn.y, button: "left", clickCount: 1 });
+  const playing = `(() => { const a = [...document.querySelectorAll("audio.mb-audio")].find((e) => e.getAttribute("src") && !e.paused); return a ? a.currentTime : -1; })()`;
+  const started = await evaluate(`${wait(`${playing} > 0.5`)}
+    const bar = document.getElementById("music-bar");
+    return { t: ${playing}, bar: !!bar && !bar.hidden, title: bar ? bar.querySelector(".mb-title").textContent : "" };`);
+  if (!(started.t > 0.5)) fail("music", `the album did not start playing (t=${started.t})`);
+  if (!started.bar) fail("music", "no player bar while music plays");
+
+  // A page change: the router replaces #view, never the bar or the audio.
+  await s("Page.navigate", { url: `${base}/#/library/${ids.libs[0]}` });
+  const across = await evaluate(`${wait(`document.querySelector("#view .grid .card")`)}
+    const before = ${playing};
+    await new Promise((r) => setTimeout(r, 1200));
+    const bar = document.getElementById("music-bar");
+    return { before, after: ${playing}, bar: !!bar && !bar.hidden, hash: location.hash };`);
+  if (!(across.after > across.before && across.before >= 0)) fail("music", `the music stopped on a page change (${across.before} then ${across.after})`);
+  if (!across.bar) fail("music", "the player bar went away on a page change");
+
+  // Into the second track: it was loaded while the first played.
+  const handover = await evaluate(`
+    const p = await import("/js/music/player.js");
+    ${wait(`p.debug.transitions.length > 0 && p.debug.transitions[0].gapMs !== null`, 80)}
+    const t = p.debug.transitions[0];
+    const c = p.current();
+    const ms = navigator.mediaSession && navigator.mediaSession.metadata;
+    return { t: t || null, current: c ? c.title : "", session: ms ? ms.title : "", playing: p.isPlaying() };`);
+  if (!handover.t) fail("music", "the first track never handed over to the second");
+  else {
+    if (!handover.t.preloaded) fail("music", "the next track was not loaded before the first ended (not gapless)");
+    console.log(`  track change: next track preloaded ${handover.t.preloaded}, ${handover.t.gapMs} ms from ended to playing`);
+  }
+  if (handover.session !== handover.current) fail("music", `lock screen shows "${handover.session}", playing "${handover.current}"`);
+
+  // Space pauses and plays again, from anywhere outside a text field.
+  await evaluate(`document.activeElement && document.activeElement.blur && document.activeElement.blur();`);
+  await press(" ", "Space", 32, " ");
+  const paused = await evaluate(`${wait(`document.getElementById("music-bar").dataset.state === "paused"`, 20)}
+    return document.getElementById("music-bar").dataset.state;`);
+  if (paused !== "paused") fail("music", "Space did not pause the music");
+  await press(" ", "Space", 32, " ");
+  const resumed = await evaluate(`${wait(`document.getElementById("music-bar").dataset.state === "playing"`, 20)}
+    return document.getElementById("music-bar").dataset.state;`);
+  if (resumed !== "playing") fail("music", "Space did not start the music again");
+
+  // The listens are in Activity, as tracks.
+  const listens = await evaluate(`${wait(`false`, 8)}
+    const h = await fetch("/api/v1/admin/activity/history?limit=50").then((r) => r.json());
+    return JSON.stringify(h).includes("Glass Harbor · Low Tide");`);
+  if (!listens) fail("music", "the listen is not in Activity history");
+
+  // ALAC, which Chrome does not decode, plays as AAC made on the fly.
+  if (ids.alacAlbum) {
+    const conv = await evaluate(`
+      const p = await import("/js/music/player.js");
+      await p.playAlbum(${ids.alacAlbum});
+      ${wait(`${playing} > 0.5`)}
+      const c = p.current();
+      return { t: ${playing}, protocol: c && c.stream ? c.stream.protocol : null };`);
+    if (!(conv.t > 0.5)) fail("music", `the ALAC track did not play (t=${conv.t})`);
+    if (conv.protocol !== "converted") fail("music", `ALAC came as ${conv.protocol}, expected a converted stream`);
+  } else {
+    fail("music", "no Low Orbit album (the ALAC sample)");
+  }
+  await evaluate(`const b = document.querySelector("#music-bar .mb-btn[aria-label^='Stop']"); if (b) b.click();`);
+  if (ex.first()) fail("music", `threw: ${ex.first()}`);
 }
 
 const safariUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
@@ -1219,5 +1336,5 @@ if (failures.length) {
 }
 console.log("\nweb-smoke: every page, every playback path (HLS included), Continue Watching removal, search as you type, the shortcuts list, " +
   "the Home feature and rows, Customize Home, season tabs and the phone menu, the History section, the trailer, extras and theme music, " +
-  "Skip Intro and Next Episode, the invite and pairing loop" +
+  "Skip Intro and Next Episode, the invite and pairing loop, music (playing across pages, gapless hand-over, Space)" +
   (peer ? ", and linking, badging, playing and unlinking a friend's server" : "") + " passed");

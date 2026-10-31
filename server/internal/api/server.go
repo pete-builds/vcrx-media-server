@@ -77,6 +77,9 @@ type Server struct {
 	// Newsletter is the weekly recently-added digest, set up in Settings.
 	Newsletter *newsletter.Service
 
+	// Music serves music libraries (music.go).
+	Music *Music
+
 	AdminAllowRemote bool
 	TrustedProxies   []netip.Prefix
 	// AutoSignInUser, when set, is signed in without a password for clients on
@@ -160,7 +163,7 @@ type route struct {
 
 // Routes is the full route table. The OpenAPI drift test reads it.
 func (s *Server) Routes() []route {
-	return []route{
+	return append([]route{
 		{"GET", "/healthz", public, s.healthz},
 		{"GET", "/readyz", public, s.readyz},
 		{"GET", "/api/v1/openapi.yaml", public, s.openapi},
@@ -290,7 +293,7 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/admin/newsletter/preview", adminOnly, s.newsletterPreview},
 		{"GET", "/api/v1/admin/items/{item_id}/subtitles", adminOnly, s.adminItemSubtitles},
 		{"DELETE", "/api/v1/admin/subtitles/{stream_id}", adminOnly, s.adminDeleteSubtitle},
-	}
+	}, s.musicRoutes()...)
 }
 
 // Handler builds the mux with middleware applied.

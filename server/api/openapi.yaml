@@ -2172,6 +2172,207 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  # Music libraries (kind music): artists, albums and tracks, live shows
+  # included. Every route goes through the caller's library grants, like video;
+  # a library that is not granted, or not a music library, answers 404.
+  /api/v1/music/libraries/{library_id}/artists:
+    get:
+      operationId: musicArtists
+      summary: A music library's album artists, by sort name.
+      parameters:
+        - { name: library_id, in: path, required: true, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: A page of artists.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [artists, total]
+                properties:
+                  artists: { type: array, items: { $ref: "#/components/schemas/MusicArtist" } }
+                  total: { type: integer }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/music/libraries/{library_id}/albums:
+    get:
+      operationId: musicAlbums
+      summary: A music library's albums. live=true lists only live shows, live=false only the rest.
+      parameters:
+        - { name: library_id, in: path, required: true, schema: { type: integer } }
+        - { name: sort, in: query, schema: { type: string, enum: [title, artist, year, added], default: title } }
+        - { name: live, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: A page of albums.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [albums, total]
+                properties:
+                  albums: { type: array, items: { $ref: "#/components/schemas/MusicAlbum" } }
+                  total: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/music/artists/{artist_id}:
+    get:
+      operationId: musicArtist
+      summary: An artist's page. Their albums, their live shows, and the compilations they appear on.
+      parameters:
+        - { name: artist_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The artist.
+          content: { application/json: { schema: { $ref: "#/components/schemas/MusicArtistDetail" } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/music/artists/{artist_id}/image:
+    get:
+      operationId: musicArtistImage
+      summary: The artist's picture (artist.jpg or folder.jpg in their folder), else their newest album's cover, as JPEG.
+      parameters:
+        - { name: artist_id, in: path, required: true, schema: { type: integer } }
+        - { name: width, in: query, schema: { type: integer }, description: "Snapped up to 96, 160, 240, 320, 480, 640 or 1000; never larger than the source." }
+      responses:
+        "200": { description: JPEG image, content: { image/jpeg: {} } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/music/albums/{album_id}:
+    get:
+      operationId: musicAlbum
+      summary: An album's page. Its tracks in disc and track order and, for a live show, the taper's info file and the checksums its .md5 and .ffp files declare.
+      parameters:
+        - { name: album_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The album.
+          content: { application/json: { schema: { $ref: "#/components/schemas/MusicAlbumDetail" } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/music/albums/{album_id}/cover:
+    get:
+      operationId: musicAlbumCover
+      summary: The album's cover (cover.jpg or the like beside the tracks, else a picture embedded in a track), as JPEG.
+      parameters:
+        - { name: album_id, in: path, required: true, schema: { type: integer } }
+        - { name: width, in: query, schema: { type: integer }, description: "Snapped up to 96, 160, 240, 320, 480, 640 or 1000; never larger than the source." }
+      responses:
+        "200": { description: JPEG image, content: { image/jpeg: {} } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/music/search:
+    get:
+      operationId: musicSearch
+      summary: Artists by name, albums by title, venue, place or date, and tracks by title, across the music libraries the caller may see.
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 30, maximum: 100 }, description: Per kind. }
+      responses:
+        "200":
+          description: Matches.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [artists, albums, tracks]
+                properties:
+                  artists: { type: array, items: { $ref: "#/components/schemas/MusicArtist" } }
+                  albums: { type: array, items: { $ref: "#/components/schemas/MusicAlbum" } }
+                  tracks: { type: array, items: { $ref: "#/components/schemas/MusicTrack" } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/v1/music/queue:
+    post:
+      operationId: musicQueue
+      summary: >-
+        A play queue: an album in order, an artist's tracks (shuffled unless shuffle is false), or a list of tracks in
+        the order given. Each track says how this client plays it (stream) or why it cannot (refusal), decided from the
+        capabilities. Tracks the caller may not see are left out; 404 when nothing is left.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MusicQueueRequest" } } }
+      responses:
+        "200":
+          description: The queue.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tracks]
+                properties:
+                  tracks: { type: array, items: { $ref: "#/components/schemas/MusicQueueTrack" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/music/tracks/{track_id}/sessions:
+    post:
+      operationId: musicListen
+      summary: >-
+        Record a listen as a track starts: a playback session in Activity with item_kind track. The client then sends
+        start, progress (every heartbeat_interval_ms), pause and stop to /api/v1/playback/sessions/{session_id}/events,
+        as for video. The stream returned carries the session, so stopping it from Activity cuts it off. 403 when the
+        track needs converting and the account may not; 422 when the device decodes nothing the server can convert to.
+      parameters:
+        - { name: track_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [capabilities]
+              properties:
+                capabilities: { $ref: "#/components/schemas/Capabilities" }
+      responses:
+        "201":
+          description: The listen.
+          content: { application/json: { schema: { $ref: "#/components/schemas/MusicSession" } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v1/music/tracks/{track_id}/file:
+    get:
+      operationId: musicFile
+      summary: The track's file, for direct play. Supports Range, If-Range and HEAD; access is checked on every request.
+      parameters:
+        - { name: track_id, in: path, required: true, schema: { type: integer } }
+        - { name: session, in: query, schema: { type: string }, description: The listen's session id, so stopping it from Activity cuts the stream. }
+      responses:
+        "200": { description: Whole file }
+        "206": { description: Partial content }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "416": { description: Range not satisfiable }
+    head:
+      operationId: headMusicFile
+      parameters:
+        - { name: track_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: Headers only }
+  /api/v1/music/tracks/{track_id}/stream:
+    get:
+      operationId: musicStream
+      summary: >-
+        The track converted as ffmpeg reads it, for a client that cannot decode the file: AAC in ADTS (audio/aac) or
+        Opus in Ogg (audio/ogg), stereo. It cannot be seeked by range; to seek, request it again with start_ms. 403 for
+        an account without allow_transcode; 503 busy when the server is converting as many tracks as it allows.
+      parameters:
+        - { name: track_id, in: path, required: true, schema: { type: integer } }
+        - { name: codec, in: query, schema: { type: string, enum: [aac, opus], default: aac } }
+        - { name: start_ms, in: query, schema: { type: integer, default: 0 } }
+        - { name: session, in: query, schema: { type: string } }
+      responses:
+        "200": { description: The converted stream, content: { audio/aac: {}, audio/ogg: {} } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    head:
+      operationId: headMusicStream
+      parameters:
+        - { name: track_id, in: path, required: true, schema: { type: integer } }
+        - { name: codec, in: query, schema: { type: string, enum: [aac, opus], default: aac } }
+      responses:
+        "200": { description: Headers only }
 
 components:
   securitySchemes:
@@ -2376,8 +2577,8 @@ components:
       properties:
         id: { type: integer }
         name: { type: string }
-        kind: { type: string, enum: [movie, show] }
-        item_count: { type: integer }
+        kind: { type: string, enum: [movie, show, music] }
+        item_count: { type: integer, description: Top-level titles; 0 for a music library, which the music routes list. }
     WatchState:
       type: object
       required: [position_ms, played, play_count]
@@ -2741,7 +2942,7 @@ components:
       required: [name, kind, root_path]
       properties:
         name: { type: string }
-        kind: { type: string, enum: [movie, show] }
+        kind: { type: string, enum: [movie, show, music] }
         root_path: { type: string, description: Absolute path inside the container, under a configured media root. }
         grouping: { type: string, enum: [folder, title_year], default: folder }
         scan_interval_minutes: { type: integer, default: 60 }
@@ -3009,3 +3210,147 @@ components:
         started_at: { type: integer }
         last_event_at: { type: integer }
         ended_at: { type: [integer, "null"] }
+    MusicArtist:
+      type: object
+      required: [id, library_id, name, sort_name, album_count, track_count, has_image]
+      properties:
+        id: { type: integer }
+        library_id: { type: integer }
+        name: { type: string }
+        sort_name: { type: string, description: "\"The Band\" sorts as \"Band, The\"." }
+        musicbrainz_id: { type: [string, "null"] }
+        album_count: { type: integer }
+        track_count: { type: integer, description: Tracks they perform, compilations included. }
+        has_image: { type: boolean }
+    MusicAlbum:
+      type: object
+      required: [id, library_id, artist_id, artist_name, title, compilation, live, track_count, duration_ms, has_cover, added_at]
+      properties:
+        id: { type: integer }
+        library_id: { type: integer }
+        artist_id: { type: integer }
+        artist_name: { type: string, description: The album artist; Various Artists for a compilation. }
+        title: { type: string, description: "A live show without an album tag is titled by its date and venue." }
+        year: { type: [integer, "null"] }
+        date: { type: [string, "null"], description: "YYYY, YYYY-MM or YYYY-MM-DD; a live show's date." }
+        genre: { type: [string, "null"] }
+        compilation: { type: boolean }
+        live: { type: boolean, description: "A show folder as tapers ship it: a date in the name, plus an info file, checksums or a source." }
+        venue: { type: [string, "null"] }
+        location: { type: [string, "null"] }
+        source: { type: [string, "null"], enum: [SBD, AUD, MTX, FM, null] }
+        track_count: { type: integer }
+        duration_ms: { type: integer }
+        has_cover: { type: boolean }
+        added_at: { type: integer }
+    ReplayGain:
+      type: object
+      properties:
+        track_gain: { type: [number, "null"], description: dB. }
+        track_peak: { type: [number, "null"] }
+        album_gain: { type: [number, "null"], description: dB. }
+        album_peak: { type: [number, "null"] }
+    MusicTrack:
+      type: object
+      required: [id, library_id, album_id, artist_id, title, artist_name, album_title, album_artist, replaygain, has_cover]
+      properties:
+        id: { type: integer }
+        library_id: { type: integer }
+        album_id: { type: integer }
+        artist_id: { type: integer, description: Who performs it; on a compilation not the album artist. }
+        title: { type: string }
+        artist_name: { type: string }
+        album_title: { type: string }
+        album_artist: { type: string }
+        disc_number: { type: [integer, "null"] }
+        track_number: { type: [integer, "null"] }
+        duration_ms: { type: [integer, "null"] }
+        codec: { type: [string, "null"], description: "FFprobe name: flac, mp3, aac, alac, opus, vorbis, shorten, pcm_s16le ..." }
+        container: { type: [string, "null"], description: "flac, mp3, m4a, ogg, opus, wav, shn, aiff, wv ..." }
+        bitrate: { type: [integer, "null"] }
+        sample_rate: { type: [integer, "null"] }
+        channels: { type: [integer, "null"] }
+        bit_depth: { type: [integer, "null"] }
+        replaygain: { $ref: "#/components/schemas/ReplayGain" }
+        has_cover: { type: boolean }
+        md5: { type: [string, "null"], description: What the show's .md5 file declares for this file. }
+        ffp: { type: [string, "null"], description: What the show's .ffp file declares (the MD5 of the decoded FLAC audio). }
+    MusicChecksum:
+      type: object
+      required: [file_name, algorithm, value, source]
+      properties:
+        file_name: { type: string, description: As the checksum file names it, relative to the album folder. }
+        algorithm: { type: string, enum: [md5, ffp] }
+        value: { type: string, description: Lowercase hex. }
+        source: { type: string, description: The checksum file, relative to the album folder. }
+        track_id: { type: [integer, "null"] }
+    MusicAlbumDetail:
+      allOf:
+        - $ref: "#/components/schemas/MusicAlbum"
+        - type: object
+          required: [replaygain, tracks, checksums]
+          properties:
+            source_detail: { type: [string, "null"], description: "The info file's Source line, such as SBD > DAT > CD." }
+            lineage: { type: [string, "null"] }
+            taper: { type: [string, "null"] }
+            info_text: { type: [string, "null"], description: The show's .txt info file as the taper wrote it (at most 64 KiB). }
+            musicbrainz_id: { type: [string, "null"] }
+            musicbrainz_release_group_id: { type: [string, "null"] }
+            replaygain: { $ref: "#/components/schemas/ReplayGain" }
+            tracks: { type: array, items: { $ref: "#/components/schemas/MusicTrack" } }
+            checksums: { type: array, items: { $ref: "#/components/schemas/MusicChecksum" } }
+    MusicArtistDetail:
+      allOf:
+        - $ref: "#/components/schemas/MusicArtist"
+        - type: object
+          required: [albums, live, appears_on]
+          properties:
+            albums: { type: array, items: { $ref: "#/components/schemas/MusicAlbum" } }
+            live: { type: array, items: { $ref: "#/components/schemas/MusicAlbum" } }
+            appears_on: { type: array, items: { $ref: "#/components/schemas/MusicAlbum" } }
+    MusicStream:
+      type: object
+      required: [url, protocol, mime_type, decision, reason]
+      properties:
+        url: { type: string }
+        protocol:
+          type: string
+          enum: [progressive, converted]
+          description: "progressive: the file, seek by range. converted: made on the fly, seek by requesting url with start_ms."
+        mime_type: { type: string }
+        decision: { type: string, enum: [direct_play, audio_transcode] }
+        reason: { type: string }
+    MusicQueueRequest:
+      type: object
+      properties:
+        album_id: { type: integer }
+        artist_id: { type: integer }
+        track_ids: { type: array, items: { type: integer } }
+        shuffle: { type: boolean, description: "Shuffle the queue. Defaults to true for an artist, false otherwise." }
+        capabilities:
+          $ref: "#/components/schemas/Capabilities"
+          description: "For music, containers lists the audio containers the player reads (flac, mp3, m4a, ogg, opus, wav ...) and audio_codecs what it decodes (pcm for WAV)."
+    MusicQueueTrack:
+      allOf:
+        - $ref: "#/components/schemas/MusicTrack"
+        - type: object
+          properties:
+            stream: { oneOf: [{ $ref: "#/components/schemas/MusicStream" }, { type: "null" }] }
+            refusal:
+              oneOf:
+                - type: object
+                  required: [code, message]
+                  properties:
+                    code: { type: string }
+                    message: { type: string }
+                - { type: "null" }
+    MusicSession:
+      type: object
+      required: [session_id, track_id, decision, reason, stream, heartbeat_interval_ms]
+      properties:
+        session_id: { type: string }
+        track_id: { type: integer }
+        decision: { type: string, enum: [direct_play, audio_transcode] }
+        reason: { type: string }
+        stream: { $ref: "#/components/schemas/MusicStream" }
+        heartbeat_interval_ms: { type: integer }

@@ -96,8 +96,9 @@ jobs:
           VCRX_DEV_DIR="$RUNNER_TEMP/vcrx-dev" ./scripts/dev-server.sh > "$RUNNER_TEMP/dev.log" 2>&1 &
           # A second server, linked to the first as a friend's server.
           VCRX_DEV_DIR="$RUNNER_TEMP/vcrx-peer" VCRX_PORT=3752 VCRX_DEV_NAME="VCRX Peer" ./scripts/dev-server.sh > "$RUNNER_TEMP/peer.log" 2>&1 &
+          # One scan line per library on each: Movies, TV and Music.
           for _ in $(seq 1 240); do
-            [ "$(grep -c '^scan ' "$RUNNER_TEMP/dev.log" || true)" -ge 2 ] && [ "$(grep -c '^scan ' "$RUNNER_TEMP/peer.log" || true)" -ge 2 ] && exit 0
+            [ "$(grep -c '^scan ' "$RUNNER_TEMP/dev.log" || true)" -ge 3 ] && [ "$(grep -c '^scan ' "$RUNNER_TEMP/peer.log" || true)" -ge 3 ] && exit 0
             sleep 1
           done
           echo "dev servers did not finish their scans"; tail -50 "$RUNNER_TEMP/dev.log" "$RUNNER_TEMP/peer.log"; exit 1
