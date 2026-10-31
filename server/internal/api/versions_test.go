@@ -9,6 +9,7 @@ import (
 )
 
 func TestMergeAndSplitAPI(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	now := time.Now().UnixMilli()
 	// The 4K file starts as a movie of its own, which someone watched.

@@ -226,6 +226,7 @@ func (f *fixture) login(user, pass string) string {
 }
 
 func TestPublicAndAuth(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	if r := f.do("GET", "/healthz", "", nil); r.code != 200 {
 		t.Fatalf("healthz %d", r.code)
@@ -248,6 +249,7 @@ func TestPublicAndAuth(t *testing.T) {
 }
 
 func TestLoginRateLimit(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	for i := range 10 {
 		r := f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": "friend", "password": "wrong-wrong", "device": map[string]string{}})
@@ -262,6 +264,7 @@ func TestLoginRateLimit(t *testing.T) {
 }
 
 func TestUngrantedUserSeesNothing(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	var libs struct{ Libraries []catalog.Library }
 	f.do("GET", "/api/v1/libraries", f.strangerTok, nil).json(t, &libs)
@@ -288,6 +291,7 @@ func TestUngrantedUserSeesNothing(t *testing.T) {
 // The reference's headline access test: a friend capped at 1080p can neither list
 // nor stream the 4K version of a title that has both.
 func TestFriendCannotSeeOrStream4K(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	var d catalog.ItemDetail
 	r := f.do("GET", fmt.Sprintf("/api/v1/items/%d", f.movieID), f.friendTok, nil)
@@ -333,6 +337,7 @@ func TestFriendCannotSeeOrStream4K(t *testing.T) {
 }
 
 func TestDenyLabelHidesShowAndEpisodes(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	lid, _ := f.db.Exec(`INSERT INTO labels (name, hidden) VALUES ('kids-no', 1)`)
 	labelID, _ := lid.LastInsertId()
@@ -356,6 +361,7 @@ func TestDenyLabelHidesShowAndEpisodes(t *testing.T) {
 }
 
 func TestRangeRequests(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	url := fmt.Sprintf("/api/v1/versions/%d/file", f.v1080)
 	data := content(int(f.fileSize))
@@ -410,6 +416,7 @@ func TestRangeRequests(t *testing.T) {
 }
 
 func TestStreamRefusesPathOutsideRoot(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	// A tampered row must not turn into a file read outside the library.
 	if _, err := f.db.Exec(`UPDATE media_versions SET path = ? WHERE id = ?`, f.outsidePath, f.v1080); err != nil {
@@ -432,6 +439,7 @@ func TestStreamRefusesPathOutsideRoot(t *testing.T) {
 }
 
 func TestAdminIsLANOnly(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	if r := f.do("GET", "/api/v1/admin/users", f.adminTok, nil); r.code != 200 {
 		t.Fatalf("admin on LAN: %d %s", r.code, r.body)
@@ -467,6 +475,7 @@ func tclCaps() map[string]any {
 // The acceptance-test loop: start, progress, seek, stop, then resume from the
 // saved position, with every step in the activity log.
 func TestPlaybackResumeLoop(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	var sess struct {
 		SessionID        string `json:"session_id"`
@@ -551,6 +560,7 @@ func TestPlaybackResumeLoop(t *testing.T) {
 }
 
 func TestRefusalIsRecorded(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	caps := map[string]any{"containers": []string{"mkv"}, "video_codecs": []map[string]any{{"codec": "h264"}}, "audio_codecs": []map[string]any{{"codec": "aac"}}}
 	r := f.do("POST", "/api/v1/playback/sessions", f.friendTok, map[string]any{"item_id": f.movieID, "capabilities": caps})
@@ -567,6 +577,7 @@ func TestRefusalIsRecorded(t *testing.T) {
 }
 
 func TestShowNavigationAndWatched(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	var kids struct{ Items []catalog.ItemSummary }
 	f.do("GET", fmt.Sprintf("/api/v1/items/%d/children", f.showID), f.friendTok, nil).json(t, &kids)
@@ -597,6 +608,7 @@ func TestShowNavigationAndWatched(t *testing.T) {
 }
 
 func TestTrustedNetworkSignIn(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	dev := map[string]any{"device": map[string]string{"id": "web-1", "name": "Browser", "platform": "web", "client": "vcrx-web", "client_version": "1"}}
 	// Off by default: no password-free sign-in from anywhere.
@@ -655,6 +667,7 @@ func TestTrustedNetworkSignIn(t *testing.T) {
 }
 
 func TestWebVTTSubtitles(t *testing.T) {
+	t.Parallel()
 	ffmpeg, err := osexec.LookPath("ffmpeg")
 	if err != nil {
 		t.Skip("ffmpeg not on PATH")
@@ -751,6 +764,7 @@ func TestWebVTTSubtitles(t *testing.T) {
 }
 
 func TestActivityNowHistoryStatsAndTerminate(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	var mu sync.Mutex
 	var hooks []map[string]any
@@ -880,6 +894,7 @@ func TestActivityNowHistoryStatsAndTerminate(t *testing.T) {
 }
 
 func TestTerminateCutsAnOpenStream(t *testing.T) {
+	t.Parallel()
 	var g streamRegistry
 	ctx, cancel := context.WithCancel(context.Background())
 	g.add("s1", &cancel)
@@ -901,6 +916,7 @@ func TestTerminateCutsAnOpenStream(t *testing.T) {
 }
 
 func TestEpisodeNextIsTheFollowingEpisode(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	now := time.Now().UnixMilli()
 	var tv int64
@@ -959,6 +975,7 @@ func TestEpisodeNextIsTheFollowingEpisode(t *testing.T) {
 }
 
 func TestHostCheckStopsDNSRebinding(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	p, _ := netip.ParsePrefix("192.168.1.0/24")
 	f.srv.AutoSignInUser, f.srv.TrustedNetworks = "pete", []netip.Prefix{p}
@@ -988,6 +1005,7 @@ func TestHostCheckStopsDNSRebinding(t *testing.T) {
 }
 
 func TestClientIPBehindProxyFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	proxy, _ := netip.ParsePrefix("127.0.0.1/32")
 	lan, _ := netip.ParsePrefix("127.0.0.0/8")
@@ -1018,6 +1036,7 @@ func TestClientIPBehindProxyFailsClosed(t *testing.T) {
 }
 
 func TestCollectionsAndFilters(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	now := time.Now().UnixMilli()
 	var movies int64
@@ -1086,6 +1105,7 @@ func TestCollectionsAndFilters(t *testing.T) {
 // Remove from Continue Watching: the resume position goes, the item stays
 // unplayed, and only the caller's own watch state changes.
 func TestClearProgressLeavesContinueWatching(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	now := time.Now().UnixMilli()
 	for _, u := range []string{"pete", "friend"} {
@@ -1155,6 +1175,7 @@ func TestClearProgressLeavesContinueWatching(t *testing.T) {
 }
 
 func TestContinueWatchingOffersTheNextEpisode(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	now := time.Now().UnixMilli()
 	var tv int64
@@ -1223,6 +1244,7 @@ func TestContinueWatchingOffersTheNextEpisode(t *testing.T) {
 // Remove on a next-episode card keeps it away, including a removed episode
 // that was in progress, until another episode of the show is finished.
 func TestRemoveNextEpisodeStaysRemoved(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	now := time.Now().UnixMilli()
 	var tv int64
@@ -1313,6 +1335,7 @@ func TestRemoveNextEpisodeStaysRemoved(t *testing.T) {
 // The details page lists the cast in billing order, an episode's guests before
 // its show's regulars, each actor once.
 func TestItemDetailCast(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	add := func(item int64, name, role string, pos int) {
 		t.Helper()

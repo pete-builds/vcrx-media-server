@@ -9,6 +9,7 @@ import (
 )
 
 func TestWebAppServing(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	get := func(path string, hdr ...string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -55,6 +56,7 @@ func TestWebAppServing(t *testing.T) {
 }
 
 func TestCookieSessionAndCSRF(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	r := f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": "pete", "password": "adminpass1", "cookie": true})
 	if r.code != 200 {

@@ -23,6 +23,7 @@ func (f *fixture) withSubSearch(user, pass string) (*ostest.Server, string) {
 const remote = "203.0.113.9:4000"
 
 func TestSubtitleSearchRoutes(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	search := func(tok string, version int64) resp {
 		return f.do("GET", fmt.Sprintf("/api/v1/versions/%d/subtitles/search?languages=en", version), tok, nil)
@@ -194,6 +195,7 @@ func (f *fixture) userID(name string) int64 {
 // OpenSubtitles being down, out of quota or unconfigured never breaks
 // anything else, and each says what to do.
 func TestSubtitleProviderFailures(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	fake, _ := f.withSubSearch("viewer", "secret")
 	path := fmt.Sprintf("/api/v1/versions/%d/subtitles/", f.v1080)
@@ -234,6 +236,7 @@ func TestSubtitleProviderFailures(t *testing.T) {
 }
 
 func TestSubtitleOffsetShiftsServedCues(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	vtt := filepath.Join(f.root, "Film 2001 1080p", "film.1080p.fr.vtt")
 	if err := os.WriteFile(vtt, []byte("WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\nBonjour\n"), 0o644); err != nil {

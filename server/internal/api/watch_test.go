@@ -39,6 +39,7 @@ func (f *fixture) play(tok string, item int64, pos int64) {
 }
 
 func TestItemHistoryEndpoint(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.play(f.adminTok, f.movieID, 5_700_000) // finished
 	f.play(f.friendTok, f.episodeID, 600_000)
@@ -79,6 +80,7 @@ func TestItemHistoryEndpoint(t *testing.T) {
 }
 
 func TestWatchExportEndpoint(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	now := time.Now().UnixMilli()
 	var moviesLib int64

@@ -6,6 +6,7 @@ import (
 )
 
 func TestSpeedTest(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	if r := f.do("GET", "/api/v1/speedtest", "", nil); r.code != 401 {
 		t.Fatalf("speed test without a token: %d", r.code)

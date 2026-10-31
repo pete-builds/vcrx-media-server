@@ -13,6 +13,7 @@ func clipsOf(durS float64, eps ...[]float64) []Clip {
 // A recap shares a scene with one episode only; the theme is in all of them.
 // The theme wins, after a cold open of a different length in each episode.
 func TestDetectPrefersThemeOverRecap(t *testing.T) {
+	t.Parallel()
 	th := theme(1, 30)
 	ep1Scene := programme(100, 20)
 	clips := clipsOf(400,
@@ -37,6 +38,7 @@ func TestDetectPrefersThemeOverRecap(t *testing.T) {
 // One partner agreeing is not enough when there are several to ask: a scene
 // shared by two episodes of four is not an intro.
 func TestDetectNeedsAgreement(t *testing.T) {
+	t.Parallel()
 	scene := programme(100, 30)
 	clips := clipsOf(400,
 		cat(programme(1, 10), scene, programme(2, 60)),
@@ -56,6 +58,7 @@ func TestDetectNeedsAgreement(t *testing.T) {
 // The intro must be in the first half and credits in the second, and neither
 // may be too short or too long.
 func TestPlausible(t *testing.T) {
+	t.Parallel()
 	c := Clip{DurationMs: 1_200_000}
 	cases := []struct {
 		start, end int64
