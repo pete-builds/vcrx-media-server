@@ -57,6 +57,23 @@ h3 { font-size: 18px; }
   padding: 7px 14px;
 }
 .search input:focus { border-color: var(--orange); outline: none; }
+.search { position: relative; }
+/* Search as you type */
+.suggest {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 380px; max-width: calc(100vw - 2 * var(--pad));
+  max-height: min(70vh, 560px); overflow-y: auto; margin: 0; padding: 6px; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0,0,0,.6);
+}
+.suggest-item { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-radius: 4px; cursor: pointer; }
+.suggest-item:hover, .suggest-item.active { background: var(--surface-2); }
+.suggest-item.active { box-shadow: inset 2px 0 0 var(--orange); }
+.suggest-art { flex: 0 0 40px; width: 40px; height: 60px; border-radius: 3px; overflow: hidden; background: linear-gradient(160deg, #1a1a1f, #0d0d10); }
+.suggest-art.wide { flex-basis: 64px; width: 64px; height: 36px; }
+.suggest-art img { width: 100%; height: 100%; object-fit: cover; }
+.suggest-text { min-width: 0; }
+.suggest-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.suggest-meta { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.suggest-empty { padding: 10px 8px; color: var(--muted); }
 
 main { padding: 24px var(--pad) 64px; outline: none; }
 .loading, .empty { color: var(--muted); padding: 48px 0; text-align: center; }
@@ -111,6 +128,18 @@ main { padding: 24px var(--pad) 64px; outline: none; }
 }
 .badge.watched { background: rgba(0,0,0,.7); color: var(--orange); }
 .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(0,0,0,.6); }
+/* Continue Watching: the Remove button sits over the card's art, outside its link. */
+.cw-card { position: relative; min-width: 0; }
+.cw-remove {
+  position: absolute; top: 6px; right: 6px; display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px 3px 6px;
+  border: 1px solid rgba(255,255,255,.18); border-radius: 12px; background: rgba(0,0,0,.75); color: var(--text);
+  font-size: 12px; font-weight: 500; cursor: pointer; opacity: 0; transition: opacity .15s;
+}
+.cw-remove svg { width: 14px; height: 14px; fill: currentColor; }
+.cw-card:hover .cw-remove, .cw-remove:focus-visible { opacity: 1; }
+.cw-remove:hover { border-color: var(--orange); color: var(--orange); }
+.cw-remove[disabled] { opacity: .5; cursor: default; }
+@media (hover: none) { .cw-remove { opacity: 1; } }
 .progress > i { display: block; height: 100%; background: var(--orange); }
 
 /* Library toolbar */
@@ -233,6 +262,7 @@ table.list td.num, table.list th.num { text-align: right; font-variant-numeric: 
   .nav-link { white-space: nowrap; padding: 6px 10px; }
   .search { order: 4; width: 100%; margin-left: 0; }
   .search input { width: 100%; }
+  .suggest { left: 0; right: 0; width: auto; max-width: none; }
   .session { grid-template-columns: 72px minmax(0, 1fr); }
   .s-foot { flex-wrap: wrap; }
   .tabs { overflow-x: auto; }
@@ -279,3 +309,16 @@ a.link:hover { text-decoration: underline; }
 .fix-form input.fix-year { flex: 0 0 90px; min-width: 0; }
 .fix-choice { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
 .fix-choice p { margin: 4px 0 0; font-size: 14px; }
+
+/* Keyboard shortcuts list (press ?) */
+.shortcuts-backdrop { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,.7); }
+.shortcuts { width: min(520px, 100%); max-height: 90vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 24px; }
+.shortcuts h2 { margin-bottom: 6px; }
+.shortcuts h3 { margin: 16px 0 8px; font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.shortcuts dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; font-size: 14px; align-items: baseline; }
+.shortcuts dd { margin: 0; }
+kbd {
+  display: inline-block; min-width: 24px; padding: 1px 7px; text-align: center; font: 12px/1.6 Inter, system-ui, sans-serif;
+  background: var(--surface-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px;
+}
+.shortcuts-foot { display: flex; justify-content: flex-end; margin-top: 20px; }

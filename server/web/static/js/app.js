@@ -13,6 +13,8 @@ import { playerView } from "./views/player.js";
 import { activityView } from "./views/activity.js";
 import { settingsView } from "./views/settings.js";
 import { loginView } from "./views/login.js";
+import { searchSuggest } from "./suggest.js";
+import { installShortcuts } from "./shortcuts.js";
 
 export const state = { me: null, server: null, libraries: [] };
 
@@ -121,6 +123,8 @@ async function boot() {
     const q = new FormData(e.target).get("q").toString().trim();
     if (q) go("/search?q=" + encodeURIComponent(q));
   });
+  searchSuggest(document.getElementById("search"));
+  installShortcuts();
   try {
     state.server = await api("/server");
   } catch {

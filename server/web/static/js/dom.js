@@ -43,6 +43,7 @@ export function icon(name) {
     check: "M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z",
     back: "M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z",
     stop: "M6 6h12v12H6z",
+    close: "M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z",
   };
   return s("svg", { viewBox: "0 0 24 24", "aria-hidden": "true" }, s("path", { d: paths[name] }));
 }

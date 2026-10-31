@@ -1073,6 +1073,77 @@ func TestCollectionsAndFilters(t *testing.T) {
 	}
 }
 
+// Remove from Continue Watching: the resume position goes, the item stays
+// unplayed, and only the caller's own watch state changes.
+func TestClearProgressLeavesContinueWatching(t *testing.T) {
+	f := newFixture(t)
+	now := time.Now().UnixMilli()
+	for _, u := range []string{"pete", "friend"} {
+		if _, err := f.db.Exec(`INSERT INTO watch_state (user_id, item_id, position_ms, duration_ms, played, play_count, last_played_at, updated_at)
+			VALUES ((SELECT id FROM users WHERE username = ?), ?, 1_200_000, 6_000_000, 0, 0, ?, ?)`, u, f.movieID, now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	continuing := func(tok string) bool {
+		t.Helper()
+		var home struct{ Rows []catalog.HomeRow }
+		f.do("GET", "/api/v1/home", tok, nil).json(t, &home)
+		for _, row := range home.Rows {
+			if row.ID != "continue_watching" {
+				continue
+			}
+			for _, it := range row.Items {
+				if it.ID == f.movieID {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !continuing(f.adminTok) || !continuing(f.friendTok) {
+		t.Fatal("setup: the movie should be in both users' Continue Watching")
+	}
+	url := fmt.Sprintf("/api/v1/items/%d/progress", f.movieID)
+
+	// A user who cannot see the item gets 404, and nobody's state moves.
+	if r := f.do("DELETE", url, f.strangerTok, nil); r.code != 404 {
+		t.Fatalf("stranger cleared an item it cannot see: %d %s", r.code, r.body)
+	}
+	if r := f.do("DELETE", "/api/v1/items/999999/progress", f.adminTok, nil); r.code != 404 {
+		t.Fatalf("missing item: %d %s", r.code, r.body)
+	}
+	if !continuing(f.adminTok) || !continuing(f.friendTok) {
+		t.Fatal("a refused clear changed someone's Continue Watching")
+	}
+
+	// The friend clears their own: it leaves their row, not the admin's.
+	if r := f.do("DELETE", url, f.friendTok, nil); r.code != 204 {
+		t.Fatalf("clear: %d %s", r.code, r.body)
+	}
+	if continuing(f.friendTok) {
+		t.Fatal("the movie is still in the friend's Continue Watching")
+	}
+	if !continuing(f.adminTok) {
+		t.Fatal("clearing the friend's progress removed it from the admin's Continue Watching")
+	}
+	var d catalog.ItemDetail
+	f.do("GET", fmt.Sprintf("/api/v1/items/%d", f.movieID), f.friendTok, nil).json(t, &d)
+	if d.Watch.Played || d.Watch.PositionMs != 0 || d.Watch.PlayCount != 0 {
+		t.Fatalf("after clearing, friend watch state: %+v", d.Watch)
+	}
+	f.do("GET", fmt.Sprintf("/api/v1/items/%d", f.movieID), f.adminTok, nil).json(t, &d)
+	if d.Watch.PositionMs != 1_200_000 {
+		t.Fatalf("admin position changed to %d", d.Watch.PositionMs)
+	}
+	// Clearing again, or an item never started, is still fine.
+	if r := f.do("DELETE", url, f.friendTok, nil); r.code != 204 {
+		t.Fatalf("second clear: %d", r.code)
+	}
+	if r := f.do("DELETE", fmt.Sprintf("/api/v1/items/%d/progress", f.episodeID), f.friendTok, nil); r.code != 204 {
+		t.Fatalf("clear an unstarted episode: %d", r.code)
+	}
+}
+
 func TestContinueWatchingOffersTheNextEpisode(t *testing.T) {
 	f := newFixture(t)
 	now := time.Now().UnixMilli()
@@ -1136,5 +1207,95 @@ func TestContinueWatchingOffersTheNextEpisode(t *testing.T) {
 	}
 	if got := cont(); len(got) != 0 {
 		t.Fatalf("after 90 days: %v", got)
+	}
+}
+
+// Remove on a next-episode card keeps it away, including a removed episode
+// that was in progress, until another episode of the show is finished.
+func TestRemoveNextEpisodeStaysRemoved(t *testing.T) {
+	f := newFixture(t)
+	now := time.Now().UnixMilli()
+	var tv int64
+	if err := f.db.QueryRow(`SELECT library_id FROM items WHERE id = ?`, f.showID).Scan(&tv); err != nil {
+		t.Fatal(err)
+	}
+	var eps []int64
+	for n := 2; n <= 3; n++ {
+		res, err := f.db.Exec(`INSERT INTO items (library_id, kind, parent_id, group_key, title, sort_title, season_number, episode_number, added_at, updated_at)
+			VALUES (?, 'episode', ?, ?, ?, ?, 1, ?, ?, ?)`, tv, f.seasonID, fmt.Sprint(n), fmt.Sprint("Ep ", n), fmt.Sprint("Ep ", n), n, now, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := res.LastInsertId()
+		if _, err := f.db.Exec(`INSERT INTO media_versions (item_id, library_id, path, rel_path, size, mtime, container, probe_status, added_at, updated_at)
+			VALUES (?, ?, ?, ?, 1, 0, 'mkv', 'ok', ?, ?)`, id, tv, fmt.Sprintf("/x/e%d.mkv", n), fmt.Sprintf("e%d.mkv", n), now, now); err != nil {
+			t.Fatal(err)
+		}
+		eps = append(eps, id)
+	}
+	e2, e3 := eps[0], eps[1]
+	cont := func() []int64 {
+		t.Helper()
+		var home struct {
+			Rows []struct {
+				ID    string
+				Items []struct{ ID int64 }
+			}
+		}
+		f.do("GET", "/api/v1/home", f.adminTok, nil).json(t, &home)
+		var ids []int64
+		for _, r := range home.Rows {
+			if r.ID == "continue_watching" {
+				for _, i := range r.Items {
+					ids = append(ids, i.ID)
+				}
+			}
+		}
+		return ids
+	}
+	remove := func(id int64) {
+		t.Helper()
+		if r := f.do("DELETE", fmt.Sprintf("/api/v1/items/%d/progress", id), f.adminTok, nil); r.code != 204 {
+			t.Fatalf("remove %d: %d %s", id, r.code, r.body)
+		}
+	}
+	finish := func(id, at int64) {
+		t.Helper()
+		if r := f.do("PUT", fmt.Sprintf("/api/v1/items/%d/watched", id), f.adminTok, map[string]any{"played": true}); r.code != 204 {
+			t.Fatalf("mark %d watched: %d", id, r.code)
+		}
+		// Server clocks tie at millisecond resolution; place the finish clearly
+		// before or after the removal.
+		if _, err := f.db.Exec(`UPDATE watch_state SET last_played_at = ? WHERE item_id = ?`, at, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	finish(f.episodeID, now-60_000)
+	if got := cont(); len(got) != 1 || got[0] != e2 {
+		t.Fatalf("after S01E01: %v, want [%d]", got, e2)
+	}
+	remove(e2)
+	if got := cont(); len(got) != 0 {
+		t.Fatalf("the removed next-episode card came back: %v", got)
+	}
+
+	// Started, then removed: it must not return as the show's next episode.
+	if _, err := f.db.Exec(`INSERT INTO watch_state (user_id, item_id, position_ms, played, play_count, last_played_at, updated_at)
+		SELECT id, ?, 60000, 0, 0, ?, ? FROM users WHERE username = 'pete'`, e2, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := cont(); len(got) != 1 || got[0] != e2 {
+		t.Fatalf("with S01E02 in progress: %v", got)
+	}
+	remove(e2)
+	if got := cont(); len(got) != 0 {
+		t.Fatalf("a removed in-progress episode came back as next up: %v", got)
+	}
+
+	// Finishing another episode afterwards offers the one after it again.
+	finish(e2, now+60_000)
+	if got := cont(); len(got) != 1 || got[0] != e3 {
+		t.Fatalf("after finishing S01E02: %v, want [%d]", got, e3)
 	}
 }
