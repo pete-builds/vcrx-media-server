@@ -418,6 +418,7 @@ func (s *Server) startPlayback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, refusal.Status, refusal.Code, refusal.Message)
 		return
 	}
+	s.decorateSession(r, out)
 	s.Log.Info("playback start", "user", sess.User.Username, "item", req.ItemID, "version", out.Version.ID, "decision", out.Decision,
 		"reason", out.Reason, "session", out.SessionID, "device", sess.Device.Name)
 	writeJSON(w, http.StatusCreated, out)

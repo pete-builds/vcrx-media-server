@@ -113,6 +113,8 @@ function userRow(u, libraries, redraw) {
       .map(([v, label]) => h("option", { value: v, selected: (p.max_resolution || "") === v }, label)));
   const conv = h("label", { class: "check" }, h("input", { type: "checkbox", checked: p.allow_transcode }), "May use converted streams");
   const conv4k = h("label", { class: "check" }, h("input", { type: "checkbox", checked: p.allow_4k_transcode }), "Including 4K");
+  const subDl = h("label", { class: "check", title: "Spends the server's daily OpenSubtitles quota" },
+    h("input", { type: "checkbox", checked: p.allow_subtitle_download }), "May download subtitles");
   const save = h("button", { class: "btn btn-small btn-primary", type: "button" }, "Save");
   save.addEventListener("click", async () => {
     save.disabled = true;
@@ -123,6 +125,7 @@ function userRow(u, libraries, redraw) {
         max_resolution: res.value || null, max_content_rating: p.max_content_rating || null,
         allow_labels: p.allow_labels || [], deny_labels: p.deny_labels || [],
         allow_transcode: conv.querySelector("input").checked, allow_4k_transcode: conv4k.querySelector("input").checked,
+        allow_subtitle_download: subDl.querySelector("input").checked,
       } });
       toast(`Saved ${u.username}`);
       redraw();
@@ -134,7 +137,7 @@ function userRow(u, libraries, redraw) {
   return h("div", { class: "panel user" }, head,
     h("div", { class: "user-grid" },
       h("div", {}, h("div", { class: "k" }, "Libraries"), h("div", { class: "checks" }, boxes)),
-      h("div", {}, h("div", { class: "k" }, "Limits"), h("div", { class: "checks" }, res, conv, conv4k))),
+      h("div", {}, h("div", { class: "k" }, "Limits"), h("div", { class: "checks" }, res, conv, conv4k, subDl))),
     h("div", { class: "actions" }, save));
 }
 

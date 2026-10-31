@@ -202,7 +202,7 @@ Pete shares Plex with friends and uses hidden labels and content-rating ceilings
 ## 11. Ecosystem integration
 
 - **Radarr and Sonarr:** accept their "on import" webhook and run a targeted scan of that path. Map NAS paths to container paths in config. Polling remains the fallback.
-- **Bazarr:** keep it external. It works through Sonarr and Radarr, not the media server. VCRX reads whatever sidecar subtitle files sit beside the media.
+- **Bazarr:** keep it external. It works through Sonarr and Radarr, not the media server. VCRX reads whatever sidecar subtitle files sit beside the media. On 2026-10-31 Pete asked for subtitle search inside VCRX as well ("super important"): an opt-in OpenSubtitles search and download stores files in VCRX's own data dir, since the media mounts are read-only, so it complements Bazarr rather than replacing it.
 - **media-reclaim.py:** today it reads watch state from Plex. Expose per-user watch state and last-played through the API so it can move to VCRX later.
 - **Requests:** Seerr supports Plex, Jellyfin or Emby, one at a time, and nothing else. Overseerr stays on Plex for now; requests are not in scope.
 - **Maintainerr:** not needed; media-reclaim covers it.

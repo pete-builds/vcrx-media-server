@@ -423,6 +423,73 @@ async function main() {
     (await evaluate(`return document.createElement("video").canPlayType("application/vnd.apple.mpegurl") !== ""`));
   if (nativeHLS) await hlsPlayer(s, evaluate, ids);
   else await hlsMSE(evaluate, ids);
+
+  // Subtitles: "Search for subtitles…" (the dev server's offline stub, never
+  // OpenSubtitles), download and switch in one click, then the timing control,
+  // which must change the cues the server serves, and Delete on the item page.
+  if (ids.direct) {
+    console.log(`subtitles: search, download, timing (#/play/${ids.direct})`);
+    exceptions = [];
+    await s("Page.navigate", { url: `${base}/#/play/${ids.direct}?start=0` });
+    const res = await evaluate(`
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const wait = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = await fn(); if (v) return v; await sleep(150); } return null; };
+      const sel = await wait(() => document.querySelector('.player select[aria-label="Subtitles"]'));
+      if (!sel) return { why: "no subtitle menu" };
+      if (![...sel.options].some((o) => o.value === "search")) return { why: "no Search for subtitles entry in the menu" };
+      sel.value = "search";
+      sel.dispatchEvent(new Event("change"));
+      const btn = await wait(() => document.querySelector(".sub-search:not([hidden]) .sub-result button:not([disabled])"));
+      if (!btn) return { why: "no search results: " + ((document.querySelector(".sub-search") || {}).innerText || "no panel") };
+      const row = btn.closest(".sub-result").innerText;
+      if (!/Matches this file/.test(row)) return { why: "first result has no hash-match badge: " + row };
+      btn.click();
+      const picked = await wait(() => sel.selectedOptions[0] && /downloaded/.test(sel.selectedOptions[0].textContent));
+      if (!picked) return { why: "the downloaded subtitle was not selected" };
+      const v = document.querySelector("video");
+      const firstCue = () => { const t = [...v.textTracks].find((t) => t.mode === "showing"); return t && t.cues && t.cues.length ? t.cues[0] : null; };
+      const c0 = await wait(firstCue);
+      if (!c0 || !/Downloaded subtitle/.test(c0.text)) return { why: "downloaded cues not shown: " + (c0 && c0.text) };
+      const start0 = c0.startTime;
+      const item = await (await fetch("/api/v1/items/${ids.direct}")).json();
+      const track = item.versions.flatMap((x) => x.subtitle_tracks).find((t) => t.is_downloaded);
+      if (!track) return { why: "the item lists no downloaded track" };
+      const served = async () => (await (await fetch("/api/v1/subtitles/" + track.id + "?format=vtt")).text()).match(/^\\S+ --> \\S+/m)[0];
+      const before = await served();
+      const plus = document.querySelector(".sub-timing-plus");
+      if (!plus || plus.closest("[hidden]")) return { why: "no subtitle timing control" };
+      plus.click();
+      plus.click();
+      const shown = await wait(() => { const c = firstCue(); return c && Math.abs(c.startTime - start0 - 0.5) < 0.01; });
+      const after = await served();
+      document.querySelector(".sub-timing-reset").click();
+      await wait(async () => (await served()) === before);
+      const reset = await served();
+      return { ok: true, before, after, reset, shown: !!shown, label: document.querySelector(".sub-timing-value").textContent };`);
+    if (!res.ok) fail("subtitles", res.why);
+    else {
+      console.log(`  served ${res.before}, then ${res.after} at +500 ms, then ${res.reset} after Reset`);
+      // ffmpeg writes mm:ss.ttt and the shifted copy hh:mm:ss.ttt, so compare times.
+      const ms = (line) => line.split(" --> ").map((t) => t.split(":").reduce((acc, p) => acc * 60 + Number(p), 0) * 1000);
+      const [b0, b1] = ms(res.before), [a0, a1] = ms(res.after);
+      if (b0 !== 2000 || b1 !== 5000) fail("subtitles", `unexpected first cue ${res.before}`);
+      if (Math.round(a0 - b0) !== 500 || Math.round(a1 - b1) !== 500) fail("subtitles", `timing +500 ms served ${res.after}`);
+      if (!res.shown) fail("subtitles", "the player did not show the shifted cue");
+      if (res.reset !== res.before || res.label !== "0 ms") fail("subtitles", `Reset left ${res.reset} (${res.label})`);
+    }
+    if (exceptions.length) fail("subtitles", `threw: ${exceptions[0]}`);
+
+    console.log(`subtitles: delete on the item page (#/item/${ids.direct})`);
+    await s("Page.navigate", { url: `${base}/#/item/${ids.direct}` });
+    const del = await evaluate(`
+      const wait = async (fn, n = 60) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await new Promise((r) => setTimeout(r, 150)); } return null; };
+      const btn = await wait(() => document.querySelector(".sub-admin:not([hidden]) .sub-admin-row button"));
+      if (!btn) return { why: "no downloaded subtitle listed for the admin" };
+      btn.click();
+      const gone = await wait(() => document.querySelector(".sub-admin:not([hidden])") && !document.querySelector(".sub-admin-row"));
+      return gone ? { ok: true } : { why: "the subtitle was still listed after Delete" };`);
+    if (!del.ok) fail("subtitles delete", del.why);
+  }
   await s("Page.navigate", { url: `${base}/#/` });
   await sleep(500);
 
