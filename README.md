@@ -48,6 +48,8 @@ curl -s http://<server-ip>:3750/readyz     # {"status":"ok", "checks": {...}}
 docker compose exec vcrx vcrx library list # item counts and the last scan
 ```
 
+Update later with `deploy/deploy.sh`, run on the server from this clone. It refuses a checkout with local changes or commits origin does not have, refuses while someone is watching (checked as an admin whose password you keep in `deploy/.flexbot-password`; `--force` overrides), fast-forwards to `origin/main`, builds with the commit as the version, waits for the server and runs `scripts/smoke-api.sh`.
+
 ### More users
 
 ```bash
