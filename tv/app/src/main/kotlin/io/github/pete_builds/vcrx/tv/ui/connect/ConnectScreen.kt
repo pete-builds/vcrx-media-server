@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.res.stringResource
@@ -50,12 +51,20 @@ class ConnectViewModel(private val graph: AppGraph) : ViewModel() {
     var error by mutableStateOf<String?>(null)
         private set
 
-    /** Checks the address is a VCRX server before saving it. [onDone] says whether sign in is needed. */
-    fun connect(onDone: (needsLogin: Boolean) -> Unit) {
+    /**
+     * Checks the address is a VCRX server before saving it. [onDone] says whether
+     * sign in is needed; [onEmpty] runs when nothing was typed, to open the keyboard.
+     */
+    fun connect(onEmpty: () -> Unit = {}, onDone: (needsLogin: Boolean) -> Unit) {
         if (busy) return
+        if (address.isBlank()) {
+            error = "Type your server's address first, for example 192.168.1.20:3750, then press Connect."
+            onEmpty()
+            return
+        }
         val base = ServerAddress.normalize(address)
         if (base == null) {
-            error = "Enter the server's LAN address, for example 192.168.1.20:3750."
+            error = "That is not an address. Type the server's LAN address, for example 192.168.1.20:3750."
             return
         }
         busy = true
@@ -93,7 +102,14 @@ fun ConnectScreen() {
     val actions = LocalAppActions.current
     val vm = graphViewModel { ConnectViewModel(it) }
     val fieldFocus = remember { FocusRequester() }
-    val submit = { vm.connect { needsLogin -> if (needsLogin) actions.toLogin() else actions.toBrowse() } }
+    val keyboard = LocalSoftwareKeyboardController.current
+    // Nothing typed: back to the field with the keyboard up, not just an error.
+    val typeFirst = {
+        runCatching { fieldFocus.requestFocus() }
+        keyboard?.show()
+        Unit
+    }
+    val submit = { vm.connect(onEmpty = typeFirst) { needsLogin -> if (needsLogin) actions.toLogin() else actions.toBrowse() } }
 
     Box(Modifier.fillMaxSize().padding(48.dp), contentAlignment = Alignment.Center) {
         Column(Modifier.width(560.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -109,14 +125,15 @@ fun ConnectScreen() {
                 value = vm.address,
                 onValueChange = { vm.address = it },
                 label = "Server address",
-                placeholder = "192.168.1.20:3750",
+                // Not an address: an example in the box read as one already typed.
+                placeholder = "Type your server's address",
                 keyboardType = KeyboardType.Uri,
                 imeAction = ImeAction.Go,
                 onImeAction = submit,
                 modifier = Modifier.focusRequester(fieldFocus),
             )
             Text(
-                "LAN IP or hostname, with the port if it is not 3750. Plain HTTP on your own network; " +
+                "For example 192.168.1.20:3750: a LAN IP or hostname, with the port if it is not 3750. Plain HTTP on your own network; " +
                     "HTTPS arrives later through a reverse proxy.",
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -128,7 +145,7 @@ fun ConnectScreen() {
                 BrandButton(
                     "Pair with a phone",
                     onClick = {
-                        vm.connect { needsLogin ->
+                        vm.connect(onEmpty = typeFirst) { needsLogin ->
                             if (needsLogin) {
                                 actions.toLogin()
                                 actions.openPair()
