@@ -20,6 +20,7 @@ import { musicLibraryView, musicArtistView, musicAlbumView } from "./views/music
 import { installMusicPlayer } from "./music/player.js";
 import { pickerView, drawProfileButton } from "./views/profiles.js";
 import { pairView, inviteView } from "./views/devices.js";
+import { peerItemView } from "./views/peer.js";
 
 export const state = { me: null, server: null, libraries: [] };
 
@@ -32,8 +33,10 @@ const routes = [
   [/^\/item\/(\d+)$/, () => itemView],
   [/^\/search$/, () => searchView],
   [/^\/play\/(\d+)$/, () => playerView],
+  [/^\/peer\/(\d+)\/item\/(\d+)$/, () => peerItemView],
+  [/^\/peer\/(\d+)\/play\/(\d+)$/, () => playerView],
   [/^\/activity(?:\/(now|history|stats|users))?$/, () => activityView],
-  [/^\/settings(?:\/(account|home|libraries|users|devices|newsletter|markers))?$/, () => settingsView],
+  [/^\/settings(?:\/(account|home|libraries|users|devices|friends|newsletter|markers))?$/, () => settingsView],
   [/^\/login$/, () => loginView],
   [/^\/music\/(\d+)$/, () => musicLibraryView],
   [/^\/music\/artist\/(\d+)$/, () => musicArtistView],
@@ -77,12 +80,13 @@ async function render() {
     match = path.match(re);
     if (match) { viewFn = fn(); break; }
   }
-  document.getElementById("topbar").hidden = !state.me || path.startsWith("/play/") || path === "/profiles" || isInvite(path);
+  const playing = /^\/(peer\/\d+\/)?play\//.test(path);
+  document.getElementById("topbar").hidden = !state.me || playing || path === "/profiles" || isInvite(path);
   markNav(path);
   setMenu(false);
   // While a page with a hero loads, its skeleton already sits under the
   // translucent top bar, so the bar does not flash solid and back.
-  setHero(path === "/" || path.startsWith("/item/"));
+  setHero(path === "/" || path.startsWith("/item/") || /^\/peer\/\d+\/item\//.test(path));
   view.replaceChildren(skeleton(path));
   if (!viewFn) {
     setHero(false);
