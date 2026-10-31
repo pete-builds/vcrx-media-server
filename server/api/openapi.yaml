@@ -755,7 +755,7 @@ components:
             studios: { type: array, items: { type: string } }
             ratings: { type: object, additionalProperties: { type: number }, description: "Keyed by source: imdb, tmdb, nfo." }
             versions: { type: array, items: { $ref: "#/components/schemas/Version" }, description: Only versions the caller may play, best first. }
-            next_episode: { oneOf: [{ $ref: "#/components/schemas/ItemSummary" }, { type: "null" }], description: "For a show or season: the episode Play should start (first unwatched, or in progress)." }
+            next_episode: { oneOf: [{ $ref: "#/components/schemas/ItemSummary" }, { type: "null" }], description: "For a show or season: the episode Play should start (first unwatched, or in progress). For an episode: the one after it, for Up Next (the rest of the season, then the next; specials only after a special); null at the end of the show." }
     ItemPage:
       type: object
       required: [items, total]

@@ -440,12 +440,52 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 		if d.Versions, err = c.Versions(ctx, pol, id); err != nil {
 			return d, err
 		}
+		if d.Kind == "episode" {
+			if d.NextEpisode, err = c.FollowingEpisode(ctx, pol, userID, id); err != nil {
+				return d, err
+			}
+		}
 	} else {
 		if d.NextEpisode, err = c.NextEpisode(ctx, pol, userID, id, d.Kind); err != nil {
 			return d, err
 		}
 	}
 	return d, nil
+}
+
+// FollowingEpisode is the episode after this one in the show, for Up Next:
+// the rest of the season, then the next season. Specials (season 0) follow
+// only a special. Nil at the end of the show.
+func (c *Catalog) FollowingEpisode(ctx context.Context, pol policy.Policy, userID, episodeID int64) (*ItemSummary, error) {
+	var show int64
+	var season, ep sql.NullInt64
+	err := c.DB.QueryRowContext(ctx, `SELECT s.parent_id, s.season_number, e.episode_number FROM items e
+		JOIN items s ON s.id = e.parent_id WHERE e.id = ? AND e.kind = 'episode'`, episodeID).Scan(&show, &season, &ep)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	cond, args := pol.ItemCond("e")
+	sameSeasonOnly := " AND s.season_number > 0"
+	if season.Int64 == 0 {
+		sameSeasonOnly = " AND s.season_number = 0"
+	}
+	ids, err := c.queryIDs(ctx, `SELECT e.id FROM items e JOIN items s ON s.id = e.parent_id
+		WHERE e.kind = 'episode' AND s.parent_id = ?`+sameSeasonOnly+`
+		  AND (s.season_number > ? OR (s.season_number = ? AND COALESCE(e.episode_number, 0) > ?))
+		  AND `+cond+`
+		ORDER BY s.season_number, e.episode_number, e.id LIMIT 1`,
+		append([]any{show, season.Int64, season.Int64, ep.Int64}, args...)...)
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	sums, err := c.Summaries(ctx, pol, userID, ids)
+	if err != nil || len(sums) == 0 {
+		return nil, err
+	}
+	return &sums[0], nil
 }
 
 // Children lists a show's seasons or a season's episodes in order.

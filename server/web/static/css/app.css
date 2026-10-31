@@ -246,3 +246,4 @@ table.list td.num, table.list th.num { text-align: right; font-variant-numeric: 
 .pc-time { font-variant-numeric: tabular-nums; font-size: 14px; color: var(--muted); white-space: nowrap; }
 .pc-bar { flex: 1; accent-color: var(--orange); }
 .player .top .pill { color: var(--orange); border-color: var(--orange); }
+.player .up-next { border-left-color: var(--orange); }
