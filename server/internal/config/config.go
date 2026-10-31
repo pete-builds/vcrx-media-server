@@ -46,6 +46,9 @@ type Config struct {
 	FFmpegPath       string `yaml:"ffmpeg"`
 	ProbeConcurrency int    `yaml:"probe_concurrency"`
 	ScanOnStartup    bool   `yaml:"scan_on_startup"`
+	// MaxTranscodes caps video transcodes running at once; each takes one or
+	// more CPU cores. 0 turns video transcoding off.
+	MaxTranscodes int `yaml:"max_transcodes"`
 
 	LogLevel  string `yaml:"log_level"`
 	LogFormat string `yaml:"log_format"`
@@ -109,6 +112,7 @@ func defaults() Config {
 		FFprobePath:      "ffprobe",
 		FFmpegPath:       "ffmpeg",
 		ProbeConcurrency: 4,
+		MaxTranscodes:    2,
 		ScanOnStartup:    true,
 		LogLevel:         "info",
 		LogFormat:        "json",
@@ -177,6 +181,7 @@ func Load() (Config, error) {
 	str("VCRX_FFPROBE", &c.FFprobePath)
 	str("VCRX_FFMPEG", &c.FFmpegPath)
 	integer("VCRX_PROBE_CONCURRENCY", &c.ProbeConcurrency)
+	integer("VCRX_MAX_TRANSCODES", &c.MaxTranscodes)
 	boolean("VCRX_SCAN_ON_STARTUP", &c.ScanOnStartup)
 	str("VCRX_LOG_LEVEL", &c.LogLevel)
 	str("VCRX_LOG_FORMAT", &c.LogFormat)
@@ -248,6 +253,9 @@ func (c *Config) validate() error {
 	if c.ProbeConcurrency < 1 {
 		c.ProbeConcurrency = 1
 	}
+	if c.MaxTranscodes < 0 {
+		errs = append(errs, fmt.Errorf("max_transcodes %d must be 0 (off) or more", c.MaxTranscodes))
+	}
 	if c.SessionTTL < time.Hour {
 		errs = append(errs, errors.New("session TTL must be at least one day"))
 	}
@@ -286,6 +294,11 @@ func (c Config) ArtworkCacheDir() string { return filepath.Join(c.CacheDir, "art
 
 // SubtitleCacheDir holds WebVTT copies of text subtitles for browsers.
 func (c Config) SubtitleCacheDir() string { return filepath.Join(c.CacheDir, "subtitles") }
+
+// HLSDir holds the segments of HLS streams while they play. Each session's
+// files are deleted when it ends, and the whole directory's leftovers at
+// startup.
+func (c Config) HLSDir() string { return filepath.Join(c.CacheDir, "hls") }
 
 // MetadataDir holds images downloaded from TMDb. It sits under the config dir,
 // not the cache, because downloading them again for a whole library is slow.

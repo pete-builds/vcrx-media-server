@@ -128,6 +128,9 @@ func (s *Server) terminateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cut := s.streams.cancel(id)
+	if s.HLS != nil && s.HLS.Stop(id) {
+		cut++
+	}
 	s.Log.Info("playback terminated", "session", id, "by", by, "open_streams", cut)
 	if s.Webhooks != nil {
 		s.Webhooks.Send(notify.Notice{Event: notify.Terminated, SessionID: id, Username: deref(sess.Username),

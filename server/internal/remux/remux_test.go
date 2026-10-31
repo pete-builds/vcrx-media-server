@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func tools(t *testing.T) (string, string) {
@@ -97,5 +98,177 @@ func TestArgs(t *testing.T) {
 	}
 	if a := strings.Join(New("ffmpeg", "ffprobe", 1, nil).args(Options{Path: "f", AudioIndex: -1}), " "); strings.Contains(a, "-ss") || strings.Contains(a, "-c:a") {
 		t.Errorf("a stream from the start with no audio: %s", a)
+	}
+}
+
+func TestFitNeverScalesUp(t *testing.T) {
+	for _, c := range []struct{ sw, sh, mw, mh, w, h int }{
+		{3840, 2160, 1920, 1080, 1920, 1080}, // down to fit
+		{1920, 1080, 3840, 2160, 1920, 1080}, // never up
+		{1280, 720, 0, 0, 1280, 720},         // no limit
+		{1920, 800, 1280, 720, 1280, 532},    // wide: width binds, shape kept, even
+		{1440, 1080, 1280, 720, 960, 720},    // 4:3: height binds
+		{721, 481, 0, 0, 720, 480},           // odd source rounded down to even
+		{0, 0, 1280, 720, 0, 0},              // unknown size
+	} {
+		if w, h := Fit(c.sw, c.sh, c.mw, c.mh); w != c.w || h != c.h {
+			t.Errorf("Fit(%d, %d, %d, %d) = %dx%d, want %dx%d", c.sw, c.sh, c.mw, c.mh, w, h, c.w, c.h)
+		}
+	}
+}
+
+func TestTranscodeArgs(t *testing.T) {
+	s := New("ffmpeg", "ffprobe", 1, nil)
+	a := strings.Join(s.args(Options{Path: "/m/f.avi", StartMs: 12700, AudioIndex: 1, HEVC: true,
+		Video: &Video{SrcWidth: 1920, SrcHeight: 1080, MaxWidth: 1280, MaxHeight: 720, FPS: 23.976}}), " ")
+	for _, want := range []string{
+		"-accurate_seek -ss 12.700 -i /m/f.avi", // exactly the position, not a keyframe before it
+		"-vf scale=1280:720,format=yuv420p",
+		"-c:v libx264 -preset veryfast -crf 21 -profile:v high -pix_fmt yuv420p",
+		"-maxrate 5000000 -bufsize 10000000",
+		"-force_key_frames expr:gte(t,n_forced*2) -g 48",
+		"-copypriorss 0 -c:a copy", // copied audio starts at the position too
+	} {
+		if !strings.Contains(a, want) {
+			t.Errorf("args lack %q:\n%s", want, a)
+		}
+	}
+	for _, bad := range []string{"-noaccurate_seek", "-c:v copy", "hvc1", "zscale"} {
+		if strings.Contains(a, bad) {
+			t.Errorf("args have %q:\n%s", bad, a)
+		}
+	}
+	// A source smaller than the limit keeps its size; unknown sizes are left to
+	// ffmpeg, still never larger than the source; the client's bitrate binds.
+	a = strings.Join(s.args(Options{Path: "f", AudioIndex: -1, Video: &Video{SrcWidth: 640, SrcHeight: 360, MaxWidth: 1920, MaxHeight: 1080, MaxBitrate: 2_000_000}}), " ")
+	if !strings.Contains(a, "scale=640:360,") || !strings.Contains(a, "-maxrate 1744000") || strings.Contains(a, "-ss") || strings.Contains(a, "copypriorss") {
+		t.Errorf("small source: %s", a)
+	}
+	a = strings.Join(s.args(Options{Path: "f", AudioIndex: -1, Video: &Video{MaxWidth: 1280, MaxHeight: 720, FPS: 120, MaxFPS: 60}}), " ")
+	if !strings.Contains(a, `scale=min(iw\,1280):min(ih\,720):force_original_aspect_ratio=decrease`) || !strings.Contains(a, "-fpsmax 60") || !strings.Contains(a, "-g 120") {
+		t.Errorf("unknown size, fast source: %s", a)
+	}
+	// HDR to a display without it: tone mapped when the build can, tagged BT.709.
+	s.ToneMap = true
+	a = strings.Join(s.args(Options{Path: "f", AudioIndex: -1, Video: &Video{SrcWidth: 3840, SrcHeight: 2160, HDR: "hdr10", ToneMap: true}}), " ")
+	if !strings.Contains(a, "zscale=tin=smpte2084") || !strings.Contains(a, "tonemap=tonemap=hable") || !strings.Contains(a, "-color_trc bt709") {
+		t.Errorf("tone map: %s", a)
+	}
+	if a = strings.Join(s.args(Options{Path: "f", AudioIndex: -1, Video: &Video{HDR: "hdr10"}}), " "); strings.Contains(a, "tonemap") {
+		t.Errorf("tone mapped for an HDR display: %s", a)
+	}
+}
+
+func TestTranscodeLimitIsSeparate(t *testing.T) {
+	s := New("ffmpeg-not-here", "ffprobe", 4, nil)
+	s.SetMaxTranscodes(1)
+	s.tsem <- struct{}{}
+	if err := s.Stream(context.Background(), &bytes.Buffer{}, Options{Path: "x", Video: &Video{}}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("second transcode: %v, want ErrBusy", err)
+	}
+	// Copied-video streams have their own slots.
+	if err := s.Stream(context.Background(), &bytes.Buffer{}, Options{Path: "x"}); errors.Is(err, ErrBusy) {
+		t.Fatal("a full transcode limit blocked a copied stream")
+	}
+	// A seek's new stream waits for the old one's slot.
+	go func() { time.Sleep(50 * time.Millisecond); <-s.tsem }()
+	if err := s.Stream(context.Background(), &bytes.Buffer{}, Options{Path: "x", Video: &Video{}, Wait: 2 * time.Second}); errors.Is(err, ErrBusy) {
+		t.Fatal("waited for a slot and still got ErrBusy")
+	}
+}
+
+func TestDetect(t *testing.T) {
+	ff, fp := tools(t)
+	f, err := New(ff, fp, 1, nil).Detect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := exec.Command(ff, "-hide_banner", "-encoders").Output()
+	if want := strings.Contains(string(out), " libx264 "); f.X264 != want {
+		t.Fatalf("X264 %v, ffmpeg -encoders says %v", f.X264, want)
+	}
+	got := listed(" V....D libx264              libx264 H.264\n .S tonemap           V->V       Conversion\n ------\n")
+	if !got["libx264"] || !got["tonemap"] || got["H.264"] {
+		t.Fatalf("listed: %v", got)
+	}
+}
+
+// needX264 skips unless ffmpeg can encode H.264.
+func needX264(t *testing.T, s *Service) {
+	t.Helper()
+	f, err := s.Detect(context.Background())
+	if err != nil || !f.X264 {
+		t.Skipf("ffmpeg has no libx264: %v", err)
+	}
+}
+
+func TestTranscodeStartsExactly(t *testing.T) {
+	ff, fp := tools(t)
+	s := New(ff, fp, 2, nil)
+	needX264(t, s)
+	// MPEG-4 Part 2 video, which no browser decodes, with a keyframe only
+	// every 10 s: a stream that started on a keyframe would start 2.7 s early.
+	in := filepath.Join(t.TempDir(), "in.mkv")
+	if msg, err := exec.Command(ff, "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=30",
+		"-f", "lavfi", "-i", "sine=duration=30", "-c:v", "mpeg4", "-g", "240", "-c:a", "aac", "-y", in).CombinedOutput(); err != nil {
+		t.Skipf("cannot build fixture: %v %s", err, msg)
+	}
+	for _, transcodeAudio := range []bool{false, true} {
+		var buf bytes.Buffer
+		err := s.Stream(context.Background(), &buf, Options{Path: in, StartMs: 12700, AudioIndex: 1, TranscodeAudio: transcodeAudio,
+			Video: &Video{SrcWidth: 640, SrcHeight: 360, MaxWidth: 320, MaxHeight: 240, FPS: 24}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := filepath.Join(t.TempDir(), "out.mp4")
+		if err := os.WriteFile(out, buf.Bytes(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := probe(t, fp, out, "stream=codec_name,width,height,duration")
+		lines := strings.Split(got, "\n")
+		if len(lines) != 2 || !strings.HasPrefix(lines[0], "h264,320,180,") || !strings.HasPrefix(lines[1], "aac,") {
+			t.Fatalf("audio converted %v: streams %q", transcodeAudio, got)
+		}
+		// Both run the 17.3 s from 12.7 s to the end: the stream starts where
+		// it was asked to, so the client's offset plus currentTime is right.
+		for _, l := range lines {
+			f := strings.Split(l, ",")
+			d, _ := strconv.ParseFloat(f[len(f)-1], 64)
+			if d < 17.0 || d > 17.6 {
+				t.Errorf("audio converted %v: %s runs %.2f s, want about 17.3", transcodeAudio, f[0], d)
+			}
+		}
+	}
+}
+
+func TestToneMapHDR(t *testing.T) {
+	ff, fp := tools(t)
+	s := New(ff, fp, 2, nil)
+	needX264(t, s)
+	if !s.ToneMap {
+		// CI installs Ubuntu's ffmpeg, built with zscale like the image's
+		// Debian one, so there a missing filter is a failure, not a skip.
+		if os.Getenv("CI") != "" {
+			t.Fatal("ffmpeg in CI has no zscale and tonemap filters")
+		}
+		t.Skip("ffmpeg has no zscale filter: HDR is sent without tone mapping")
+	}
+	in := filepath.Join(t.TempDir(), "hdr.mkv")
+	if msg, err := exec.Command(ff, "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=4",
+		"-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc",
+		"-y", in).CombinedOutput(); err != nil {
+		t.Skipf("cannot build an HDR10 fixture (needs libx265): %v %s", err, msg)
+	}
+	var buf bytes.Buffer
+	if err := s.Stream(context.Background(), &buf, Options{Path: in, AudioIndex: -1,
+		Video: &Video{SrcWidth: 640, SrcHeight: 360, HDR: "hdr10", ToneMap: true}}); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "out.mp4")
+	if err := os.WriteFile(out, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := probe(t, fp, out, "stream=codec_name,pix_fmt,color_transfer,color_primaries"); got != "h264,yuv420p,bt709,bt709" {
+		t.Fatalf("tone mapped stream: %q", got)
 	}
 }

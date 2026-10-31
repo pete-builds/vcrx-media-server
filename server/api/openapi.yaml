@@ -317,7 +317,13 @@ paths:
         with the device's capabilities, records the decision and its reason, and
         returns where to stream from. A policy refusal is 403 and a file this server
         cannot yet adapt for the device is 422; both carry a message to show on screen
-        and are still recorded in the activity history.
+        and are still recorded in the activity history. A client that reports
+        fmp4_stream gets files it cannot play directly as a converted stream (protocol
+        fmp4): video copied, or transcoded to H.264 when the device cannot decode it
+        (decision transcode; needs an ffmpeg with libx264 and a client that decodes
+        H.264). A client that reports hls_stream (Safari) gets the same conversion as
+        HLS instead (protocol hls), and gets HLS when it reports both. Any other client
+        is refused with transcode_unavailable when its video needs converting.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackRequest" } } }
@@ -348,12 +354,16 @@ paths:
     get:
       operationId: seekConvertedStream
       summary: >-
-        For a session with protocol fmp4: where a stream asked for at position_ms starts (the keyframe at or before
-        it, since copied video starts only on one) and the URL to play. The player's position is start_ms plus the
-        media element's own time.
+        For a session with protocol fmp4 or hls: where a stream asked for at position_ms starts and the URL to play.
+        When the video is copied that is the keyframe at or before position_ms, since copied video starts only on
+        one; when it is transcoded (decision transcode) it is position_ms itself. The player's position is start_ms
+        plus the media element's own time. For hls this also starts the stream, replacing the one the session had
+        (whose URLs then answer 404), and url is its playlist; audio picks the track by its stream index, and 503
+        (busy) means no conversion slot is free, as on the fmp4 stream.
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
         - { name: position_ms, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: audio, in: query, schema: { type: integer }, description: For hls only; fmp4 takes it on the stream URL. }
       responses:
         "200":
           description: OK
@@ -365,6 +375,55 @@ paths:
                 properties:
                   start_ms: { type: integer }
                   url: { type: string, description: Path relative to the server base URL. }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/v1/playback/sessions/{session_id}/hls/{run}/index.m3u8:
+    get:
+      operationId: getHLSPlaylist
+      summary: >-
+        For a session with protocol hls: the playlist of the stream the seek endpoint started, as an HLS EVENT
+        playlist of fragmented MP4 segments (about 4 s each; copied video is cut on its own keyframes) that grows
+        as the server converts, with EXT-X-ENDLIST once the file is done. Time 0 is the seek's start_ms. Waits for
+        three segments (or the end of a shorter file), since a player starts a growing playlist no closer than three
+        segments from its end. Only the session's owner gets it, and only while the session is open (409 once it has
+        ended, 410 when stopped from Activity). 404 once a seek has replaced the stream, and after two minutes in
+        which nothing of it was requested, when the server deletes it: seek again.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+        - { name: run, in: path, required: true, schema: { type: string }, description: The stream's id, from the seek endpoint's url. }
+      responses:
+        "200": { description: The playlist, content: { application/vnd.apple.mpegurl: {} } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+    head:
+      operationId: headHLSPlaylist
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+        - { name: run, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The stream exists }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+  /api/v1/playback/sessions/{session_id}/hls/{run}/{segment}:
+    get:
+      operationId: getHLSSegment
+      summary: >-
+        A segment the playlist names: init.mp4 or segNNNNN.m4s, nothing else. The same access rules as the
+        playlist. Segments well behind the player are deleted to bound disk use, so asking for one again is 404;
+        seek instead. Supports Range.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+        - { name: run, in: path, required: true, schema: { type: string } }
+        - { name: segment, in: path, required: true, schema: { type: string, pattern: '^(init\.mp4|seg[0-9]{5,9}\.m4s)$' } }
+      responses:
+        "200": { description: Fragmented MP4, content: { video/mp4: {} } }
+        "206": { description: Partial content }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
@@ -372,9 +431,13 @@ paths:
     get:
       operationId: getConvertedStream
       summary: >-
-        The file as fragmented MP4 from start_ms: video copied, audio copied when the device decodes a track MP4 can
-        carry, otherwise the default track converted to stereo AAC. Not seekable by byte range; seek by asking the seek
-        endpoint for a new stream. audio picks a track by its stream index.
+        The file as fragmented MP4 from start_ms: video copied, or for a transcode session re-encoded to H.264
+        (High profile, 8-bit 4:2:0, scaled down to fit the device's reported size and never up, a keyframe every
+        2 s, HDR tone mapped to SDR for a device that reports no HDR when ffmpeg has zscale); audio copied when the
+        device decodes a track MP4 can carry, otherwise the default track converted to stereo AAC. Not seekable by
+        byte range; seek by asking the seek endpoint for a new stream. audio picks a track by its stream index. 503
+        (busy) when the server is already running as many converted streams, or as many transcodes
+        (VCRX_MAX_TRANSCODES, default 2), as it allows.
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
         - { name: start_ms, in: query, schema: { type: integer, minimum: 0 } }
@@ -1073,7 +1136,8 @@ components:
         max_width: { type: integer }
         max_height: { type: integer }
         max_bitrate: { type: integer }
-        fmp4_stream: { type: boolean, description: "The client plays a fragmented MP4 stream that seeks by asking for a new one. Only then are files it cannot play directly converted (video copied, audio converted)." }
+        fmp4_stream: { type: boolean, description: "The client plays a fragmented MP4 stream that seeks by asking for a new one. Only then are files it cannot play directly converted (video copied or transcoded to H.264, audio copied or converted)." }
+        hls_stream: { type: boolean, description: "The client plays HLS with fragmented MP4 segments natively (Safari). Files it cannot play directly are converted as for fmp4_stream and come as HLS (protocol hls)." }
         default_audio_only: { type: boolean, description: "The client plays only the default audio track (a browser), so that track is the one that has to decode." }
     PlaybackRequest:
       type: object
@@ -1109,9 +1173,9 @@ components:
           required: [url, protocol]
           properties:
             url: { type: string, description: Path relative to the server base URL; send the bearer header. }
-            protocol: { type: string, enum: [progressive, hls, fmp4], description: "fmp4: a converted stream; see seek_url." }
+            protocol: { type: string, enum: [progressive, hls, fmp4], description: "fmp4 and hls: a converted stream; see seek_url." }
             mime_type: { type: [string, "null"], description: "video/x-matroska, video/mp4, ..." }
-            seek_url: { type: string, description: For fmp4, the seek endpoint to call with position_ms before playing. }
+            seek_url: { type: string, description: "For fmp4 and hls, the seek endpoint to call with position_ms before playing. For hls, url is the seek endpoint too: every HLS stream starts at a position." }
         subtitles: { type: array, items: { $ref: "#/components/schemas/SubtitleSource" }, description: Sidecar files to add as side-loaded tracks. Embedded tracks come from the container. }
         webvtt_subtitles:
           type: array
