@@ -69,6 +69,7 @@ func (f *extraFixture) detail(tok string, id int64) (catalog.ItemDetail, int) {
 }
 
 func TestExtrasInDetailsAndPlayback(t *testing.T) {
+	t.Parallel()
 	f := newExtraFixture(t)
 	d, _ := f.detail(f.adminTok, f.movieID)
 	if len(d.Extras) != 2 || d.Extras[0].ID != f.trailer || d.Extras[1].Kind != "featurette" || *d.Extras[0].DurationMs != 90000 {
@@ -155,6 +156,7 @@ func TestExtrasInDetailsAndPlayback(t *testing.T) {
 // A user who cannot see the film gets 404 for its extras and its trailer, by
 // every route: no library grant, or a deny label.
 func TestExtrasFollowTheItemsPolicy(t *testing.T) {
+	t.Parallel()
 	f := newExtraFixture(t)
 	f.srv.TrailersYouTube, f.srv.Catalog.TrailersYouTube = true, true
 	if _, err := f.db.Exec(`UPDATE items SET tmdb_id = 77 WHERE id = ?`, f.showID); err != nil {
@@ -204,6 +206,7 @@ func TestExtrasFollowTheItemsPolicy(t *testing.T) {
 }
 
 func TestYouTubeTrailerInDetails(t *testing.T) {
+	t.Parallel()
 	f := newExtraFixture(t)
 	if _, err := f.db.Exec(`UPDATE items SET tmdb_id = 42 WHERE id = ?`, f.showID); err != nil {
 		t.Fatal(err)
@@ -256,6 +259,7 @@ func TestYouTubeTrailerInDetails(t *testing.T) {
 // The YouTube player is the only frame the web app may load, and only when
 // the feature is on; nothing else in the policy changes.
 func TestCSPAllowsYouTubeOnlyWhenOn(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	csp := func() string {
 		t.Helper()
@@ -285,6 +289,7 @@ func TestCSPAllowsYouTubeOnlyWhenOn(t *testing.T) {
 // decision, the same kind of stream or the same refusal. Its converted stream
 // finds the extra's file through the session.
 func TestExtraPlaysLikeAVersion(t *testing.T) {
+	t.Parallel()
 	f := newExtraFixture(t)
 	f.srv.Playback.CanRemux = true
 	f.srv.Remux = remux.New("ffmpeg", "ffprobe", 2, nil)

@@ -6,6 +6,7 @@ import "testing"
 // above it gets a button, and auto skip only at AutoSkipConfidence. Credits
 // keep their button however low they score.
 func TestForPlayerConfidence(t *testing.T) {
+	t.Parallel()
 	ms := []Marker{
 		{Kind: Intro, StartMs: 0, EndMs: 30000, Confidence: 0.42, Source: SourceDetected},
 		{Kind: Credits, StartMs: 3000000, EndMs: 3100000, Confidence: 0.3, Source: SourceDetected},

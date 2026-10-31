@@ -13,6 +13,7 @@ import (
 // TestOpenAPIMatchesRoutes fails when a route is registered without being in
 // server/api/openapi.yaml, or documented without being registered.
 func TestOpenAPIMatchesRoutes(t *testing.T) {
+	t.Parallel()
 	var spec struct {
 		OpenAPI string                            `yaml:"openapi"`
 		Paths   map[string]map[string]interface{} `yaml:"paths"`

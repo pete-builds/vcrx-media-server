@@ -6,6 +6,7 @@ import (
 )
 
 func TestHours(t *testing.T) {
+	t.Parallel()
 	at := func(h, m int) time.Time { return time.Date(2026, 1, 2, h, m, 0, 0, time.Local) }
 	night, err := ParseHours("01:00-06:00")
 	if err != nil {
