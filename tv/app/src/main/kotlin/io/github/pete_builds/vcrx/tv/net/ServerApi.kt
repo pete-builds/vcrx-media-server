@@ -147,6 +147,15 @@ class ServerApi(
         return send(Request.Builder().url(url("/api/v1/me/playback-settings")).put(body).build(), PlaybackSettings.serializer())
     }
 
+    /** Saves the Before a movie settings sent and nothing else (Skip intro stays as it is). */
+    suspend fun setBeforeMovie(settings: BeforeMovieSettings): PlaybackSettings {
+        val body = json.encodeToString(BeforeMovieSettings.serializer(), settings).toRequestBody(JSON)
+        return send(Request.Builder().url(url("/api/v1/me/playback-settings")).put(body).build(), PlaybackSettings.serializer())
+    }
+
+    /** What the profile's Before a movie settings play ahead of this item; empty for most. */
+    suspend fun before(itemId: Long): BeforeResponse = get("/api/v1/items/$itemId/before", BeforeResponse.serializer())
+
     suspend fun startPlayback(request: PlaybackRequest): PlaybackSession =
         send(post("/api/v1/playback/sessions", request, PlaybackRequest.serializer()), PlaybackSession.serializer())
 

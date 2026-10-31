@@ -3,6 +3,8 @@ package io.github.pete_builds.vcrx.tv.ui
 import android.app.Activity
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.navigation.NavController
+import io.github.pete_builds.vcrx.tv.player.BeforeMovie
+import io.github.pete_builds.vcrx.tv.player.BeforeMovieActivity
 import io.github.pete_builds.vcrx.tv.player.PlayerActivity
 import io.github.pete_builds.vcrx.tv.player.StartRequest
 import kotlinx.serialization.Serializable
@@ -69,7 +71,9 @@ class AppActions(private val nav: NavController, private val activity: Activity)
             resume -> StartRequest.Resume
             else -> StartRequest.Default
         }
-        activity.startActivity(PlayerActivity.intent(activity, itemId, versionId, start, title))
+        val player = PlayerActivity.intent(activity, itemId, versionId, start, title)
+        // From the beginning: the profile's Before a movie clips first, if any.
+        activity.startActivity(if (BeforeMovie.asks(start, null)) BeforeMovieActivity.wrap(activity, player) else player)
     }
 
     /** The profile picker on top of the current screen; Back returns to it. */

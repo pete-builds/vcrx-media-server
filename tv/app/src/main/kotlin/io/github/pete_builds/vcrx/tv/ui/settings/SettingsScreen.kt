@@ -43,6 +43,7 @@ import androidx.tv.material3.Text
 import io.github.pete_builds.vcrx.tv.AppGraph
 import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.ApiException
+import io.github.pete_builds.vcrx.tv.net.BeforeMovieSettings
 import io.github.pete_builds.vcrx.tv.net.HomeRow
 import io.github.pete_builds.vcrx.tv.player.CaptionStyles
 import io.github.pete_builds.vcrx.tv.player.rememberServerSkipIntro
@@ -364,6 +365,49 @@ private fun PlaybackSettings() {
                 ToggleRow("Theme music", prefs.themeMusic, "Play a show's theme quietly on its page.", { v -> update { it.copy(themeMusic = v) } })
             }
         }
+        item(key = "before_movie") { BeforeMovieRows() }
+    }
+}
+
+/**
+ * Before a movie: the server keeps these for the profile, shared with the web
+ * app, so they are read from it and saved to it. Offline they do not show.
+ */
+@Composable
+private fun BeforeMovieRows() {
+    val api = LocalContext.current.graph.api
+    val scope = rememberCoroutineScope()
+    var trailers by remember { mutableStateOf<Int?>(null) }
+    var preroll by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(Unit) {
+        runCatching { api.playbackSettings() }.getOrNull()?.let {
+            trailers = it.beforeMovieTrailers ?: 0
+            preroll = it.beforeMoviePreroll ?: false
+        }
+    }
+    val t = trailers ?: return
+    val p = preroll ?: return
+    Column {
+        ChoiceRow(
+            "Trailers before a movie",
+            t,
+            listOf(0, 1, 2, 3),
+            { n -> if (n == 0) "None" else "$n" },
+            "When a movie starts from the beginning: local trailers for other movies you have not watched. One press of Skip passes each. Shared with the web app.",
+            { v ->
+                trailers = v
+                scope.launch { runCatching { api.setBeforeMovie(BeforeMovieSettings(trailers = v)) } }
+            },
+        )
+        ToggleRow(
+            "Pre-roll before a movie",
+            p,
+            "A short clip from the server's pre-roll folder, just before the movie. Shared with the web app.",
+            { v ->
+                preroll = v
+                scope.launch { runCatching { api.setBeforeMovie(BeforeMovieSettings(preroll = v)) } }
+            },
+        )
     }
 }
 

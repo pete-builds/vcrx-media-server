@@ -406,6 +406,13 @@ data class Marker(
 data class PlaybackSettings(
     /** Intros: [BUTTON] (the default), [AUTO] (confident intros only) or [OFF]. */
     @SerialName("skip_markers") val skipMarkers: String = BUTTON,
+    /**
+     * Before a movie: local trailers (0 to 3) and a pre-roll. Null leaves the
+     * server's value alone (nulls are not sent), so saving Skip intro never
+     * resets them.
+     */
+    @SerialName("before_movie_trailers") val beforeMovieTrailers: Int? = null,
+    @SerialName("before_movie_preroll") val beforeMoviePreroll: Boolean? = null,
 ) {
     companion object {
         const val BUTTON = "button"
@@ -413,3 +420,22 @@ data class PlaybackSettings(
         const val OFF = "off"
     }
 }
+
+/** One clip to play before a movie (GET /items/{id}/before): a trailer or a pre-roll, by URL. */
+@Serializable
+data class BeforeClip(
+    /** "trailer" or "preroll". */
+    val kind: String,
+    val title: String = "",
+    val url: String,
+)
+
+@Serializable
+data class BeforeResponse(val clips: List<BeforeClip> = emptyList())
+
+/** A save of the Before a movie settings alone: null fields are left out, so the server keeps them. */
+@Serializable
+data class BeforeMovieSettings(
+    @SerialName("before_movie_trailers") val trailers: Int? = null,
+    @SerialName("before_movie_preroll") val preroll: Boolean? = null,
+)
