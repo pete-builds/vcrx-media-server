@@ -82,7 +82,7 @@ function sessionCard(x, redraw, setEditing) {
     h("a", { class: "card", href: x.item_id ? `#/item/${x.item_id}` : "#/activity" }, art),
     h("div", {},
       h("div", { class: "s-title" }, x.item_title || "Unknown title"),
-      h("div", { class: "s-line" }, [x.username, x.device_name || x.client, x.ip].filter(Boolean).join(" · ")),
+      h("div", { class: "s-line" }, [x.username, x.device_name || x.client, address(x.ip, x.location)].filter(Boolean).join(" · ")),
       h("div", { class: "s-line" }, [x.version_summary, bitrate(x.bitrate)].filter(Boolean).join(" · ")),
       h("div", { class: "bar", role: "progressbar", "aria-valuenow": pct ?? 0, "aria-valuemin": 0, "aria-valuemax": 100 },
         h("i", { style: { width: `${pct ?? 0}%` } })),
@@ -117,7 +117,7 @@ async function historyTab(body, params) {
       : h("span", { class: `decision ${x.decision}`, title: x.decision_reason }, x.decision.replace(/_/g, " "))),
     h("td", { class: "num" }, hours(x.played_ms)),
     h("td", { class: "num" }, x.progress != null ? `${Math.round(x.progress * 100)}%` : ""),
-    h("td", {}, x.ip || "")));
+    h("td", {}, address(x.ip, x.location))));
   // replaceChildren writes a null argument as the text "null"; h() skips it.
   body.replaceChildren(h("div", {},
     data.total ? h("table", { class: "list" },
@@ -139,44 +139,90 @@ async function statsTab(body, params) {
     h("h2", {}, `Last ${days} days`),
     [7, 30, 90, 365].map((d) => h("a", { class: "btn btn-small" + (d === days ? " btn-primary" : ""), href: `#/activity/stats?days=${d}` }, `${d} days`)));
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const titleLink = (r) => (r.id ? `#/item/${r.id}` : null);
   body.replaceChildren(range,
     h("div", { class: "tiles" },
       tile("Plays", st.plays),
       tile("Watch time", hours(st.watch_ms)),
       tile("People", st.users),
+      h("div", { class: "tile", title: st.peak_at ? `Began ${when(st.peak_at)}` : "" },
+        h("div", { class: "k" }, "Most at once"), h("div", { class: "v" }, st.peak_streams)),
       tile("Refused", st.refused)),
     h("div", { class: "panel", style: { marginBottom: "24px" } },
       h("h3", {}, "Plays per day"),
-      barChart(st.by_day.map((d) => ({ label: d.date.slice(5), full: d.date, value: d.plays, note: hours(d.watch_ms) })), { every: Math.ceil(st.by_day.length / 10) })),
+      barChart(st.by_day.map((d) => ({ label: d.date.slice(5), full: d.date, value: d.plays, note: hours(d.watch_ms) })),
+        { every: Math.ceil(st.by_day.length / 10), heading: "Day", skipZeros: true })),
     h("div", { class: "panels" },
-      rankPanel("Top movies", st.top_movies, (r) => (r.id ? `#/item/${r.id}` : null)),
-      rankPanel("Top shows", st.top_shows, (r) => (r.id ? `#/item/${r.id}` : null)),
+      sharePanel(st.playback_types),
+      rankPanel("Platforms", st.platform_types),
+      h("div", { class: "panel" }, h("h3", {}, "Plays by hour"),
+        barChart(st.by_hour.map((v, i) => ({ label: String(i), full: `${i}:00 to ${i}:59`, value: v })), { every: 3, heading: "Hour" })),
+      h("div", { class: "panel" }, h("h3", {}, "Plays by weekday"),
+        barChart(st.by_weekday.map((v, i) => ({ label: weekdays[i], full: weekdays[i], value: v })), { every: 1, heading: "Day" })),
+      rankPanel("Top movies", st.top_movies, titleLink, true),
+      rankPanel("Top shows", st.top_shows, titleLink, true),
       rankPanel("Top people", st.top_users, (r) => (r.id ? `#/activity/history?user_id=${r.id}` : null)),
       rankPanel("Clients", st.platforms),
-      rankPanel("Devices", st.devices),
-      h("div", { class: "panel" }, h("h3", {}, "Plays by hour"),
-        barChart(st.by_hour.map((v, i) => ({ label: String(i), full: `${i}:00 to ${i}:59`, value: v })), { every: 3 })),
-      h("div", { class: "panel" }, h("h3", {}, "Plays by weekday"),
-        barChart(st.by_weekday.map((v, i) => ({ label: weekdays[i], full: weekdays[i], value: v })), { every: 1 }))));
+      rankPanel("Devices", st.devices)));
 }
 
-function rankPanel(title, list, href) {
+// address shows an IP with the kind of network it is on, worked out offline.
+function address(ip, location) {
+  if (!ip) return "";
+  return location ? `${ip} (${location})` : ip;
+}
+
+const playbackNames = {
+  direct_play: "Direct play",
+  remux: "Converted: container only",
+  audio_transcode: "Converted: audio",
+  transcode: "Converted: video",
+};
+
+// sharePanel is Tautulli's stream type split: direct play against each kind of
+// conversion, as a share of counted plays. A ranked list rather than a pie, so
+// each row carries its own label and percentage and needs no legend.
+function sharePanel(list) {
+  const total = list.reduce((n, r) => n + r.plays, 0);
+  const direct = list.filter((r) => r.name === "direct_play").reduce((n, r) => n + r.plays, 0);
+  const pct = (n) => (total ? Math.round((100 * n) / total) : 0);
+  return h("div", { class: "panel" }, h("h3", {}, "Direct play or converted"),
+    total ? h("p", { class: "muted share-head" }, `${pct(direct)}% direct play, ${pct(total - direct)}% converted`) : null,
+    list.length ? h("ol", { class: "rank" }, list.map((r) => h("li", {},
+      h("span", {}, playbackNames[r.name] || r.name.replace(/_/g, " ")),
+      h("span", { class: "muted" }, `${r.plays} ${r.plays === 1 ? "play" : "plays"} · ${pct(r.plays)}%`),
+      h("div", { class: "meter", "aria-hidden": "true" }, h("i", { style: { width: `${pct(r.plays)}%` } })))))
+      : h("p", { class: "muted" }, "Nothing yet."));
+}
+
+function rankPanel(title, list, href, people = false) {
   const max = Math.max(1, ...list.map((r) => r.plays));
   return h("div", { class: "panel" }, h("h3", {}, title),
     list.length ? h("ol", { class: "rank" }, list.map((r) => {
       const target = href ? href(r) : null;
+      const who = people ? ` · ${r.users} ${r.users === 1 ? "person" : "people"}` : "";
       return h("li", {},
         target ? h("a", { href: target }, r.name) : h("span", {}, r.name),
-        h("span", { class: "muted" }, `${r.plays} ${r.plays === 1 ? "play" : "plays"} · ${hours(r.watch_ms)}`),
+        h("span", { class: "muted" }, `${r.plays} ${r.plays === 1 ? "play" : "plays"} · ${hours(r.watch_ms)}${who}`),
         h("div", { class: "meter", "aria-hidden": "true" }, h("i", { style: { width: `${(100 * r.plays) / max}%` } })));
     })) : h("p", { class: "muted" }, "Nothing yet."));
 }
 
 // barChart draws one series of vertical bars: rounded tops anchored to the
 // baseline, a 2px gap between bars, a hover tooltip per bar, recessive axes.
-// It draws at the container's real pixel width, so text never scales.
-function barChart(points, { every = 1, height = 180 } = {}) {
+// It draws at the container's real pixel width, so text never scales. A
+// collapsed table under it holds the same numbers for screen readers, for
+// anyone who cannot tell bar heights apart, and for exact values on a phone.
+function barChart(points, { every = 1, height = 180, heading = "", skipZeros = false } = {}) {
   const box = h("div", { class: "chart-box" });
+  const rows = skipZeros ? points.filter((p) => p.value > 0) : points;
+  const table = h("details", { class: "chart-table" }, h("summary", {}, "Show as a table"),
+    rows.length ? h("table", {},
+      h("thead", {}, h("tr", {}, h("th", { scope: "col" }, heading), h("th", { scope: "col", class: "num" }, "Plays"),
+        points.some((p) => p.note) ? h("th", { scope: "col", class: "num" }, "Watch time") : null)),
+      h("tbody", {}, rows.map((p) => h("tr", {}, h("th", { scope: "row" }, p.full), h("td", { class: "num" }, p.value),
+        p.note ? h("td", { class: "num" }, p.note) : null))))
+      : h("p", { class: "muted" }, "No plays in this range."));
   let lastW = 0;
   const draw = () => {
     const W = Math.round(box.clientWidth);
@@ -186,7 +232,7 @@ function barChart(points, { every = 1, height = 180 } = {}) {
   };
   const ro = new ResizeObserver(draw);
   ro.observe(box);
-  return box;
+  return h("div", {}, box, table);
 }
 
 function svgBars(points, W, H, every) {
@@ -240,5 +286,5 @@ async function usersTab(body) {
       h("td", {}, u.last_seen ? when(u.last_seen) : "Never"),
       h("td", {}, u.last_title || ""),
       h("td", {}, u.last_device || ""),
-      h("td", {}, u.last_ip || ""))))));
+      h("td", {}, address(u.last_ip, u.last_location)))))));
 }

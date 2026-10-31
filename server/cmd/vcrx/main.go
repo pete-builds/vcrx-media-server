@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -39,6 +40,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
+	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
@@ -72,6 +74,11 @@ Usage:
                                        re-checks items already done
   vcrx metadata status                 matched and unmatched counts, and why each
                                        unmatched title was skipped
+  vcrx watch export [-library NAME] [-unplayed-days N]
+                                       every movie and show with its files, size and
+                                       who watched it when, one JSON object per line;
+                                       -unplayed-days keeps titles nobody played in
+                                       N days, never-played ones included
 
 Settings come from VCRX_* environment variables and /config/vcrx.yaml; see
 deploy/.env.example.
@@ -99,6 +106,8 @@ func main() {
 		err = libraryCmd(args)
 	case "metadata":
 		err = metadataCmd(args)
+	case "watch":
+		err = watchCmd(args)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
@@ -180,6 +189,30 @@ func migrateOnly() error {
 	return nil
 }
 
+// canTranscode reports whether video transcoding is on: allowed by the
+// config and possible with this ffmpeg, which needs libx264. It logs which.
+func canTranscode(ctx context.Context, rmx *remux.Service, limit int, log *slog.Logger) bool {
+	if limit == 0 {
+		log.Info("video transcoding is off (max_transcodes is 0): clients that cannot decode a file's video are refused")
+		return false
+	}
+	f, err := rmx.Detect(ctx)
+	switch {
+	case err != nil:
+		log.Error("video transcoding is off: cannot ask ffmpeg for its encoders", "ffmpeg", rmx.FFmpeg, "err", err)
+		return false
+	case !f.X264:
+		log.Warn("video transcoding is off: this ffmpeg has no libx264 encoder", "ffmpeg", rmx.FFmpeg)
+		return false
+	case !f.ToneMap:
+		log.Info("video transcoding is on, without HDR tone mapping: this ffmpeg has no zscale filter, so HDR sent to an SDR browser looks washed out",
+			"max_transcodes", limit)
+	default:
+		log.Info("video transcoding is on, with HDR tone mapping", "max_transcodes", limit)
+	}
+	return true
+}
+
 // scanAdapter lets the API start scans without depending on the library package.
 type scanAdapter struct{ m *library.Manager }
 
@@ -225,10 +258,22 @@ func serve() error {
 	scans := library.NewManager(scanner, log.With("component", "scans"))
 	cat := &catalog.Catalog{DB: a.db}
 	authStore := &auth.Store{DB: a.db, TTL: cfg.SessionTTL}
-	// Converted streams copy the video and convert at most the audio, a small
+	// Converted streams that copy the video convert at most the audio, a small
 	// fraction of a core each; four at once is well within nix1's budget.
+	// Video transcodes cost whole cores and have their own, smaller limit.
 	rmx := remux.New(cfg.FFmpegPath, cfg.FFprobePath, 4, log.With("component", "remux"))
-	pb := &playback.Service{DB: a.db, Catalog: cat, CanRemux: true}
+	rmx.SetMaxTranscodes(cfg.MaxTranscodes)
+	pb := &playback.Service{DB: a.db, Catalog: cat, CanRemux: true, CanTranscode: canTranscode(ctx, rmx, cfg.MaxTranscodes, log)}
+	// Safari plays converted streams only as HLS, written to disk per session
+	// under the same slot limits.
+	hls, err := remux.NewHLS(rmx, cfg.HLSDir(), log.With("component", "hls"))
+	if err != nil {
+		log.Error("HLS streams are off, so Safari cannot play files that need converting", "err", err)
+	} else {
+		pb.CanHLS = true
+		defer hls.Close()
+		go hls.Run(ctx)
+	}
 	hooks := notify.New(cfg.WebhookURLs, cfg.WebhookEvents, cfg.ServerName, log.With("component", "webhooks"))
 	if len(cfg.WebhookURLs) > 0 {
 		pb.Notify = hooks.Send
@@ -269,16 +314,24 @@ func serve() error {
 		go (&imdb.Syncer{DB: a.db, Log: log.With("component", "imdb")}).Run(ctx)
 	}
 	go collectionBuilder(a).Run(ctx, 30*time.Minute)
+	smart := smartBuilder(a)
+	scanner.OnFinished = func(library.Library, library.Run) { smart.Trigger() }
+	go smart.Run(ctx, 15*time.Minute)
 	srv := &api.Server{
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
 		Artwork: art, Admin: adm, Scans: scanAdapter{scans},
-		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, Remux: rmx, WebDir: os.Getenv("VCRX_WEB_DIR"),
+		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, Remux: rmx, HLS: hls, WebDir: os.Getenv("VCRX_WEB_DIR"),
 		Subtitles:        subtitles.New(cfg.SubtitleCacheDir(), cfg.FFmpegPath, log.With("component", "subtitles")),
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
 		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets, AllowedHosts: cfg.AllowedHosts,
 	}
+	srv.SmartCollections = smart
+	// The weekly newsletter checks once a minute whether its time has come; it
+	// does nothing until switched on in Settings.
+	srv.Newsletter = &newsletter.Service{DB: a.db, Hooks: hooks, Log: log.With("component", "newsletter")}
+	go srv.Newsletter.Run(ctx)
 	if users, err := authStore.CountUsers(ctx); err == nil && users == 0 {
 		log.Warn("no users yet: create the admin with `docker compose exec vcrx vcrx user add -username <name> -admin`")
 	}
@@ -286,10 +339,23 @@ func serve() error {
 	if cfg.ScanOnStartup {
 		go scans.Schedule(ctx)
 	}
-	go housekeeping(ctx, log, pb, authStore)
+	go housekeeping(ctx, log, pb, authStore, a.db, cfg.BackupDir())
 	if cfg.TMDbAPIKey != "" {
 		enr := newEnricher(a)
 		enr.Busy = scans.Running
+		// Merge copies first, then rebuild: stamps are worked out on the
+		// merged movie, not on a copy that is about to disappear.
+		enr.AfterPass = func(ctx context.Context) {
+			rep, err := library.MergeByTMDb(ctx, a.db, 0)
+			if err != nil {
+				log.Warn("merging copies with the same TMDb id", "err", err)
+			}
+			rep.Log(log)
+			if rep.Merged > 0 {
+				smart.Trigger()
+			}
+		}
+		enr.Changed = smart.Trigger
 		srv.Metadata = enr
 		go enr.Run(ctx, 2*time.Minute, 15*time.Minute)
 	} else {
@@ -372,7 +438,10 @@ func rootStates(ctx context.Context, adm *admin.Admin) (map[string]string, error
 	return out, nil
 }
 
-func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, as *auth.Store) {
+// nightlyBackups is how many daily database snapshots are kept in /config/backups.
+const nightlyBackups = 7
+
+func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, as *auth.Store, conn *sql.DB, backupDir string) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for i := 0; ; i++ {
@@ -386,12 +455,30 @@ func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, a
 				log.Warn("purge expired sessions", "err", err)
 			}
 		}
+		// Ten minutes after start, then daily: a consistent snapshot of the
+		// database (watch history, resume points, matches), keeping a week.
+		if i%1440 == 10 {
+			nightlyBackup(ctx, log, conn, backupDir)
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
 	}
+}
+
+func nightlyBackup(ctx context.Context, log *slog.Logger, conn *sql.DB, dir string) {
+	path, err := db.Backup(ctx, conn, dir, "nightly")
+	if err != nil {
+		log.Warn("nightly database backup failed", "err", err)
+		return
+	}
+	removed, err := db.Prune(dir, "nightly", nightlyBackups)
+	if err != nil {
+		log.Warn("pruning old database backups failed", "err", err)
+	}
+	log.Info("database backed up", "path", path, "pruned", removed)
 }
 
 func readPassword(prompt string) (string, error) {
@@ -600,6 +687,54 @@ func libraryCmd(args []string) error {
 	return nil
 }
 
+func watchCmd(args []string) error {
+	if len(args) == 0 || args[0] != "export" {
+		return errors.New("watch: want export")
+	}
+	fs := flag.NewFlagSet("watch export", flag.ContinueOnError)
+	name := fs.String("library", "", "only this library")
+	days := fs.Int("unplayed-days", 0, "only titles nobody played in this many days, never-played ones included")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *days < 0 {
+		return errors.New("watch export: -unplayed-days must be 0 or more")
+	}
+	ctx := context.Background()
+	a, err := open(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.db.Close() }()
+	return watchExport(ctx, a.db, os.Stdout, *name, *days)
+}
+
+// watchExport writes the watch state export as JSON lines, the same rows as
+// GET /api/v1/admin/watch/export.
+func watchExport(ctx context.Context, conn *sql.DB, out io.Writer, library string, unplayedDays int) error {
+	f := activity.ExportFilter{UnplayedDays: unplayedDays}
+	if library != "" {
+		libs, err := (&admin.Admin{DB: conn}).Libraries(ctx)
+		if err != nil {
+			return err
+		}
+		for _, l := range libs {
+			if strings.EqualFold(l.Name, library) {
+				f.LibraryID = l.ID
+			}
+		}
+		if f.LibraryID == 0 {
+			return fmt.Errorf("no library named %q", library)
+		}
+	}
+	bw := bufio.NewWriter(out)
+	enc := json.NewEncoder(bw)
+	if err := (&activity.Service{DB: conn}).WatchExport(ctx, f, func(t activity.TitleWatch) error { return enc.Encode(t) }); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+
 func newEnricher(a *app) *enrich.Enricher {
 	return &enrich.Enricher{DB: a.db, TMDb: tmdb.New(a.cfg.TMDbAPIKey, a.cfg.TMDbLanguage), Dir: a.cfg.MetadataDir(),
 		Country: a.cfg.TMDbCountry, Log: a.log.With("component", "tmdb")}
@@ -630,7 +765,7 @@ func metadataCmd(args []string) error {
 			return err
 		}
 		fmt.Printf("collections: %d franchises, %d newly named, %d removed, %d waiting for a name\n", res.Collections, res.Named, res.Removed, res.Waiting)
-		return nil
+		return printSmart(ctx, smartBuilder(a))
 	case "imdb":
 		res, err := (&imdb.Syncer{DB: a.db, Log: a.log}).Sync(ctx, true)
 		if err != nil {
@@ -651,6 +786,16 @@ func metadataCmd(args []string) error {
 		fmt.Printf("tmdb: %d matched, %d unmatched, %d errors, %d episodes filled\n", st.Matched, st.Unmatched, st.Errors, st.Episodes)
 		if st.Unmatched > 0 {
 			fmt.Println("run `vcrx metadata status` to see what was skipped and why")
+		}
+		if err != nil {
+			return err
+		}
+		rep, err := library.MergeByTMDb(ctx, a.db, 0)
+		if rep.Merged > 0 {
+			fmt.Printf("merged %d copies into movies with the same TMDb id\n", rep.Merged)
+		}
+		for _, why := range rep.Apart {
+			fmt.Println("left apart:", why)
 		}
 		return err
 	case "status":
@@ -743,4 +888,36 @@ func collectionBuilder(a *app) *collections.Builder {
 		}
 	}
 	return b
+}
+
+// smartBuilder builds the smart collections defined in YAML files.
+func smartBuilder(a *app) *collections.SmartBuilder {
+	return &collections.SmartBuilder{DB: a.db, Dir: a.cfg.SmartCollectionsDir(), Log: a.log.With("component", "smart-collections")}
+}
+
+// printSmart builds the smart collections once and says what happened, with
+// every refused file and failed definition, so a typo is found at the shell.
+func printSmart(ctx context.Context, b *collections.SmartBuilder) error {
+	rep, err := b.Build(ctx)
+	if err != nil {
+		return err
+	}
+	if rep.Error != "" {
+		fmt.Printf("smart collections: %s (nothing changed)\n", rep.Error)
+	}
+	for _, f := range rep.Files {
+		if f.Error != "" {
+			fmt.Printf("smart collections: refused %s\n", f.Error)
+		}
+	}
+	failed := 0
+	for _, c := range rep.Collections {
+		if c.Error != "" {
+			failed++
+			fmt.Printf("smart collections: %s\n", c.Error)
+		}
+	}
+	fmt.Printf("smart collections: %d from %d files, %d failed, labels +%d -%d, %d removed\n",
+		len(rep.Collections), len(rep.Files), failed, rep.LabelsAdded, rep.LabelsRemoved, rep.Removed)
+	return nil
 }

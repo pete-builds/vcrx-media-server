@@ -33,6 +33,13 @@ func TestWebAppServing(t *testing.T) {
 	if w := get("/library/1"); w.Code != 200 || !strings.Contains(w.Body.String(), "js/app.js") {
 		t.Fatalf("deep link: %d", w.Code)
 	}
+	// A missing asset is a 404, never the page: otherwise a broken build passes
+	// every probe with a 200.
+	for _, p := range []string{"/js/not-there.js", "/css/gone.css", "/img/none.png", "/fonts/x.ttf"} {
+		if w := get(p); w.Code != 404 || strings.Contains(w.Body.String(), "js/app.js") {
+			t.Fatalf("missing asset %s: %d %.80s", p, w.Code, w.Body.String())
+		}
+	}
 	if w := get("/api/v1/nope"); w.Code != 404 || !strings.Contains(w.Header().Get("Content-Type"), "json") {
 		t.Fatalf("unknown api path: %d %s", w.Code, w.Header().Get("Content-Type"))
 	}

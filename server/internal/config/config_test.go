@@ -28,6 +28,18 @@ func TestDefaultsAndEnv(t *testing.T) {
 	if c.Port != 4000 || len(c.MediaRoots) != 2 || c.MediaRoots[1] != "/srv/more" || c.SessionTTL != 7*24*time.Hour {
 		t.Fatalf("env: %+v", c)
 	}
+	if c.MaxTranscodes != 2 {
+		t.Fatalf("max transcodes default %d", c.MaxTranscodes)
+	}
+	t.Setenv("VCRX_MAX_TRANSCODES", "0")
+	if c, err = Load(); err != nil || c.MaxTranscodes != 0 {
+		t.Fatalf("transcoding off: %d %v", c.MaxTranscodes, err)
+	}
+	t.Setenv("VCRX_MAX_TRANSCODES", "-1")
+	if _, err := Load(); err == nil {
+		t.Fatal("negative max transcodes accepted")
+	}
+	t.Setenv("VCRX_MAX_TRANSCODES", "")
 	t.Setenv("VCRX_PORT", "seventy")
 	if _, err := Load(); err == nil {
 		t.Fatal("bad port accepted")
@@ -104,7 +116,7 @@ func TestTrustedNetworksHaveNoDefault(t *testing.T) {
 		t.Fatalf("defaults: %q %v %v", c.AutoSignInUser, c.TrustedNetworks, err)
 	}
 	t.Setenv("VCRX_AUTO_SIGN_IN_USER", "pete")
-	t.Setenv("VCRX_TRUSTED_NETWORKS", "192.168.86.0/24, 100.64.0.0/10")
+	t.Setenv("VCRX_TRUSTED_NETWORKS", "192.168.1.0/24, 100.64.0.0/10")
 	t.Setenv("VCRX_ALLOWED_HOSTS", "nix1.tail1234.ts.net")
 	if c, err = Load(); err != nil || c.AutoSignInUser != "pete" || len(c.TrustedNetworks) != 2 || len(c.AllowedHosts) != 1 {
 		t.Fatalf("env: %q %v %v %v", c.AutoSignInUser, c.TrustedNetworks, c.AllowedHosts, err)

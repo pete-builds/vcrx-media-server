@@ -87,8 +87,8 @@ ADB runs from any machine on the same LAN. On this NixOS box, `nix-shell -p andr
 4. Pair, then connect to the port shown on the Wireless debugging screen (not the pairing port):
 
    ```sh
-   adb pair 192.168.86.50:37123 123456
-   adb connect 192.168.86.50:41235
+   adb pair 192.168.1.50:37123 123456
+   adb connect 192.168.1.50:41235
    ```
 
 5. Install, or upgrade in place:
@@ -109,7 +109,7 @@ VCRX appears in the TV's app row with its banner. Some Google TV launchers hide 
 
 ## Connect to the server
 
-On first launch, enter the server's LAN address with its port, for example `192.168.86.20:3750` or `http://192.168.86.20:3750`. A bare address gets `http://` and port 3750. The app checks `GET /api/v1/server` and refuses anything that is not `vcrx-media-server` speaking API version 1, then asks for a username and password.
+On first launch, enter the server's LAN address with its port, for example `192.168.1.20:3750` or `http://192.168.1.20:3750`. A bare address gets `http://` and port 3750. The app checks `GET /api/v1/server` and refuses anything that is not `vcrx-media-server` speaking API version 1, then asks for a username and password.
 
 Plain HTTP is allowed because LAN addresses cannot be listed ahead of time (`res/xml/network_security_config.xml`). HTTPS comes later through a reverse proxy; enter the `https://` address then and it works with publicly trusted certificates.
 

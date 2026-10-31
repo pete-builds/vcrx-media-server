@@ -16,7 +16,9 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/artwork"
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
+	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
+	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
@@ -41,6 +43,9 @@ type Server struct {
 	Artwork    *artwork.Service
 	Subtitles  *subtitles.Service
 	Remux      *remux.Service
+	// HLS writes converted streams as HLS for clients that report
+	// hls_stream (Safari). Nil turns it off.
+	HLS *remux.HLS
 	// Arr turns Radarr and Sonarr webhooks into scans; ArrToken guards it.
 	Arr      *arr.Dispatcher
 	ArrToken string
@@ -52,6 +57,12 @@ type Server struct {
 	Scans    ScanStarter
 	// LibraryRoots lists roots for the readiness check.
 	LibraryRoots func(ctx context.Context) (map[string]string, error)
+
+	// SmartCollections reports the YAML collection definitions and their builds.
+	SmartCollections *collections.SmartBuilder
+
+	// Newsletter is the weekly recently-added digest, set up in Settings.
+	Newsletter *newsletter.Service
 
 	AdminAllowRemote bool
 	TrustedProxies   []netip.Prefix
@@ -106,12 +117,16 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/items/{item_id}", signedIn, s.item},
 		{"GET", "/api/v1/items/{item_id}/children", signedIn, s.itemChildren},
 		{"PUT", "/api/v1/items/{item_id}/watched", signedIn, s.setWatched},
+		{"DELETE", "/api/v1/items/{item_id}/progress", signedIn, s.clearProgress},
 		{"GET", "/api/v1/items/{item_id}/artwork/{kind}", signedIn, s.artwork},
 		{"POST", "/api/v1/playback/sessions", signedIn, s.startPlayback},
 		{"POST", "/api/v1/playback/sessions/{session_id}/events", signedIn, s.playbackEvent},
 		{"GET", "/api/v1/playback/sessions/{session_id}/seek", signedIn, s.convertedSeek},
 		{"GET", "/api/v1/playback/sessions/{session_id}/stream.mp4", signedIn, s.convertedStream},
 		{"HEAD", "/api/v1/playback/sessions/{session_id}/stream.mp4", signedIn, s.convertedStream},
+		{"GET", "/api/v1/playback/sessions/{session_id}/hls/{run}/index.m3u8", signedIn, s.hlsPlaylist},
+		{"HEAD", "/api/v1/playback/sessions/{session_id}/hls/{run}/index.m3u8", signedIn, s.hlsPlaylist},
+		{"GET", "/api/v1/playback/sessions/{session_id}/hls/{run}/{segment}", signedIn, s.hlsSegment},
 		{"GET", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"HEAD", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"GET", "/api/v1/subtitles/{stream_id}", signedIn, s.subtitle},
@@ -120,6 +135,7 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/admin/libraries", adminOnly, s.adminCreateLibrary},
 		{"POST", "/api/v1/admin/libraries/{library_id}/scan", adminOnly, s.adminScan},
 		{"GET", "/api/v1/admin/scans", adminOnly, s.adminScans},
+		{"GET", "/api/v1/admin/collections", adminOnly, s.adminSmartCollections},
 		{"GET", "/api/v1/admin/users", adminOnly, s.adminUsers},
 		{"POST", "/api/v1/admin/users", adminOnly, s.adminCreateUser},
 		{"PUT", "/api/v1/admin/users/{user_id}/grants", adminOnly, s.adminSetGrants},
@@ -128,11 +144,19 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/admin/metadata/unmatched", adminOnly, s.unmatched},
 		{"GET", "/api/v1/admin/items/{item_id}/match", adminOnly, s.matchSearch},
 		{"PUT", "/api/v1/admin/items/{item_id}/match", adminOnly, s.matchSet},
+		{"GET", "/api/v1/admin/items/{item_id}/history", adminOnly, s.itemHistory},
+		{"GET", "/api/v1/admin/watch/export", adminOnly, s.watchExport},
+		{"POST", "/api/v1/admin/items/{item_id}/merge", adminOnly, s.adminMergeItems},
+		{"POST", "/api/v1/admin/versions/{version_id}/split", adminOnly, s.adminSplitVersion},
 		{"GET", "/api/v1/admin/activity/now", adminOnly, s.activityNow},
 		{"GET", "/api/v1/admin/activity/history", adminOnly, s.activityHistory},
 		{"GET", "/api/v1/admin/activity/stats", adminOnly, s.activityStats},
 		{"GET", "/api/v1/admin/activity/users", adminOnly, s.activityUsers},
 		{"POST", "/api/v1/admin/activity/sessions/{session_id}/terminate", adminOnly, s.terminateSession},
+		// The weekly newsletter.
+		{"GET", "/api/v1/admin/newsletter", adminOnly, s.newsletterStatus},
+		{"PUT", "/api/v1/admin/newsletter", adminOnly, s.newsletterSave},
+		{"POST", "/api/v1/admin/newsletter/preview", adminOnly, s.newsletterPreview},
 	}
 }
 

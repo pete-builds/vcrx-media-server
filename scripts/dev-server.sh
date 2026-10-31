@@ -76,13 +76,26 @@ if [ ! -f "$twin" ]; then
     -metadata:s:a:0 language=eng -metadata:s:a:1 language=ger "$twin"
 fi
 
-# NFO ratings let the poster overlays show without network access.
-nfo() { # dir file rating votes
+# MPEG-4 Part 2 video in AVI with MP3 audio, the old Xvid shape: no browser
+# decodes the video, so it plays as a transcoded stream (H.264 made on the
+# fly, MP3 copied). Keyframes only every 10 s, so a seek that started on one
+# would land visibly early.
+kettle="$media/Movies/Tin Kettle Road (1994)/Tin Kettle Road (1994).avi"
+if [ ! -f "$kettle" ]; then
+  mkdir -p "$(dirname "$kettle")"
+  ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=640x360:rate=24:duration=60" -f lavfi -i "sine=frequency=660:duration=60" \
+    -c:v mpeg4 -q:v 4 -g 240 -c:a libmp3lame -ac 2 "$kettle"
+fi
+
+# NFO ratings let the poster overlays show without network access; the optional
+# fifth argument is more NFO XML, such as an invented cast.
+nfo() { # dir file rating votes [extra-xml]
   [ -f "$1/$2" ] && return
-  printf '<?xml version="1.0" encoding="UTF-8"?>\n<%s><ratings><rating name="imdb" max="10"><value>%s</value><votes>%s</votes></rating></ratings></%s>\n' \
-    "${2%.nfo}" "$3" "$4" "${2%.nfo}" > "$1/$2"
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<%s><ratings><rating name="imdb" max="10"><value>%s</value><votes>%s</votes></rating></ratings>%s</%s>\n' \
+    "${2%.nfo}" "$3" "$4" "${5:-}" "${2%.nfo}" > "$1/$2"
 }
-nfo "$media/Movies/Harbor Lights (2001)" movie.nfo 8.4 310000
+nfo "$media/Movies/Harbor Lights (2001)" movie.nfo 8.4 310000 \
+  '<actor><name>Mara Quill</name><role>Lighthouse Keeper</role><order>0</order></actor><actor><name>Tomas Brandt</name><role>Harbor Master</role><order>1</order></actor><actor><name>June Okafor</name><order>2</order></actor>'
 nfo "$media/Movies/Copper Valley (2015)" movie.nfo 6.9 41000
 nfo "$media/Movies/Paper Trail (1998)" movie.nfo 7.7 88000
 nfo "$media/TV/Quiet Street" tvshow.nfo 8.8 120000
