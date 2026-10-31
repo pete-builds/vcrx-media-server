@@ -650,6 +650,11 @@ func TestShortRowsAreHidden(t *testing.T) {
 	if r := rowByID(rows, "continue_watching"); r == nil || len(r.Items) != 1 {
 		t.Errorf("Continue Watching with one title is hidden: %v", rowIDs(rows))
 	}
+	// See all of a row with nothing in it is an empty row, not a crash (it
+	// once indexed an empty result): nothing is like a lone Western yet.
+	if r, err := f.c.HomeRowItems(context.Background(), f.admin, f.adminID, "because_you_watched:"+fmt.Sprint(f.ids["One"])); err != nil || len(r.Items) != 0 || r.Title != "Because You Watched One" {
+		t.Errorf("empty See all: %+v, %v", r, err)
+	}
 	// See all has no minimum.
 	f.exec(`UPDATE items SET missing_since = 1 WHERE title IN ('Two', 'Three')`)
 	if r, err := f.c.HomeRowItems(context.Background(), f.admin, f.adminID, movies); err != nil || len(r.Items) != 2 {

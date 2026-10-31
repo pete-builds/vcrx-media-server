@@ -203,7 +203,8 @@ func (q *homeQuery) load(built []builtRow, dropShort bool) ([]HomeRow, error) {
 		if dropShort && len(row.Items) < MinRowItems && row.ID != "continue_watching" {
 			continue
 		}
-		if len(row.Items) == 0 {
+		// Home leaves out empty rows; See all answers with an empty one.
+		if dropShort && len(row.Items) == 0 {
 			continue
 		}
 		out = append(out, row)
