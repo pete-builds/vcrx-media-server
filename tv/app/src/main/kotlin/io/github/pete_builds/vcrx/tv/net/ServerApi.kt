@@ -36,6 +36,10 @@ class ServerApi(
     suspend fun login(request: LoginRequest): LoginResponse =
         send(post("/api/v1/auth/login", request, LoginRequest.serializer()), LoginResponse.serializer(), authRoute = false)
 
+    /** Signs in without a password; the server allows it only from its trusted networks. */
+    suspend fun autoLogin(request: AutoLoginRequest): LoginResponse =
+        send(post("/api/v1/auth/auto", request, AutoLoginRequest.serializer()), LoginResponse.serializer(), authRoute = false)
+
     suspend fun logout() {
         send<Unit>(Request.Builder().url(url("/api/v1/auth/logout")).post(EMPTY_BODY).build(), null, authRoute = true)
     }

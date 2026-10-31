@@ -29,6 +29,7 @@ import androidx.tv.material3.Text
 import io.github.pete_builds.vcrx.tv.AppGraph
 import io.github.pete_builds.vcrx.tv.data.DeviceInfo
 import io.github.pete_builds.vcrx.tv.net.ApiException
+import io.github.pete_builds.vcrx.tv.net.AutoLoginRequest
 import io.github.pete_builds.vcrx.tv.net.LoginRequest
 import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
 import io.github.pete_builds.vcrx.tv.ui.components.BrandButton
@@ -51,6 +52,41 @@ class LoginViewModel(private val graph: AppGraph) : ViewModel() {
         private set
 
     val serverLabel: String = listOfNotNull(graph.settings.serverName, graph.settings.serverUrl).joinToString("  ")
+
+    /** True while checking whether this network may sign in without a password. */
+    var checkingAuto by mutableStateOf(true)
+        private set
+    private var autoTried = false
+
+    /**
+     * On the server's trusted networks (the home LAN, Tailscale) there is no
+     * password to type: the server says so in GET /api/v1/server, and
+     * POST /api/v1/auth/auto signs this device in. Anything else shows the form.
+     */
+    fun tryAutoSignIn(context: android.content.Context, onDone: () -> Unit) {
+        if (autoTried) return
+        autoTried = true
+        val base = graph.settings.serverUrl
+        if (base == null) {
+            checkingAuto = false
+            return
+        }
+        viewModelScope.launch {
+            try {
+                if (graph.api.serverInfo(base).autoSignIn) {
+                    val response = graph.api.autoLogin(AutoLoginRequest(DeviceInfo.device(context, graph.settings)))
+                    graph.tokens.save(response.token)
+                    graph.settings.username = response.user.displayName ?: response.user.username
+                    onDone()
+                    return@launch
+                }
+            } catch (e: ApiException) {
+                // Not trusted here, or the server is down: the form says what is wrong.
+                android.util.Log.i("Login", "Sign-in without a password not available: ${e.message}")
+            }
+            checkingAuto = false
+        }
+    }
 
     fun signIn(context: android.content.Context, onDone: () -> Unit) {
         if (busy) return
@@ -93,6 +129,17 @@ fun LoginScreen() {
 
     // Back from Login means "wrong server": go to Connect rather than leave the app.
     BackHandler { actions.toConnect() }
+
+    LaunchedEffect(Unit) { vm.tryAutoSignIn(context) { actions.toBrowse() } }
+    if (vm.checkingAuto) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                Wordmark(height = 56.dp)
+                Label("Signing in", style = MaterialTheme.typography.labelLarge, color = Gray)
+            }
+        }
+        return
+    }
 
     Box(Modifier.fillMaxSize().padding(48.dp), contentAlignment = Alignment.Center) {
         Column(Modifier.width(560.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {

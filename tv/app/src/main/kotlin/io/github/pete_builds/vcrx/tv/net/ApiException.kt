@@ -39,3 +39,16 @@ private fun defaultMessage(status: Int): String = when (status) {
     in 500..599 -> "The server had an internal error (HTTP $status)."
     else -> "The server answered HTTP $status."
 }
+
+/**
+ * What to tell the viewer when the server refuses a stream mid-play. A 410 means
+ * an admin stopped it from Activity, and the body carries their message.
+ */
+fun streamRefusal(status: Int, body: ByteArray?, json: Json): String {
+    val error = httpError(status, body?.toString(Charsets.UTF_8), json)
+    return if (error is ApiException.Http && error.code == "session_terminated") {
+        "Playback was stopped on the server: ${error.message}"
+    } else {
+        "The server refused the stream (HTTP $status)."
+    }
+}

@@ -82,4 +82,14 @@ class ModelsTest {
         assertTrue(encoded.contains("\"client_version\":\"0.1.0\""))
         assertTrue(encoded.contains("\"platform\":\"android_tv\""))
     }
+
+    @Test
+    fun serverInfoSaysWhetherAutoSignInWorksHere() {
+        val on = json.decodeFromString(ServerInfo.serializer(),
+            """{"name": "VCRX", "product": "vcrx-media-server", "version": "1", "api_version": 1, "auto_sign_in": true}""")
+        assertTrue(on.autoSignIn)
+        // Servers from before the feature send no field: the form is shown.
+        val old = json.decodeFromString(ServerInfo.serializer(), """{"name": "VCRX", "product": "vcrx-media-server", "api_version": 1}""")
+        assertFalse(old.autoSignIn)
+    }
 }
