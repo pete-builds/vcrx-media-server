@@ -3,9 +3,12 @@ package playback
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
+	"github.com/pete-builds/vcrx-media-server/server/internal/loans"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 )
@@ -16,6 +19,16 @@ import (
 // film's resume point or marks it played.
 func (s *Service) startExtra(ctx context.Context, pol policy.Policy, c Client, req StartRequest) (*Session, *Refusal, error) {
 	f, err := s.Catalog.ExtraForPlayback(ctx, pol, *req.ExtraID)
+	if errors.Is(err, catalog.ErrNotFound) {
+		// A lent movie's trailer goes with the tape: refused as the film is.
+		lent, due, lerr := s.Catalog.ExtraOnLoan(ctx, pol, *req.ExtraID)
+		if lerr != nil {
+			return nil, nil, lerr
+		}
+		if lent {
+			return nil, &Refusal{Status: 409, Code: "on_loan", Message: loans.OnLoanMessage(time.UnixMilli(due))}, nil
+		}
+	}
 	if err != nil {
 		return nil, nil, err
 	}

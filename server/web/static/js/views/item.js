@@ -5,6 +5,7 @@ import { versionTools } from "./versions.js";
 import { markerEditor } from "./markers.js";
 import { extraActions, extrasSection } from "./extras.js";
 import { downloadedSubtitles } from "./subtitle-admin.js";
+import { dueDate, returnButton } from "./lend.js";
 
 // The details page for a movie, show, season or episode.
 export async function itemView({ match, params }) {
@@ -114,10 +115,28 @@ function resumeBar(item) {
     h("span", {}, `${clock(Math.max(0, total - w.position_ms))} left`));
 }
 
+// loanNote says a movie is out on loan: to the borrower, until when it is
+// theirs; to everyone else, when it is due back, and to admins, who has it.
+function loanNote(item) {
+  const loan = item.loan;
+  if (!loan) return null;
+  if (loan.yours) {
+    return h("p", { class: "loan-note yours" }, h("strong", {}, "On loan to you"), ` until ${dueDate(loan.due_at)}. Be kind, rewind.`);
+  }
+  const admin = !!(state.me && state.me.is_admin);
+  return h("div", { class: "loan-note" },
+    h("p", {}, h("strong", {}, "Out on loan"), loan.borrower ? ` to ${loan.borrower}` : "", `, due back ${dueDate(loan.due_at)}.`),
+    admin ? returnButton(loan, item.title, () => go(location.hash.slice(1))) : null);
+}
+
 function actions(item) {
   const row = h("div", { class: "actions" });
   const w = item.watch || {};
-  if (item.kind === "movie" || item.kind === "episode") {
+  const isAdmin = !!(state.me && state.me.is_admin);
+  if (item.loan && !item.loan.yours) {
+    // The owner's copy is out: nobody but the borrower plays it.
+    row.append(loanNote(item));
+  } else if (item.kind === "movie" || item.kind === "episode") {
     const versions = item.versions || [];
     let versionSel = null;
     if (versions.length > 1) {
@@ -139,6 +158,10 @@ function actions(item) {
       row.append(h("button", { class: "btn btn-primary btn-large", type: "button", onclick: () => go(playUrl(0)) }, icon("play"), "Play"));
     }
     if (versionSel) row.append(versionSel);
+    if (item.loan) row.append(loanNote(item));
+    if (isAdmin && item.kind === "movie" && !item.loan) {
+      row.append(h("a", { class: "btn btn-glass", href: `#/lend/${item.id}` }, icon("tape"), "Lend this tape"));
+    }
   } else if (item.next_episode) {
     const n = item.next_episode;
     row.append(h("button", { class: "btn btn-primary btn-large", type: "button", onclick: () => go(`/play/${n.id}`) }, icon("play"),

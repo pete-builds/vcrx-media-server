@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"sort"
 
@@ -124,21 +125,43 @@ func (c *Catalog) attachTracks(ctx context.Context, vs []Version) error {
 // within their ceiling and its item is visible to them. Session routes check it
 // on every call, so a policy tightened mid-play applies at once.
 func (c *Catalog) CanPlay(ctx context.Context, pol policy.Policy, versionID int64) (bool, error) {
-	vc, vargs := pol.VersionCond("v")
-	cond, cargs := pol.ItemCond("i")
+	cond, args := playCond(pol)
 	var n int
 	err := c.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM media_versions v JOIN items i ON i.id = v.item_id
-		WHERE v.id = ? AND `+vc+` AND `+cond, append(append([]any{versionID}, vargs...), cargs...)...).Scan(&n)
+		WHERE v.id = ? AND `+cond, append([]any{versionID}, args...)...).Scan(&n)
 	return n > 0, err
+}
+
+// playCond is what playing a version needs, on aliases v and i: the version
+// within the caller's ceiling, its item visible to them, and the item not out
+// on loan to someone else (one loan per copy).
+func playCond(pol policy.Policy) (string, []any) {
+	vc, vargs := pol.VersionCond("v")
+	cond, cargs := pol.ItemCond("i")
+	lc, largs := pol.LoanCond("i")
+	return vc + " AND " + cond + " AND " + lc, append(append(vargs, cargs...), largs...)
+}
+
+// OnLoan reports whether the item is out on loan to someone other than the
+// caller, and when it is due back. playback.Start asks it first, so a refusal
+// can say when to try again; the same policy.LoanCond guards every file route.
+func (c *Catalog) OnLoan(ctx context.Context, pol policy.Policy, itemID int64) (bool, int64, error) {
+	lc, largs := pol.LoanCond("i")
+	var due sql.NullInt64
+	err := c.DB.QueryRowContext(ctx, `SELECT (SELECT MAX(due_at) FROM loans WHERE item_id = i.id AND ended_at IS NULL) FROM items i
+		WHERE i.id = ? AND NOT (`+lc+`)`, append([]any{itemID}, largs...)...).Scan(&due)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, 0, nil
+	}
+	return err == nil, due.Int64, err
 }
 
 // VersionForPlayback returns one version and its library root if the caller may
 // play it.
 func (c *Catalog) VersionForPlayback(ctx context.Context, pol policy.Policy, versionID int64) (Version, string, error) {
-	vc, vargs := pol.VersionCond("v")
-	cond, cargs := pol.ItemCond("i")
+	cond, args := playCond(pol)
 	rows, err := c.DB.QueryContext(ctx, `SELECT `+versionColumns+` FROM media_versions v JOIN items i ON i.id = v.item_id
-		WHERE v.id = ? AND `+vc+` AND `+cond, append(append([]any{versionID}, vargs...), cargs...)...)
+		WHERE v.id = ? AND `+cond, append([]any{versionID}, args...)...)
 	if err != nil {
 		return Version{}, "", err
 	}

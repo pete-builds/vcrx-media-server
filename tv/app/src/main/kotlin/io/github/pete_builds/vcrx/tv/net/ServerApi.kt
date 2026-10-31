@@ -25,7 +25,7 @@ class ServerApi(
     private val client: OkHttpClient,
     private val baseUrl: () -> String?,
     private val json: Json,
-    private val onUnauthorized: () -> Unit,
+    private val onUnauthorized: (ApiException.Unauthorized) -> Unit,
 ) {
     /** Checks that [baseUrl] is a VCRX server, before it is saved. Sends no token. */
     suspend fun serverInfo(baseUrl: String): ServerInfo {
@@ -171,7 +171,7 @@ class ServerApi(
             202 -> SubtitleAnswer.Preparing(answer.retryAfter)
             else -> {
                 val error = httpError(answer.status, answer.body.toString(Charsets.UTF_8), json)
-                if (error is ApiException.Unauthorized) onUnauthorized()
+                if (error is ApiException.Unauthorized) onUnauthorized(error)
                 throw error
             }
         }
@@ -189,7 +189,7 @@ class ServerApi(
                 client.newCall(request).await().use { response ->
                     if (!response.isSuccessful) {
                         val error = httpError(response.code, response.body.string(), json)
-                        if (error is ApiException.Unauthorized) onUnauthorized()
+                        if (error is ApiException.Unauthorized) onUnauthorized(error)
                         throw error
                     }
                     val source = response.body.source()
@@ -244,7 +244,8 @@ class ServerApi(
     /**
      * Runs the call and decodes the body with [serializer], or ignores it when null.
      * A 401 outside the login routes means the session is gone, so the app returns
-     * to the Login screen through [onUnauthorized]. The body is read on the IO
+     * to the Login screen, or for a lent tape that came back to "Be kind, rewind.",
+     * through [onUnauthorized]. The body is read on the IO
      * dispatcher: callers are often on Main, and a body larger than OkHttp's first
      * buffer is still on the socket.
      */
@@ -258,7 +259,7 @@ class ServerApi(
         }
         if (status !in 200..299) {
             val error = httpError(status, body, json)
-            if (error is ApiException.Unauthorized && authRoute) onUnauthorized()
+            if (error is ApiException.Unauthorized && authRoute) onUnauthorized(error)
             throw error
         }
         @Suppress("UNCHECKED_CAST")
