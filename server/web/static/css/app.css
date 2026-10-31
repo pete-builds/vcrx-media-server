@@ -532,3 +532,9 @@ kbd {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   a.card:hover .art, a.card:focus-visible .art, .cw-card:hover .card .art, .cw-card:hover .cw-remove { transform: none; }
 }
+
+/* Cast: name over role, wrapping into as many columns as fit. */
+.cast-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.cast-member { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); min-width: 0; }
+.cast-name { font-weight: 600; overflow-wrap: anywhere; }
+.cast-role { color: var(--muted); font-size: 0.875rem; overflow-wrap: anywhere; }

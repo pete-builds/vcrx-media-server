@@ -103,6 +103,7 @@ async function main() {
         const by = (t) => items.find((i) => i.title === t);
         out.direct = by("Copper Valley") ? by("Copper Valley").id : null;
         out.converted = by("River Line") ? by("River Line").id : null;
+        out.cast = by("Harbor Lights") ? by("Harbor Lights").id : null;
       } else {
         out.show = items[0] && items[0].id;
       }
@@ -156,6 +157,8 @@ async function main() {
     ...ids.libs.map((id) => [`/library/${id}`, ".grid .card"]),
     ...ids.libs.map((id) => [`/library/${id}/collections`, ".toolbar h1"]),
     [`/item/${ids.movie}`, ".hero h1"],
+    // Its NFO names an invented cast.
+    [`/item/${ids.cast}`, ".cast-list .cast-member .cast-role"],
     [`/item/${ids.show}`, ".hero h1"],
     ["/search?q=a", ".toolbar h1"],
     ["/activity/now", ".tiles"],

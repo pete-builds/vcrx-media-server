@@ -93,10 +93,17 @@ type ItemDetail struct {
 	Genres        []string           `json:"genres"`
 	Directors     []string           `json:"directors"`
 	Studios       []string           `json:"studios"`
+	Cast          []CastMember       `json:"cast"`
 	Ratings       map[string]float64 `json:"ratings"`
 	Versions      []Version          `json:"versions"`
 	NextEpisode   *ItemSummary       `json:"next_episode"`
 	Collections   []CollectionRef    `json:"collections"`
+}
+
+// CastMember is one actor in billing order, with the part they play when known.
+type CastMember struct {
+	Name string  `json:"name"`
+	Role *string `json:"role"`
 }
 
 type HomeRow struct {

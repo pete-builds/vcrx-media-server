@@ -10,7 +10,7 @@ export async function itemView({ match, params }) {
   const children = playable ? null : await api(`/items/${id}/children`);
   const admin = state.me && state.me.is_admin && (item.kind === "movie" || item.kind === "show");
   const fix = admin ? fixMatch(item, params && params.get("fix") === "1") : null;
-  const el = h("div", {}, hero(item), fix, playable ? techFacts(item) : null, children ? childrenSection(item, children.items || []) : null);
+  const el = h("div", {}, hero(item), fix, castSection(item), playable ? techFacts(item) : null, children ? childrenSection(item, children.items || []) : null);
   return { el, title: item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)}`.trim() : item.title, hero: true };
 }
 
@@ -173,6 +173,16 @@ function versionLabel(v) {
 function trackName(t) {
   const parts = [t.title, t.language ? t.language.toUpperCase() : "", t.codec, t.channels ? `${t.channels} ch` : "", t.is_forced ? "forced" : "", t.is_external ? "file" : ""];
   return parts.filter(Boolean).join(" · ");
+}
+
+// The cast in billing order, name over the part played.
+function castSection(item) {
+  const cast = item.cast || [];
+  if (!cast.length) return null;
+  return h("section", { class: "section cast" }, h("h2", {}, "Cast"),
+    h("ul", { class: "cast-list" }, cast.map((c) => h("li", { class: "cast-member" },
+      h("span", { class: "cast-name" }, c.name),
+      c.role ? h("span", { class: "cast-role" }, c.role) : null))));
 }
 
 function techFacts(item) {
