@@ -48,6 +48,10 @@ services:
       # Media is mounted read-only, one folder per library.
       - ${VCRX_MOVIES_DIR:?set VCRX_MOVIES_DIR in .env}:/media/Movies:ro
       - ${VCRX_TV_DIR:?set VCRX_TV_DIR in .env}:/media/TV:ro
+      # Optional music library: set VCRX_MUSIC_DIR in .env and add a library
+      # with kind: music and path: /media/Music to vcrx.yaml. Unset, an empty
+      # folder is mounted so the path never points at anything.
+      - ${VCRX_MUSIC_DIR:-./data/no-music}:/media/Music:ro
     labels:
       # Built locally, so there is no registry image for Watchtower to pull.
       com.centurylinklabs.watchtower.enable: "false"
