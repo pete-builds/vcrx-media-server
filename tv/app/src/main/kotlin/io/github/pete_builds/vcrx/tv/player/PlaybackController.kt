@@ -23,6 +23,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.extractor.DefaultExtractorsFactory
 import io.github.pete_builds.vcrx.tv.caps.CapabilityProbe
 import io.github.pete_builds.vcrx.tv.graph
@@ -30,7 +31,6 @@ import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.Item
 import io.github.pete_builds.vcrx.tv.net.PlaybackRequest
 import io.github.pete_builds.vcrx.tv.net.PlaybackSession
-import io.github.pete_builds.vcrx.tv.net.streamRefusal
 import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -44,7 +44,8 @@ sealed interface Phase {
     data object Playing : Phase
     /** 403 or 422 from the server: policy or a file this device cannot play yet. */
     data class Refused(val message: String) : Phase
-    data class Failed(val message: String, val unreachable: Boolean) : Phase
+    /** [busy]: the server is converting as many streams as it allows (503 busy); Retry may work shortly. */
+    data class Failed(val message: String, val unreachable: Boolean, val busy: Boolean = false) : Phase
     /** An episode ended and the next one starts when [secondsLeft] reaches zero. */
     data class UpNext(val next: Item, val secondsLeft: Int) : Phase
 }
@@ -59,6 +60,10 @@ data class TrackOption(val label: String, val selected: Boolean, val supported: 
  * One playback: asks the server for a session with this device's capabilities,
  * plays the stream through the shared OkHttp client (so it carries the token),
  * reports events, and turns remote keys into player actions.
+ *
+ * A converted session (see [StreamKinds]) plays as a progressive fragmented MP4
+ * and seeks by asking the server where a new stream starts; [timeline] maps the
+ * player's own time to the file's for everything shown and reported.
  */
 @OptIn(UnstableApi::class)
 class PlaybackController(
@@ -86,6 +91,14 @@ class PlaybackController(
     var scrubTargetMs by mutableStateOf<Long?>(null)
         private set
 
+    /** For a converted stream, what kind ("Audio converted"); null for direct play. */
+    var streamLabel by mutableStateOf<String?>(null)
+        private set
+
+    /** A converted stream is reopening at a new position. */
+    var reloading by mutableStateOf(false)
+        private set
+
     val player: ExoPlayer
     private var session: PlaybackSession? = null
     private var reporter: PlaybackReporter? = null
@@ -94,6 +107,14 @@ class PlaybackController(
     private var ticker: Job? = null
     private var autoHide: Job? = null
     private var countdown: Job? = null
+    private var seekJob: Job? = null
+
+    /** Direct play until a converted session replaces it in [play]. */
+    private var timeline = directTimeline()
+
+    /** Where a converted seek is headed while the server answers, so the bar does not jump back. */
+    private var pendingSeekMs: Long? = null
+    private val progressive: ProgressiveMediaSource.Factory
 
     /** For an episode, the one after it, from the item's details; null for a movie or the last episode. */
     private var nextEpisode: Item? = null
@@ -101,6 +122,7 @@ class PlaybackController(
     init {
         val http = OkHttpDataSource.Factory(graph.httpClient)
         val extractors = DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true)
+        progressive = ProgressiveMediaSource.Factory(DefaultDataSource.Factory(activity, http), extractors)
         val renderers = DefaultRenderersFactory(activity)
             // Platform decoders and passthrough win; the bundled FFmpeg decodes what they cannot.
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
@@ -132,26 +154,32 @@ class PlaybackController(
                 val created = graph.api.startPlayback(PlaybackRequest(itemId, versionId, start, capabilities))
                 if (released) return@launch
                 play(created)
-            } catch (e: ApiException.Http) {
-                phase = if (e.status == 403 || e.status == 422) Phase.Refused(e.message.orEmpty()) else Phase.Failed(e.message.orEmpty(), false)
-            } catch (e: ApiException.Unreachable) {
-                phase = Phase.Failed(e.message.orEmpty(), true)
             } catch (e: ApiException) {
-                phase = Phase.Failed(e.message.orEmpty(), false)
+                phase = phaseFor(e)
             }
         }
     }
 
     fun retry() {
-        val at = if (session != null) player.currentPosition else null
-        reporter?.stop(player.currentPosition, duration())
+        val at = if (session != null) shownPosition() else null
+        reporter?.stop(shownPosition(), duration())
         reporter = null
         session = null
+        seekJob?.cancel()
+        timeline.cancelSeeks()
+        pendingSeekMs = null
+        reloading = false
         player.stop()
         start(at)
     }
 
     private fun play(created: PlaybackSession) {
+        if (StreamKinds.isConverted(created)) {
+            playConverted(created)
+            return
+        }
+        timeline = directTimeline()
+        streamLabel = null
         val uri = graph.api.absoluteUrl(created.stream.url)
         if (uri == null) {
             phase = Phase.Failed("The server sent a stream address this app cannot use.", false)
@@ -180,19 +208,95 @@ class PlaybackController(
         player.prepare()
         player.playWhenReady = true
         phase = Phase.Playing
+        startReporting(created)
+    }
 
+    /**
+     * A converted session: no side-loaded subtitles (their times are the file's, while
+     * each stream restarts at zero after a seek), and the first stream opens at
+     * the resume position the server keyframe-aligned. The phase stays Starting until
+     * the first stream is set on the player.
+     */
+    private fun playConverted(created: PlaybackSession) {
+        timeline = StreamTimeline(
+            converted = true,
+            fileDurationMs = created.version.durationMs,
+            playerPositionMs = { player.currentPosition },
+            playerDurationMs = ::playerDuration,
+        )
+        streamLabel = StreamKinds.label(created)
+        session = created
+        reporter = PlaybackReporter { event -> graph.playbackEvents.send(created.sessionId, event) }
+        player.playWhenReady = true
+        openConverted(created, created.resumePositionMs, seekFromMs = null)
+        startReporting(created)
+    }
+
+    /**
+     * Asks the seek endpoint where a stream from [targetMs] starts, then plays that
+     * stream. [seekFromMs] is the position the viewer left, reported with the seek
+     * event once the new start is known; null for the first stream.
+     */
+    private fun openConverted(created: PlaybackSession, targetMs: Long, seekFromMs: Long?) {
+        val seek = timeline.beginSeek()
+        val target = timeline.seekTarget(targetMs)
+        pendingSeekMs = target
+        positionMs = target
+        reloading = true
+        seekJob?.cancel()
+        seekJob = activity.lifecycleScope.launch {
+            try {
+                val answer = graph.api.convertedStart(StreamKinds.seekPath(created), target)
+                if (released || !timeline.isCurrent(seek)) return@launch
+                val uri = graph.api.absoluteUrl(answer.url)
+                if (uri == null) {
+                    convertedFailed(Phase.Failed("The server sent a stream address this app cannot use.", false))
+                    return@launch
+                }
+                val item = MediaItem.Builder()
+                    .setUri(uri)
+                    .setMediaId(created.sessionId)
+                    .setMimeType(MimeTypes.VIDEO_MP4)
+                    .build()
+                timeline.land(seek, answer.startMs)
+                pendingSeekMs = null
+                reloading = false
+                // Before the new stream, so the seek is reported ahead of its buffering, as in direct play.
+                if (seekFromMs != null) reporter?.onSeek(seekFromMs, answer.startMs, duration())
+                player.setMediaSource(progressive.createMediaSource(item))
+                player.prepare()
+                positionMs = position()
+                if (phase == Phase.Starting) phase = Phase.Playing
+            } catch (e: ApiException) {
+                if (!released && timeline.isCurrent(seek)) convertedFailed(phaseFor(e))
+            }
+        }
+    }
+
+    /**
+     * A converted stream could not be opened or reopened: stop the old one and say why.
+     * A pending seek target is kept, so Retry and the final stop use where the viewer was going.
+     */
+    private fun convertedFailed(failed: Phase) {
+        reloading = false
+        player.stop()
+        if (failed is Phase.Failed) reporter?.onError(failed.message, shownPosition(), duration())
+        phase = failed
+    }
+
+    private fun startReporting(created: PlaybackSession) {
         heartbeat?.cancel()
         heartbeat = activity.lifecycleScope.launch {
             val interval = created.heartbeatIntervalMs.coerceAtLeast(2_000)
             while (isActive) {
                 delay(interval)
-                reporter?.onHeartbeat(player.currentPosition, duration(), player.isPlaying)
+                reporter?.onHeartbeat(position(), duration(), player.isPlaying)
             }
         }
         ticker?.cancel()
         ticker = activity.lifecycleScope.launch {
             while (isActive) {
-                positionMs = player.currentPosition
+                positionMs = shownPosition()
                 durationMs = duration() ?: 0L
                 delay(500)
             }
@@ -203,7 +307,9 @@ class PlaybackController(
     fun finishPlayback() {
         if (released) return
         released = true
-        reporter?.stop(player.currentPosition, duration())
+        reporter?.stop(shownPosition(), duration())
+        timeline.cancelSeeks()
+        seekJob?.cancel()
         heartbeat?.cancel()
         ticker?.cancel()
         autoHide?.cancel()
@@ -211,28 +317,61 @@ class PlaybackController(
         player.release()
     }
 
-    private fun duration(): Long? = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
+    private fun playerDuration(): Long? = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
+
+    private fun directTimeline() = StreamTimeline(
+        converted = false,
+        fileDurationMs = null,
+        playerPositionMs = { player.currentPosition },
+        playerDurationMs = ::playerDuration,
+    )
+
+    /** The position in the file: the player's own for direct play, start plus player time for a converted stream. */
+    private fun position(): Long = timeline.positionMs()
+
+    private fun duration(): Long? = timeline.durationMs()
+
+    /**
+     * What the bar shows and where a stop or retry lands: a converted stream's target
+     * until it opens (the resume point for the first one). Always [position] for direct play.
+     */
+    private fun shownPosition(): Long = pendingSeekMs ?: position()
+
+    /** Seeks the file: by range for direct play, by opening a new stream for a converted one. */
+    private fun seekTo(targetMs: Long) {
+        val current = session
+        if (timeline.converted && current != null) {
+            openConverted(current, targetMs, seekFromMs = position())
+        } else {
+            player.seekTo(targetMs)
+        }
+    }
 
     private fun listener() = object : Player.Listener {
         override fun onIsPlayingChanged(playing: Boolean) {
             isPlaying = playing
             if (playing) {
-                reporter?.onPlaying(player.currentPosition, duration())
+                reporter?.onPlaying(position(), duration())
                 if (overlay == Overlay.Info) scheduleHide(INFO_MS)
             } else if (!player.playWhenReady) {
-                reporter?.onPaused(player.currentPosition, duration())
+                reporter?.onPaused(position(), duration())
             }
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            if (!playWhenReady) reporter?.onPaused(player.currentPosition, duration())
+            if (!playWhenReady) reporter?.onPaused(position(), duration())
         }
 
         override fun onPlaybackStateChanged(state: Int) {
             when (state) {
-                Player.STATE_BUFFERING -> if (player.playWhenReady) reporter?.onBuffering(player.currentPosition, duration())
+                Player.STATE_BUFFERING -> if (player.playWhenReady) reporter?.onBuffering(position(), duration())
                 Player.STATE_ENDED -> {
-                    reporter?.stop(duration() ?: player.currentPosition, duration())
+                    if (timeline.endedEarly()) {
+                        // Cut off, not finished: keep the resume point and offer Retry from here.
+                        convertedFailed(Phase.Failed("The converted stream stopped before the end.", false))
+                        return
+                    }
+                    reporter?.stop(duration() ?: position(), duration())
                     val next = nextEpisode
                     if (next != null) upNext(next) else activity.finish()
                 }
@@ -241,24 +380,25 @@ class PlaybackController(
         }
 
         override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
-            if (reason == Player.DISCONTINUITY_REASON_SEEK) reporter?.onSeek(old.positionMs, new.positionMs, duration())
+            // A converted stream reports its seeks when the new stream opens, in file time.
+            if (reason == Player.DISCONTINUITY_REASON_SEEK && !timeline.converted) reporter?.onSeek(old.positionMs, new.positionMs, duration())
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            val message = describe(error)
-            reporter?.onError(message, player.currentPosition, duration())
-            phase = Phase.Failed(message, false)
+            val failed = describe(error)
+            reporter?.onError(failed.message, position(), duration())
+            phase = failed
         }
     }
 
-    private fun describe(error: PlaybackException): String {
+    private fun describe(error: PlaybackException): Phase.Failed {
         val http = generateSequence(error.cause) { it.cause }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
         return when {
-            http != null -> streamRefusal(http.responseCode, http.responseBody, graph.json)
+            http != null -> streamFailure(http.responseCode, http.responseBody, graph.json)
             error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
                 error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
-                "Lost the connection to the server."
-            else -> "Playback failed: ${error.errorCodeName}. ${error.message.orEmpty()}".trim()
+                Phase.Failed("Lost the connection to the server.", false)
+            else -> Phase.Failed("Playback failed: ${error.errorCodeName}. ${error.message.orEmpty()}".trim(), false)
         }
     }
 
@@ -283,20 +423,20 @@ class PlaybackController(
     }
 
     fun togglePlayPause() {
-        if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+        if (player.playbackState == Player.STATE_ENDED) seekTo(0)
         player.playWhenReady = !player.playWhenReady
         showInfo(persist = !player.playWhenReady)
     }
 
     fun skip(deltaMs: Long) {
-        player.seekTo(SeekSteps.clamp(player.currentPosition + deltaMs, duration()))
+        seekTo(SeekSteps.clamp(shownPosition() + deltaMs, duration()))
         showInfo()
     }
 
     private fun scrub(direction: Int, repeatCount: Int) {
-        val from = scrubTargetMs ?: player.currentPosition
+        val from = scrubTargetMs ?: shownPosition()
         scrubTargetMs = SeekSteps.clamp(from + direction * SeekSteps.stepMs(repeatCount), duration())
-        positionMs = player.currentPosition
+        positionMs = shownPosition()
         if (overlay == Overlay.Hidden) overlay = Overlay.Info
         autoHide?.cancel()
     }
@@ -304,7 +444,7 @@ class PlaybackController(
     private fun commitScrub() {
         val target = scrubTargetMs ?: return
         scrubTargetMs = null
-        player.seekTo(target)
+        seekTo(target)
         showInfo()
     }
 

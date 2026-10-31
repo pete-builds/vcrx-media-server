@@ -1,7 +1,10 @@
 package io.github.pete_builds.vcrx.tv.caps
 
 import android.media.MediaCodecInfo.CodecProfileLevel as P
+import io.github.pete_builds.vcrx.tv.net.ApiJson
 import io.github.pete_builds.vcrx.tv.net.AudioCodecCapability
+import io.github.pete_builds.vcrx.tv.net.Capabilities
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -91,5 +94,14 @@ class CapabilityBuilderTest {
         assertEquals(2160, caps.maxHeight)
         val noDisplay = CapabilityBuilder.build(listOf(avcHw), emptySet(), emptyList(), emptyList(), null, null)
         assertEquals(4096, noDisplay.maxWidth)
+    }
+
+    @Test
+    fun theRequestSaysThisPlayerTakesConvertedStreams() {
+        val caps = build()
+        assertTrue(caps.fmp4Stream)
+        // Without it the server refuses every file that is not direct play with 422.
+        val encoded = ApiJson.parseToJsonElement(ApiJson.encodeToString(Capabilities.serializer(), caps)).jsonObject
+        assertEquals("true", encoded["fmp4_stream"].toString())
     }
 }
