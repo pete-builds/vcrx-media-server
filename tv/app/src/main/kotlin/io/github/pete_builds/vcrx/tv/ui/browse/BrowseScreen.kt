@@ -43,6 +43,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
 import io.github.pete_builds.vcrx.tv.ui.components.Wordmark
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
+import io.github.pete_builds.vcrx.tv.ui.music.MusicSection
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -111,7 +112,14 @@ fun BrowseScreen() {
     val libraries = (vm.libraries as? LoadState.Ready)?.value.orEmpty()
     val entries = buildList {
         add(RailEntry(HOME, "Home", Icons.Filled.Home))
-        libraries.forEach { add(RailEntry(librarySection(it.id), it.name, if (it.kind == "show") AppIcons.Tv else AppIcons.Movie)) }
+        libraries.forEach {
+            val icon = when (it.kind) {
+                "show" -> AppIcons.Tv
+                "music" -> AppIcons.Audio
+                else -> AppIcons.Movie
+            }
+            add(RailEntry(librarySection(it.id), it.name, icon))
+        }
         add(RailEntry(SEARCH, "Search", Icons.Filled.Search))
         if (vm.isAdmin) add(RailEntry(ACTIVITY, "Activity", Icons.Filled.PlayArrow))
         add(RailEntry(SETTINGS, "Settings", Icons.Filled.Settings))
@@ -159,6 +167,7 @@ fun BrowseScreen() {
                 section.startsWith("library:") -> {
                     val library = libraries.firstOrNull { librarySection(it.id) == section }
                     when {
+                        library != null && library.kind == "music" -> MusicSection(library, vm.focus)
                         library != null -> LibrarySection(library, vm.focus)
                         vm.libraries is LoadState.Loading -> LoadingView()
                         else -> LaunchedEffect(section) { vm.section = HOME }

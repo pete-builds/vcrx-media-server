@@ -32,6 +32,7 @@ type ffStream struct {
 	Height           int               `json:"height"`
 	PixFmt           string            `json:"pix_fmt"`
 	BitsPerRawSample string            `json:"bits_per_raw_sample"`
+	BitsPerSample    int               `json:"bits_per_sample"`
 	ColorTransfer    string            `json:"color_transfer"`
 	AvgFrameRate     string            `json:"avg_frame_rate"`
 	RFrameRate       string            `json:"r_frame_rate"`

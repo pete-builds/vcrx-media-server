@@ -352,8 +352,8 @@ func (c *Config) validate() error {
 		if l.Name == "" || l.Path == "" {
 			errs = append(errs, errors.New("every library in vcrx.yaml needs a name and a path"))
 		}
-		if l.Kind != "movie" && l.Kind != "show" {
-			errs = append(errs, fmt.Errorf("library %q: kind must be movie or show", l.Name))
+		if l.Kind != "movie" && l.Kind != "show" && l.Kind != "music" {
+			errs = append(errs, fmt.Errorf("library %q: kind must be movie, show or music", l.Name))
 		}
 		if l.Grouping != "" && l.Grouping != "folder" && l.Grouping != "title_year" {
 			errs = append(errs, fmt.Errorf("library %q: grouping must be folder or title_year", l.Name))

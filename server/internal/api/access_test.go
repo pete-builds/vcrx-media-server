@@ -136,6 +136,8 @@ type walkFixture struct {
 	hiddenVersions                          []int64 // one per hidden playable, plus the film's 4K
 	hiddenSubs                              []int64
 	posters                                 []int64
+	// A music library the restricted friend is not granted.
+	music musicIDs
 	// Extras hidden with their film (a denied label) or by the ceiling (4K).
 	hiddenExtras []int64
 }
@@ -147,6 +149,7 @@ func newWalkFixture(t *testing.T) *walkFixture {
 	f.srv.Household = &household.Store{DB: f.db, AvatarDir: filepath.Join(t.TempDir(), "avatars")}
 	f.srv.PINs = household.NewLimiter(household.PINWindow)
 	withHLS(t, f, remux.New("ffmpeg", "ffprobe", 2, nil))
+	w.music = withMusic(t, f)
 	now := time.Now().UnixMilli()
 	exec := func(q string, args ...any) int64 {
 		t.Helper()
@@ -305,7 +308,7 @@ func newWalkFixture(t *testing.T) *walkFixture {
 
 // open lets the friend see everything; restrict applies the policy under test.
 func (w *walkFixture) open() {
-	w.setAccess([]int64{w.movies, w.tv, w.vault}, map[string]any{"allow_transcode": true, "allow_4k_transcode": true})
+	w.setAccess([]int64{w.movies, w.tv, w.vault, w.music.library}, map[string]any{"allow_transcode": true, "allow_4k_transcode": true})
 }
 
 func (w *walkFixture) restrict() {
@@ -360,6 +363,20 @@ func (w *walkFixture) startSession(tok string, item int64, version *int64) strin
 	return out.SessionID
 }
 
+// startListen opens a music listen and returns its session id.
+func (w *walkFixture) startListen(tok string, track int64) string {
+	w.t.Helper()
+	var out struct {
+		SessionID string `json:"session_id"`
+	}
+	r := w.do("POST", fmt.Sprintf("/api/v1/music/tracks/%d/sessions", track), tok, map[string]any{"capabilities": musicBrowserCaps()})
+	r.json(w.t, &out)
+	if r.code != 201 {
+		w.t.Fatalf("listen on track %d: %d %s", track, r.code, r.body)
+	}
+	return out.SessionID
+}
+
 // startExtraSession opens a converted-stream session on an extra.
 func (w *walkFixture) startExtraSession(tok string, extra int64) string {
 	w.t.Helper()
@@ -378,7 +395,41 @@ func (w *walkFixture) startExtraSession(tok string, extra int64) string {
 // probes lists every call the walk makes. sessions are the friend's, opened
 // while the friend could still play the hidden things; adminSession is not the
 // friend's at all.
-func (w *walkFixture) probes(sessions []string, adminSession string) []probe {
+func (w *walkFixture) probes(sessions []string, adminSession, listen string) []probe {
+	ps := w.musicProbes(listen)
+	return append(ps, w.videoProbes(sessions, adminSession)...)
+}
+
+// musicProbes cover the music routes: every one names a library, artist,
+// album or track in the Music library the restricted friend is not granted,
+// and the lists stop mentioning it. The friend's listen, opened while allowed,
+// is cut off: its progress events 404 like the rest.
+func (w *walkFixture) musicProbes(listen string) []probe {
+	m := w.music
+	caps := map[string]any{"capabilities": musicBrowserCaps()}
+	return []probe{
+		at("GET /api/v1/music/libraries/{library_id}/artists", m.library),
+		at("GET /api/v1/music/libraries/{library_id}/albums", m.library),
+		at("GET /api/v1/music/libraries/{library_id}/albums", m.library).query("live=false&sort=added"),
+		at("GET /api/v1/music/artists/{artist_id}", m.artist),
+		at("GET /api/v1/music/artists/{artist_id}/image", m.artist),
+		at("GET /api/v1/music/albums/{album_id}", m.album),
+		at("GET /api/v1/music/albums/{album_id}/cover", m.album).query("width=96"),
+		at("POST /api/v1/music/queue").with(map[string]any{"album_id": m.album, "capabilities": musicBrowserCaps()}),
+		at("POST /api/v1/music/queue").with(map[string]any{"artist_id": m.artist, "capabilities": musicBrowserCaps()}),
+		at("POST /api/v1/music/queue").with(map[string]any{"track_ids": []int64{m.flac, m.alac}, "capabilities": musicBrowserCaps()}),
+		at("POST /api/v1/music/tracks/{track_id}/sessions", m.flac).with(caps),
+		at("GET /api/v1/music/tracks/{track_id}/file", m.flac),
+		at("HEAD /api/v1/music/tracks/{track_id}/file", m.flac),
+		at("GET /api/v1/music/tracks/{track_id}/stream", m.alac).query("codec=aac"),
+		at("HEAD /api/v1/music/tracks/{track_id}/stream", m.alac).query("codec=aac"),
+		at("GET /api/v1/music/search").query("q=o").hides("Low Tide", "Apogee", "Glass Harbor", "Cedar Static"),
+		at("GET /api/v1/libraries").hides(`"name":"Music"`),
+		at("POST /api/v1/playback/sessions/{session_id}/events", listen).with(map[string]any{"type": "progress", "position_ms": 1000}),
+	}
+}
+
+func (w *walkFixture) videoProbes(sessions []string, adminSession string) []probe {
 	f := w.fixture
 	hiddenItems := []int64{w.vaultMovie, w.horrorMovie, w.ratedMovie, w.horrorShow, w.horrorSeason, w.horrorEpisode, w.strictSeason, w.strictEpisode}
 	hiddenPlayables := []int64{w.vaultMovie, w.horrorMovie, w.ratedMovie, w.horrorEpisode, w.strictEpisode}
@@ -593,13 +644,14 @@ func accessWalk(t *testing.T, kind string) {
 		sessions = append(sessions, w.startSession(w.friendTok, id, nil))
 	}
 	sessions = append(sessions, w.startSession(w.friendTok, w.movieID, &w.v4k))
+	listen := w.startListen(w.friendTok, w.music.flac)
 	// And on the extras about to be hidden: a trailer session has no version,
 	// so its events and streams must check the extra itself.
 	for _, x := range w.hiddenExtras {
 		sessions = append(sessions, w.startExtraSession(w.friendTok, x))
 	}
 	adminSession := w.startSession(w.adminTok, w.movieID, &w.v1080)
-	ps := w.probes(sessions, adminSession)
+	ps := w.probes(sessions, adminSession, listen)
 	checkCoverage(t, w.srv.Routes(), ps)
 
 	call := func(p probe, tok string) resp {

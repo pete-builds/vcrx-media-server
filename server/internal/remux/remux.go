@@ -70,6 +70,13 @@ type Service struct {
 	sem             chan struct{}
 	// tsem limits video transcodes, which do not count against sem.
 	tsem chan struct{}
+	// asem limits converted music (audio.go). A listener's player fetches the
+	// next track while one plays, so music has its own slots rather than
+	// taking the video streams'.
+	asem chan struct{}
+	// Opus is true when ffmpeg has libopus, so music can convert to Opus as
+	// well as AAC. DetectAudio sets it.
+	Opus bool
 	// ToneMap is true when ffmpeg has the zscale and tonemap filters, so HDR
 	// can be converted to SDR. Detect sets it.
 	ToneMap bool
@@ -85,7 +92,7 @@ func New(ffmpeg, ffprobe string, maxStreams int, log *slog.Logger) *Service {
 		log = slog.Default()
 	}
 	return &Service{FFmpeg: ffmpeg, FFprobe: ffprobe, Log: log, sem: make(chan struct{}, maxStreams),
-		tsem: make(chan struct{}, DefaultMaxTranscodes)}
+		tsem: make(chan struct{}, DefaultMaxTranscodes), asem: make(chan struct{}, DefaultMaxAudio)}
 }
 
 // SetMaxTranscodes changes how many video transcodes may run at once. Call it

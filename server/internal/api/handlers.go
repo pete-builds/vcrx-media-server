@@ -499,6 +499,15 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A listen is the same: the caller must still be allowed the track.
+	if ok, err := s.musicListenAllowed(r.Context(), ri.Policy, ri.Session.User.ID, r.PathValue("session_id")); err != nil || !ok {
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		writeError(w, http.StatusNotFound, "not_found", "Unknown playback session.")
+		return
+	}
 	err := s.Playback.RecordEvent(r.Context(), ri.Session.User.ID, r.PathValue("session_id"), ev)
 	if err == nil && (ev.Type == "stop" || ev.Type == "error") {
 		// The client is done with this session, so any stream still open for it
