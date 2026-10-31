@@ -105,6 +105,21 @@ function actions(item) {
     }
   });
   row.append(toggle);
+  if ((item.kind === "movie" || item.kind === "episode") && w.position_ms > 0 && !w.played) {
+    const forget = h("button", { class: "btn", type: "button" }, icon("close"), "Remove from Continue Watching");
+    forget.addEventListener("click", async () => {
+      forget.disabled = true;
+      try {
+        await api(`/items/${item.id}/progress`, { method: "DELETE" });
+        toast("Removed from Continue Watching");
+        go(location.hash.slice(1));
+      } catch (e) {
+        toast(e.message);
+        forget.disabled = false;
+      }
+    });
+    row.append(forget);
+  }
   return row;
 }
 

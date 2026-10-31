@@ -490,3 +490,24 @@ func (c *Catalog) SetWatched(ctx context.Context, pol policy.Policy, userID, ite
 	}
 	return tx.Commit()
 }
+
+// ClearProgress forgets the caller's resume position on a movie or episode, so
+// it leaves Continue Watching, without marking it played or touching the play
+// count. On a show or season it clears every episode. Only the caller's own
+// watch state changes; an item the caller cannot see is ErrNotFound.
+func (c *Catalog) ClearProgress(ctx context.Context, pol policy.Policy, userID, itemID int64, now int64) error {
+	ok, err := c.visible(ctx, pol, itemID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	_, err = c.DB.ExecContext(ctx, `UPDATE watch_state SET position_ms = 0, updated_at = ?
+		WHERE user_id = ? AND position_ms > 0 AND item_id IN (
+			SELECT ? UNION ALL
+			SELECT id FROM items WHERE parent_id = ? AND kind = 'episode' UNION ALL
+			SELECT e.id FROM items s JOIN items e ON e.parent_id = s.id WHERE s.parent_id = ? AND e.kind = 'episode')`,
+		now, userID, itemID, itemID, itemID)
+	return err
+}

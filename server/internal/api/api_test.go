@@ -1072,3 +1072,74 @@ func TestCollectionsAndFilters(t *testing.T) {
 		t.Fatalf("decade 1990: %d", page.Total)
 	}
 }
+
+// Remove from Continue Watching: the resume position goes, the item stays
+// unplayed, and only the caller's own watch state changes.
+func TestClearProgressLeavesContinueWatching(t *testing.T) {
+	f := newFixture(t)
+	now := time.Now().UnixMilli()
+	for _, u := range []string{"pete", "friend"} {
+		if _, err := f.db.Exec(`INSERT INTO watch_state (user_id, item_id, position_ms, duration_ms, played, play_count, last_played_at, updated_at)
+			VALUES ((SELECT id FROM users WHERE username = ?), ?, 1_200_000, 6_000_000, 0, 0, ?, ?)`, u, f.movieID, now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	continuing := func(tok string) bool {
+		t.Helper()
+		var home struct{ Rows []catalog.HomeRow }
+		f.do("GET", "/api/v1/home", tok, nil).json(t, &home)
+		for _, row := range home.Rows {
+			if row.ID != "continue_watching" {
+				continue
+			}
+			for _, it := range row.Items {
+				if it.ID == f.movieID {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !continuing(f.adminTok) || !continuing(f.friendTok) {
+		t.Fatal("setup: the movie should be in both users' Continue Watching")
+	}
+	url := fmt.Sprintf("/api/v1/items/%d/progress", f.movieID)
+
+	// A user who cannot see the item gets 404, and nobody's state moves.
+	if r := f.do("DELETE", url, f.strangerTok, nil); r.code != 404 {
+		t.Fatalf("stranger cleared an item it cannot see: %d %s", r.code, r.body)
+	}
+	if r := f.do("DELETE", "/api/v1/items/999999/progress", f.adminTok, nil); r.code != 404 {
+		t.Fatalf("missing item: %d %s", r.code, r.body)
+	}
+	if !continuing(f.adminTok) || !continuing(f.friendTok) {
+		t.Fatal("a refused clear changed someone's Continue Watching")
+	}
+
+	// The friend clears their own: it leaves their row, not the admin's.
+	if r := f.do("DELETE", url, f.friendTok, nil); r.code != 204 {
+		t.Fatalf("clear: %d %s", r.code, r.body)
+	}
+	if continuing(f.friendTok) {
+		t.Fatal("the movie is still in the friend's Continue Watching")
+	}
+	if !continuing(f.adminTok) {
+		t.Fatal("clearing the friend's progress removed it from the admin's Continue Watching")
+	}
+	var d catalog.ItemDetail
+	f.do("GET", fmt.Sprintf("/api/v1/items/%d", f.movieID), f.friendTok, nil).json(t, &d)
+	if d.Watch.Played || d.Watch.PositionMs != 0 || d.Watch.PlayCount != 0 {
+		t.Fatalf("after clearing, friend watch state: %+v", d.Watch)
+	}
+	f.do("GET", fmt.Sprintf("/api/v1/items/%d", f.movieID), f.adminTok, nil).json(t, &d)
+	if d.Watch.PositionMs != 1_200_000 {
+		t.Fatalf("admin position changed to %d", d.Watch.PositionMs)
+	}
+	// Clearing again, or an item never started, is still fine.
+	if r := f.do("DELETE", url, f.friendTok, nil); r.code != 204 {
+		t.Fatalf("second clear: %d", r.code)
+	}
+	if r := f.do("DELETE", fmt.Sprintf("/api/v1/items/%d/progress", f.episodeID), f.friendTok, nil); r.code != 204 {
+		t.Fatalf("clear an unstarted episode: %d", r.code)
+	}
+}
