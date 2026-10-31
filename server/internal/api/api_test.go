@@ -24,6 +24,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/artwork"
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
+	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
@@ -1003,5 +1004,71 @@ func TestClientIPBehindProxyFailsClosed(t *testing.T) {
 	// Several header lines are read as one list; the right-most untrusted hop wins.
 	if got := ip("10.9.9.9", "8.8.4.4"); got != "8.8.4.4" {
 		t.Errorf("two headers: %q", got)
+	}
+}
+
+func TestCollectionsAndFilters(t *testing.T) {
+	f := newFixture(t)
+	now := time.Now().UnixMilli()
+	var movies int64
+	if err := f.db.QueryRow(`SELECT library_id FROM items WHERE id = ?`, f.movieID).Scan(&movies); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.db.Exec(`INSERT INTO items (library_id, kind, group_key, title, sort_title, year, tmdb_collection_id, added_at, updated_at)
+		VALUES (?, 'movie', 'sequel|2005', 'The Sequel', 'Sequel', 2005, 77, ?, ?)`, movies, now, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sequel, _ := res.LastInsertId()
+	if _, err := f.db.Exec(`INSERT INTO media_versions (item_id, library_id, path, rel_path, size, mtime, container, resolution, probe_status, added_at, updated_at)
+		VALUES (?, ?, '/x/s.mkv', 's.mkv', 1, 0, 'mkv', '1080p', 'ok', ?, ?)`, sequel, movies, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Exec(`UPDATE items SET tmdb_collection_id = 77 WHERE id = ?`, f.movieID); err != nil {
+		t.Fatal(err)
+	}
+	b := &collections.Builder{DB: f.db, Names: func(ctx context.Context, id int64) (string, error) { return "The Film Collection", nil }}
+	if r, err := b.Build(context.Background()); err != nil || r.Collections != 1 {
+		t.Fatalf("build: %+v %v", r, err)
+	}
+
+	var list struct{ Collections []catalog.Collection }
+	f.do("GET", fmt.Sprintf("/api/v1/libraries/%d/collections", movies), f.adminTok, nil).json(t, &list)
+	if len(list.Collections) != 1 || list.Collections[0].ItemCount != 2 || list.Collections[0].Name != "The Film Collection" {
+		t.Fatalf("collections: %+v", list)
+	}
+	id := list.Collections[0].ID
+	var one struct {
+		Collection catalog.Collection
+		Items      []catalog.ItemSummary
+	}
+	f.do("GET", fmt.Sprintf("/api/v1/collections/%d", id), f.adminTok, nil).json(t, &one)
+	if len(one.Items) != 2 || one.Items[0].ID != f.movieID || one.Items[1].ID != sequel {
+		t.Fatalf("members in release order: %+v", one.Items)
+	}
+	var detail struct{ Collections []catalog.CollectionRef }
+	f.do("GET", fmt.Sprintf("/api/v1/items/%d", sequel), f.adminTok, nil).json(t, &detail)
+	if len(detail.Collections) != 1 || detail.Collections[0].ID != id {
+		t.Fatalf("item detail collections: %+v", detail.Collections)
+	}
+	// Someone without the library sees neither the collection nor its list.
+	if r := f.do("GET", fmt.Sprintf("/api/v1/collections/%d", id), f.strangerTok, nil); r.code != 404 {
+		t.Fatalf("stranger reading a collection: %d", r.code)
+	}
+
+	var filters catalog.Filters
+	f.do("GET", fmt.Sprintf("/api/v1/libraries/%d/filters", movies), f.adminTok, nil).json(t, &filters)
+	if len(filters.Genres) != 1 || filters.Genres[0] != (catalog.Count{Value: "Drama", Count: 1}) ||
+		len(filters.Decades) != 1 || filters.Decades[0] != (catalog.Count{Value: "2000s", Count: 2}) {
+		t.Fatalf("filters: %+v", filters)
+	}
+	var page struct{ Total int }
+	f.do("GET", fmt.Sprintf("/api/v1/libraries/%d/items?decade=2000", movies), f.adminTok, nil).json(t, &page)
+	if page.Total != 2 {
+		t.Fatalf("decade 2000: %d", page.Total)
+	}
+	f.do("GET", fmt.Sprintf("/api/v1/libraries/%d/items?decade=1990", movies), f.adminTok, nil).json(t, &page)
+	if page.Total != 0 {
+		t.Fatalf("decade 1990: %d", page.Total)
 	}
 }

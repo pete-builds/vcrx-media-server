@@ -134,12 +134,69 @@ paths:
         - { name: order, in: query, schema: { type: string, enum: [asc, desc] } }
         - { name: genre, in: query, schema: { type: string } }
         - { name: year, in: query, schema: { type: integer } }
+        - { name: decade, in: query, schema: { type: integer }, description: "First year of a decade: 1990 for 1990 to 1999." }
         - { name: resolution, in: query, schema: { $ref: "#/components/schemas/Resolution" } }
         - { name: unwatched, in: query, schema: { type: boolean } }
         - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
         - { name: offset, in: query, schema: { type: integer, default: 0 } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ItemPage" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/libraries/{library_id}/collections:
+    get:
+      operationId: listLibraryCollections
+      summary: >-
+        The library's collections in name order, counting only members the caller may see. Franchise collections are built
+        automatically from TMDb collections with two or more films in the library, names from TMDb.
+      parameters:
+        - { name: library_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [collections]
+                properties:
+                  collections: { type: array, items: { $ref: "#/components/schemas/Collection" } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/libraries/{library_id}/filters:
+    get:
+      operationId: getLibraryFilters
+      summary: Genres and decades of the library's visible titles, with counts, for genre= and decade= on the items list.
+      parameters:
+        - { name: library_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [genres, decades]
+                properties:
+                  genres: { type: array, items: { $ref: "#/components/schemas/FilterCount" } }
+                  decades: { type: array, items: { $ref: "#/components/schemas/FilterCount" }, description: "Values like 1990s, newest first." }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/collections/{collection_id}:
+    get:
+      operationId: getCollection
+      summary: A collection and its members in order (release order for a franchise).
+      parameters:
+        - { name: collection_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [collection, items]
+                properties:
+                  collection: { $ref: "#/components/schemas/Collection" }
+                  items: { type: array, items: { $ref: "#/components/schemas/ItemSummary" } }
         "404": { $ref: "#/components/responses/Error" }
 
   /api/v1/search:
@@ -755,7 +812,31 @@ components:
             studios: { type: array, items: { type: string } }
             ratings: { type: object, additionalProperties: { type: number }, description: "Keyed by source: imdb, tmdb, nfo." }
             versions: { type: array, items: { $ref: "#/components/schemas/Version" }, description: Only versions the caller may play, best first. }
+            collections:
+              type: array
+              items:
+                type: object
+                required: [id, name]
+                properties:
+                  id: { type: integer }
+                  name: { type: string }
+              description: Collections this item is in.
             next_episode: { oneOf: [{ $ref: "#/components/schemas/ItemSummary" }, { type: "null" }], description: "For a show or season: the episode Play should start (first unwatched, or in progress). For an episode: the one after it, for Up Next (the rest of the season, then the next; specials only after a special); null at the end of the show." }
+    Collection:
+      type: object
+      required: [id, library_id, name, item_count, poster_item_ids]
+      properties:
+        id: { type: integer }
+        library_id: { type: integer }
+        name: { type: string }
+        item_count: { type: integer }
+        poster_item_ids: { type: array, items: { type: integer }, description: Up to four members whose posters make the collection's artwork. }
+    FilterCount:
+      type: object
+      required: [value, count]
+      properties:
+        value: { type: string }
+        count: { type: integer }
     ItemPage:
       type: object
       required: [items, total]

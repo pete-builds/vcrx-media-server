@@ -96,6 +96,7 @@ type ItemDetail struct {
 	Ratings       map[string]float64 `json:"ratings"`
 	Versions      []Version          `json:"versions"`
 	NextEpisode   *ItemSummary       `json:"next_episode"`
+	Collections   []CollectionRef    `json:"collections"`
 }
 
 type HomeRow struct {
@@ -110,6 +111,7 @@ type ListQuery struct {
 	Order      string
 	Genre      string
 	Year       int
+	Decade     int // e.g. 1990 for 1990 to 1999
 	Resolution string
 	Unwatched  bool
 	Limit      int

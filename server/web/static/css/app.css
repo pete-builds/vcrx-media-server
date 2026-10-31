@@ -258,3 +258,5 @@ table.list td.num, table.list th.num { text-align: right; font-variant-numeric: 
 .check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 .checks select { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 8px; }
 .add-user { display: grid; gap: 12px; max-width: 900px; }
+a.link { color: var(--orange); }
+a.link:hover { text-decoration: underline; }

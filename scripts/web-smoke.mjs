@@ -110,6 +110,7 @@ async function main() {
   const pages = [
     ["/", ".row .card"],
     ...ids.libs.map((id) => [`/library/${id}`, ".grid .card"]),
+    ...ids.libs.map((id) => [`/library/${id}/collections`, ".toolbar h1"]),
     [`/item/${ids.movie}`, ".hero h1"],
     [`/item/${ids.show}`, ".hero h1"],
     ["/search?q=a", ".toolbar h1"],

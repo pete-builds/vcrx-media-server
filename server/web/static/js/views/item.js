@@ -48,6 +48,8 @@ function hero(item) {
         h("div", { class: "meta" }, meta.map((m) => (typeof m === "string" ? h("span", {}, m) : m))),
         item.tagline ? h("p", { class: "tagline" }, item.tagline) : null,
         item.overview ? h("p", { class: "overview" }, item.overview) : null,
+        (item.collections || []).length ? h("p", { class: "muted" }, "Part of ",
+          item.collections.flatMap((c, i) => [i ? ", " : "", h("a", { class: "link", href: `#/collection/${c.id}` }, c.name)])) : null,
         actions(item))));
 }
 

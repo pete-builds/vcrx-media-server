@@ -13,13 +13,18 @@ export async function libraryView({ match, params }) {
   const order = params.get("order") || (sort === "title" ? "asc" : "desc");
   const unwatched = params.get("unwatched") === "1";
   const resolution = params.get("resolution") || "";
+  const genre = params.get("genre") || "";
+  const decade = params.get("decade") || "";
   const query = (offset) => {
     const q = new URLSearchParams({ sort, order, limit: String(PAGE), offset: String(offset) });
     if (unwatched) q.set("unwatched", "true");
     if (resolution) q.set("resolution", resolution);
+    if (genre) q.set("genre", genre);
+    if (decade) q.set("decade", decade);
     return `/libraries/${id}/items?${q}`;
   };
-  const first = await api(query(0));
+  const [first, filters, cols] = await Promise.all([api(query(0)), api(`/libraries/${id}/filters`).catch(() => null),
+    api(`/libraries/${id}/collections`).catch(() => ({ collections: [] }))]);
   const grid = h("div", { class: "grid" }, first.items.map((i) => card(i)));
   let loaded = first.items.length;
   const count = h("span", { class: "count" }, `${first.total} ${first.total === 1 ? "title" : "titles"}`);
@@ -42,6 +47,8 @@ export async function libraryView({ match, params }) {
     const p = new URLSearchParams({ sort, order });
     if (unwatched) p.set("unwatched", "1");
     if (resolution) p.set("resolution", resolution);
+    if (genre) p.set("genre", genre);
+    if (decade) p.set("decade", decade);
     for (const [k, v] of Object.entries(changes)) {
       if (v === "" || v === null) p.delete(k);
       else p.set(k, v);
@@ -58,9 +65,19 @@ export async function libraryView({ match, params }) {
     [["", "Any resolution"], ["4K", "4K"], ["1080p", "1080p"], ["720p", "720p"], ["SD", "SD"]]
       .map(([v, label]) => h("option", { value: v, selected: v === resolution }, label)));
   const unwatchedBox = h("label", {}, h("input", { type: "checkbox", checked: unwatched, onchange: (e) => set({ unwatched: e.target.checked ? "1" : "" }) }), "Unwatched");
+  const genreSel = filters && filters.genres.length ? h("select", { "aria-label": "Genre", onchange: (e) => set({ genre: e.target.value }) },
+    h("option", { value: "" }, "Any genre"),
+    filters.genres.map((g) => h("option", { value: g.value, selected: g.value === genre }, `${g.value} (${g.count})`))) : null;
+  const decadeSel = filters && filters.decades.length ? h("select", { "aria-label": "Decade", onchange: (e) => set({ decade: e.target.value }) },
+    h("option", { value: "" }, "Any decade"),
+    filters.decades.map((d) => {
+      const v = d.value.replace(/s$/, "");
+      return h("option", { value: v, selected: v === decade }, `${d.value} (${d.count})`);
+    })) : null;
+  const colLink = cols.collections.length ? h("a", { class: "btn btn-small", href: `#/library/${id}/collections` }, `Collections (${cols.collections.length})`) : null;
 
   const el = h("div", {},
-    h("div", { class: "toolbar" }, h("h1", {}, lib ? lib.name : "Library"), count, sortSel, resSel, unwatchedBox),
+    h("div", { class: "toolbar" }, h("h1", {}, lib ? lib.name : "Library"), count, colLink, sortSel, genreSel, decadeSel, resSel, unwatchedBox),
     first.total ? grid : h("div", { class: "empty" }, "No titles match these filters."),
     more);
   return { el, title: lib ? lib.name : "Library" };

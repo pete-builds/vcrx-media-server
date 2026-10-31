@@ -328,6 +328,21 @@ func (c *Client) Movie(ctx context.Context, id int64) (*Movie, error) {
 	return &m, nil
 }
 
+// CollectionInfo is a TMDb collection (a franchise such as a film series).
+type CollectionInfo struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// Collection returns a collection's name, for franchise collections.
+func (c *Client) Collection(ctx context.Context, id int64) (*CollectionInfo, error) {
+	var out CollectionInfo
+	if err := c.get(ctx, "/collection/"+strconv.FormatInt(id, 10), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *Client) Show(ctx context.Context, id int64) (*Show, error) {
 	var s Show
 	q := url.Values{"append_to_response": {"credits,content_ratings,external_ids"}}

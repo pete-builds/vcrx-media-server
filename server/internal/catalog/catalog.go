@@ -92,6 +92,10 @@ func (c *Catalog) LibraryItems(ctx context.Context, pol policy.Policy, userID, l
 		where = append(where, "i.year = ?")
 		wargs = append(wargs, q.Year)
 	}
+	if q.Decade > 0 {
+		where = append(where, "i.year BETWEEN ? AND ?")
+		wargs = append(wargs, q.Decade, q.Decade+9)
+	}
 	if q.Resolution != "" {
 		vc, vargs := pol.VersionCond("rv")
 		where = append(where, `EXISTS (SELECT 1 FROM media_versions rv WHERE rv.item_id = i.id AND rv.resolution = ? AND `+vc+`)`)
