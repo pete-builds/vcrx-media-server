@@ -17,9 +17,10 @@ const (
 	TrailerRetry = 6 * time.Hour
 )
 
-// TrailerStats counts one trailer pass.
+// TrailerStats counts one trailer pass. Skipped counts trailers YouTube said
+// no longer play embedded, passed over for the next best.
 type TrailerStats struct {
-	Found, None, Errors int
+	Found, None, Errors, Skipped int
 }
 
 // trailerPass runs RefreshTrailers for Run and logs it. It reports true when
@@ -27,7 +28,7 @@ type TrailerStats struct {
 func (e *Enricher) trailerPass(ctx context.Context) bool {
 	st, err := e.RefreshTrailers(ctx)
 	if st.Found+st.None+st.Errors > 0 {
-		e.log().Info("tmdb trailer pass", "found", st.Found, "none", st.None, "errors", st.Errors)
+		e.log().Info("tmdb trailer pass", "found", st.Found, "none", st.None, "errors", st.Errors, "skipped", st.Skipped)
 	}
 	if errors.Is(err, tmdb.ErrUnauthorized) {
 		e.log().Error("tmdb enrichment stopped: TMDb rejected the API key; check VCRX_TMDB_API_KEY")
@@ -107,7 +108,10 @@ func (e *Enricher) trailer(ctx context.Context, c trailerCand, st *TrailerStats)
 			c.id, c.tmdbID, err.Error(), now)
 		return werr
 	}
-	v, ok := tmdb.BestTrailer(videos, e.TMDb.Language)
+	v, ok, err := e.playableTrailer(ctx, tmdb.Trailers(videos, e.TMDb.Language), st)
+	if err != nil {
+		return err
+	}
 	if !ok {
 		st.None++
 		_, err := e.DB.ExecContext(ctx, `INSERT INTO youtube_trailers (item_id, tmdb_id, status, checked_at) VALUES (?, ?, 'none', ?)
@@ -122,4 +126,28 @@ func (e *Enricher) trailer(ctx context.Context, c trailerCand, st *TrailerStats)
 			language = excluded.language, published_at = excluded.published_at, status = 'found', error = NULL,
 			checked_at = excluded.checked_at`, c.id, c.tmdbID, v.Key, v.Name, v.Language, v.PublishedAt, now)
 	return err
+}
+
+// playableTrailer is the first of ranked that YouTube still embeds. When
+// YouTube cannot be asked (no internet, rate limited), the one in hand is
+// kept rather than dropped; the next refresh checks it again.
+func (e *Enricher) playableTrailer(ctx context.Context, ranked []tmdb.Video, st *TrailerStats) (tmdb.Video, bool, error) {
+	for _, v := range ranked {
+		if e.Embeddable == nil {
+			return v, true, nil
+		}
+		ok, err := e.Embeddable(ctx, v.Key)
+		if ctx.Err() != nil {
+			return tmdb.Video{}, false, ctx.Err()
+		}
+		if err != nil {
+			e.log().Warn("youtube check failed; keeping the trailer unchecked", "key", v.Key, "err", err)
+			return v, true, nil
+		}
+		if ok {
+			return v, true, nil
+		}
+		st.Skipped++
+	}
+	return tmdb.Video{}, false, nil
 }

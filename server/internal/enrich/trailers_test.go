@@ -91,3 +91,63 @@ func TestTrailersFoundRefreshedAndKeptOffline(t *testing.T) {
 		t.Fatalf("unauthorized: %v", err)
 	}
 }
+
+// YouTube no longer plays a trailer TMDb still lists: the pass takes the next
+// best, keeps what it has when YouTube cannot be asked, and offers none when
+// every one is gone.
+func TestTrailersSkipWhatYouTubeNoLongerPlays(t *testing.T) {
+	v := setup(t)
+	v.f.responses["/movie/100/videos"] = readFixture(t, "movie_videos.json")
+	movie := v.item(v.library("movie"), "movie", nil, "lantern keeper|2011", "Lantern Keeper", 2011, nil, nil)
+	v.exec(`UPDATE items SET tmdb_id = 100 WHERE id = ?`, movie)
+	ctx := context.Background()
+	gone := map[string]bool{"OffTrlrEn01": true}
+	var offline bool
+	var asked []string
+	v.e.Embeddable = func(_ context.Context, id string) (bool, error) {
+		asked = append(asked, id)
+		if offline {
+			return false, errors.New("no internet")
+		}
+		return !gone[id], nil
+	}
+	key := func() string {
+		return v.str(`SELECT IFNULL(youtube_key, '') || '|' || status FROM youtube_trailers WHERE item_id = ?`, movie)
+	}
+
+	st, err := v.e.RefreshTrailers(ctx)
+	if err != nil || st.Found != 1 || st.Skipped != 1 {
+		t.Fatalf("first pass: %+v, %v", st, err)
+	}
+	if got := key(); got != "OldTrlrEn01|found" {
+		t.Fatalf("trailer = %q, want the next best after the gone one", got)
+	}
+
+	// YouTube cannot be asked at the refresh: the best is kept unchecked rather
+	// than the title losing its trailer.
+	offline = true
+	v.now = v.now.Add(TrailerRefresh + time.Hour)
+	if st, err := v.e.RefreshTrailers(ctx); err != nil || st.Found != 1 || st.Skipped != 0 {
+		t.Fatalf("offline pass: %+v, %v", st, err)
+	}
+	if got := key(); got != "OffTrlrEn01|found" {
+		t.Fatalf("offline trailer = %q", got)
+	}
+
+	// Every trailer gone: none, so the page shows no dead button.
+	offline = false
+	for _, k := range []string{"OldTrlrEn01", "OffTrlrDe01", "FanTrlrEn01", "tEaSer0001a"} {
+		gone[k] = true
+	}
+	asked = nil
+	v.now = v.now.Add(TrailerRefresh + time.Hour)
+	if st, err := v.e.RefreshTrailers(ctx); err != nil || st.None != 1 || st.Skipped != 5 {
+		t.Fatalf("all gone: %+v, %v", st, err)
+	}
+	if got := key(); got != "|none" {
+		t.Fatalf("all gone: trailer = %q", got)
+	}
+	if len(asked) != 5 {
+		t.Fatalf("asked YouTube about %v; want the five YouTube trailers only", asked)
+	}
+}
