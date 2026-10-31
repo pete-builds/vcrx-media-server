@@ -205,6 +205,26 @@ func (s *Store) Login(ctx context.Context, username, password string, dev Device
 	if !CheckPassword(hash, password) || u.Disabled {
 		return "", Session{}, ErrInvalidCredentials
 	}
+	return s.issue(ctx, u, dev, ip)
+}
+
+// SignInAs starts a session for a user without a password. Only the trusted
+// network sign-in calls it, after checking the client's address.
+func (s *Store) SignInAs(ctx context.Context, username string, dev Device, ip string) (string, Session, error) {
+	u, _, err := s.UserByName(ctx, username)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", Session{}, ErrInvalidCredentials
+	}
+	if err != nil {
+		return "", Session{}, err
+	}
+	if u.Disabled {
+		return "", Session{}, ErrInvalidCredentials
+	}
+	return s.issue(ctx, u, dev, ip)
+}
+
+func (s *Store) issue(ctx context.Context, u User, dev Device, ip string) (string, Session, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", Session{}, err

@@ -217,17 +217,16 @@ func serve() error {
 	authStore := &auth.Store{DB: a.db, TTL: cfg.SessionTTL}
 	pb := &playback.Service{DB: a.db, Catalog: cat}
 
-	var proxies []netip.Prefix
-	for _, p := range cfg.TrustedProxies {
-		pfx, err := netip.ParsePrefix(p)
-		if err != nil {
-			addr, aerr := netip.ParseAddr(p)
-			if aerr != nil {
-				return fmt.Errorf("trusted proxy %q: %w", p, err)
-			}
-			pfx = netip.PrefixFrom(addr, addr.BitLen())
-		}
-		proxies = append(proxies, pfx)
+	proxies, err := prefixes(cfg.TrustedProxies)
+	if err != nil {
+		return fmt.Errorf("trusted proxies: %w", err)
+	}
+	trustedNets, err := prefixes(cfg.TrustedNetworks)
+	if err != nil {
+		return fmt.Errorf("trusted networks: %w", err)
+	}
+	if cfg.AutoSignInUser != "" {
+		log.Info("sign-in without a password is on for trusted networks", "user", cfg.AutoSignInUser, "networks", cfg.TrustedNetworks)
 	}
 
 	art := artwork.New(a.db, cfg.ArtworkCacheDir(), cfg.FFmpegPath)
@@ -238,6 +237,7 @@ func serve() error {
 		Artwork: art, Admin: adm, Scans: scanAdapter{scans},
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
+		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets,
 	}
 	if users, err := authStore.CountUsers(ctx); err == nil && users == 0 {
 		log.Warn("no users yet: create the admin with `docker compose exec vcrx vcrx user add -username <name> -admin`")
@@ -602,4 +602,21 @@ func metadataCmd(args []string) error {
 	default:
 		return fmt.Errorf("metadata: unknown command %q", sub)
 	}
+}
+
+// prefixes parses CIDR ranges; a bare address becomes a single-address range.
+func prefixes(list []string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, p := range list {
+		pfx, err := netip.ParsePrefix(p)
+		if err != nil {
+			addr, aerr := netip.ParseAddr(p)
+			if aerr != nil {
+				return nil, fmt.Errorf("%q: %w", p, err)
+			}
+			pfx = netip.PrefixFrom(addr, addr.BitLen())
+		}
+		out = append(out, pfx.Masked())
+	}
+	return out, nil
 }

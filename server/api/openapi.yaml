@@ -66,6 +66,21 @@ paths:
         "200": { description: Logged in, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } } }
         "401": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+  /api/v1/auth/auto:
+    post:
+      operationId: autoLogin
+      summary: >-
+        Sign in without a password, as the server's configured user, from a trusted network (LAN or
+        Tailscale by default). Off unless the server sets auto_sign_in_user. GET /api/v1/server tells a
+        client whether this works from where it is.
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AutoLoginRequest" } } }
+      responses:
+        "200": { description: Logged in, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/auth/logout:
     post:
       operationId: logout
@@ -420,6 +435,12 @@ components:
         product: { type: string, const: vcrx-media-server }
         version: { type: string }
         api_version: { type: integer, const: 1 }
+        auto_sign_in: { type: boolean, description: "True when this client may sign in without a password (POST /api/v1/auth/auto)." }
+    AutoLoginRequest:
+      type: object
+      required: [device]
+      properties:
+        device: { $ref: "#/components/schemas/Device" }
     Device:
       type: object
       required: [id, name, platform, client, client_version]

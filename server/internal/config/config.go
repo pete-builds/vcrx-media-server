@@ -50,6 +50,11 @@ type Config struct {
 	AdminAllowRemote bool `yaml:"admin_allow_remote"`
 	// TrustedProxies are reverse proxies whose X-Forwarded-For is believed.
 	TrustedProxies []string `yaml:"trusted_proxies"`
+	// AutoSignInUser is signed in without a password for clients on
+	// TrustedNetworks. Empty (the default) turns that off.
+	AutoSignInUser string `yaml:"auto_sign_in_user"`
+	// TrustedNetworks defaults to loopback, private LAN ranges and Tailscale.
+	TrustedNetworks []string `yaml:"trusted_networks"`
 
 	// TMDbAPIKey turns on TMDb enrichment: a v3 API key or a v4 read access token.
 	// It comes from VCRX_TMDB_API_KEY or VCRX_TMDB_API_KEY_FILE, never the YAML file.
@@ -145,6 +150,11 @@ func Load() (Config, error) {
 	str("VCRX_LOG_FORMAT", &c.LogFormat)
 	boolean("VCRX_ADMIN_ALLOW_REMOTE", &c.AdminAllowRemote)
 	list("VCRX_TRUSTED_PROXIES", &c.TrustedProxies)
+	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
+	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)
+	if len(c.TrustedNetworks) == 0 {
+		c.TrustedNetworks = DefaultTrustedNetworks
+	}
 	str("VCRX_TMDB_LANGUAGE", &c.TMDbLanguage)
 	str("VCRX_TMDB_COUNTRY", &c.TMDbCountry)
 	str("VCRX_TMDB_API_KEY", &c.TMDbAPIKey)
@@ -166,6 +176,11 @@ func Load() (Config, error) {
 	}
 	return c, errors.Join(errs...)
 }
+
+// DefaultTrustedNetworks are loopback, RFC 1918, link-local, IPv6 unique local,
+// and Tailscale's IPv4 and IPv6 ranges.
+var DefaultTrustedNetworks = []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+	"169.254.0.0/16", "fe80::/10", "fc00::/7", "100.64.0.0/10", "fd7a:115c:a1e0::/48"}
 
 func splitList(v string) []string {
 	var out []string

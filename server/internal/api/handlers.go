@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -91,7 +92,73 @@ func (s *Server) openapi(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serverInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": s.ServerName, "product": "vcrx-media-server", "version": s.Version, "api_version": 1,
+		"auto_sign_in": s.autoSignIn(info(r).IP),
 	})
+}
+
+// autoSignIn reports whether a client at ip may sign in without a password.
+func (s *Server) autoSignIn(ip string) bool {
+	if s.AutoSignInUser == "" {
+		return false
+	}
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return false
+	}
+	a = a.Unmap()
+	for _, p := range s.TrustedNetworks {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+type deviceJSON struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Model         string `json:"model"`
+	Platform      string `json:"platform"`
+	Client        string `json:"client"`
+	ClientVersion string `json:"client_version"`
+}
+
+func (d deviceJSON) device() auth.Device {
+	return auth.Device{ID: clip(d.ID, 128), Name: clip(d.Name, 128), Model: clip(d.Model, 128), Platform: clip(d.Platform, 32),
+		Client: clip(d.Client, 64), ClientVersion: clip(d.ClientVersion, 32)}
+}
+
+// autoLogin signs a client on a trusted network in as the configured user,
+// with its own session so activity still tells devices apart.
+func (s *Server) autoLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Device deviceJSON `json:"device"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	ip := info(r).IP
+	if s.AutoSignInUser == "" {
+		writeError(w, http.StatusNotFound, "auto_sign_in_off", "Sign-in without a password is turned off on this server.")
+		return
+	}
+	if !s.autoSignIn(ip) {
+		writeError(w, http.StatusForbidden, "not_trusted", "Sign in with a username and password from this network.")
+		return
+	}
+	dev := req.Device.device()
+	token, sess, err := s.Auth.SignInAs(r.Context(), s.AutoSignInUser, dev, ip)
+	if errors.Is(err, auth.ErrInvalidCredentials) {
+		s.Log.Error("auto sign-in user missing or disabled", "user", s.AutoSignInUser)
+		writeError(w, http.StatusForbidden, "auto_sign_in_unavailable", "The server's automatic sign-in user does not exist or is disabled.")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	s.Log.Info("login", "user", sess.User.Username, "ip", ip, "device", dev.Name, "client", dev.Client, "method", "trusted_network")
+	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires_at": sess.ExpiresAt, "user": toUserJSON(sess.User)})
 }
 
 type userJSON struct {
@@ -112,16 +179,9 @@ func toUserJSON(u auth.User) userJSON {
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Device   struct {
-			ID            string `json:"id"`
-			Name          string `json:"name"`
-			Model         string `json:"model"`
-			Platform      string `json:"platform"`
-			Client        string `json:"client"`
-			ClientVersion string `json:"client_version"`
-		} `json:"device"`
+		Username string     `json:"username"`
+		Password string     `json:"password"`
+		Device   deviceJSON `json:"device"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -134,9 +194,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	d := req.Device
-	dev := auth.Device{ID: clip(d.ID, 128), Name: clip(d.Name, 128), Model: clip(d.Model, 128), Platform: clip(d.Platform, 32),
-		Client: clip(d.Client, 64), ClientVersion: clip(d.ClientVersion, 32)}
+	dev := req.Device.device()
 	token, sess, err := s.Auth.Login(r.Context(), req.Username, req.Password, dev, ip)
 	if errors.Is(err, auth.ErrInvalidCredentials) {
 		s.Limiter.Fail(auth.IPKey(ip))
