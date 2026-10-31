@@ -59,6 +59,8 @@ type StartRequest struct {
 	VersionID       *int64       `json:"version_id"`
 	StartPositionMs *int64       `json:"start_position_ms"`
 	Capabilities    Capabilities `json:"capabilities"`
+	// ExtraID plays one of the item's extras (a trailer) instead of a version.
+	ExtraID *int64 `json:"extra_id"`
 }
 
 type Stream struct {
@@ -82,6 +84,14 @@ type SubtitleSource struct {
 	// Embedded is true for a track inside the media file. Players that read the
 	// container (Media3) already have it; browsers need the WebVTT copy.
 	Embedded bool `json:"embedded"`
+	// Downloaded is true for a subtitle the server fetched from OpenSubtitles.
+	Downloaded bool `json:"downloaded"`
+}
+
+// SubtitleSearch tells a player whether to offer "Search for subtitles".
+type SubtitleSearch struct {
+	Enabled     bool `json:"enabled"`
+	CanDownload bool `json:"can_download"`
 }
 
 type Session struct {
@@ -89,12 +99,18 @@ type Session struct {
 	Decision            string           `json:"decision"`
 	Reason              string           `json:"reason"`
 	ItemID              int64            `json:"item_id"`
+	ExtraID             *int64           `json:"extra_id,omitempty"`
 	Version             catalog.Version  `json:"version"`
 	Stream              Stream           `json:"stream"`
 	Subtitles           []SubtitleSource `json:"subtitles"`
 	WebVTTSubtitles     []SubtitleSource `json:"webvtt_subtitles"`
 	ResumePositionMs    int64            `json:"resume_position_ms"`
 	HeartbeatIntervalMs int64            `json:"heartbeat_interval_ms"`
+	// SubtitleOffsetMs is this user's subtitle delay for this version: positive
+	// shows cues later. WebVTT URLs are already shifted by it; a player that
+	// side-loads the raw files or reads embedded tracks applies it itself.
+	SubtitleOffsetMs int64          `json:"subtitle_offset_ms"`
+	SubtitleSearch   SubtitleSearch `json:"subtitle_search"`
 }
 
 type Event struct {
@@ -155,8 +171,21 @@ func newID() string {
 // Start chooses a version and a decision, records the session, and returns it. A
 // refusal is recorded too, and returned with a nil error.
 func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req StartRequest) (*Session, *Refusal, error) {
+	if req.ExtraID != nil {
+		return s.startExtra(ctx, pol, c, req)
+	}
+	// The item itself first: its library, labels and rating. Checking only the
+	// versions would let a friend start a title they cannot see and read its
+	// file name and tracks from the answer.
+	visible, err := s.Catalog.Visible(ctx, pol, req.ItemID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !visible {
+		return nil, nil, catalog.ErrNotFound
+	}
 	var kind, title string
-	err := s.DB.QueryRowContext(ctx, `SELECT kind, title FROM items WHERE id = ?`, req.ItemID).Scan(&kind, &title)
+	err = s.DB.QueryRowContext(ctx, `SELECT kind, title FROM items WHERE id = ?`, req.ItemID).Scan(&kind, &title)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, catalog.ErrNotFound
 	}
@@ -197,20 +226,7 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 		return nil, nil, err
 	}
 
-	hls := s.CanHLS && req.Capabilities.HLSStream
-	converted := s.CanRemux && (req.Capabilities.FMP4Stream || hls) && (((d.Kind == Remux || d.Kind == AudioTranscode) &&
-		remux.MP4Video(s2(v.VideoCodec))) || (d.Kind == Transcode && s.CanTranscode && decodesH264(req.Capabilities)))
-	var refusal *Refusal
-	if d.Kind != DirectPlay {
-		switch {
-		case !pol.IsAdmin && !pol.AllowTranscode:
-			refusal = &Refusal{Status: 403, Code: "playback_refused", Message: "This needs converting on the server, and your account is not allowed to do that. Reason: " + d.Reason + "."}
-		case !pol.IsAdmin && !pol.Allow4KTranscode && policy.ResolutionRank(s2(v.Resolution)) >= policy.ResolutionRank("4K"):
-			refusal = &Refusal{Status: 403, Code: "playback_refused", Message: "4K files cannot be converted for your account. Ask for a 1080p version. Reason: " + d.Reason + "."}
-		case !converted:
-			refusal = &Refusal{Status: 422, Code: "transcode_unavailable", Message: "This file needs " + describeKind(d.Kind) + " for this device, which VCRX cannot do yet. Reason: " + d.Reason + "."}
-		}
-	}
+	converted, hls, refusal := s.gate(pol, v, d, req.Capabilities)
 
 	resume := int64(0)
 	if req.StartPositionMs != nil {
@@ -257,17 +273,7 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 		return nil, refusal, nil
 	}
 
-	mime := mimeForContainer(s2(v.Container))
-	stream := Stream{URL: fmt.Sprintf("/api/v1/versions/%d/file?session=%s", v.ID, id), Protocol: "progressive", MimeType: mime}
-	seek := "/api/v1/playback/sessions/" + id + "/seek"
-	switch {
-	case converted && hls:
-		m3u8 := "application/vnd.apple.mpegurl"
-		stream = Stream{URL: seek, Protocol: "hls", MimeType: &m3u8, SeekURL: seek}
-	case converted:
-		mp4 := "video/mp4"
-		stream = Stream{URL: "/api/v1/playback/sessions/" + id + "/stream.mp4", Protocol: "fmp4", MimeType: &mp4, SeekURL: seek}
-	}
+	stream := streamFor(id, fmt.Sprintf("/api/v1/versions/%d/file?session=%s", v.ID, id), v, converted, hls)
 	out := &Session{
 		SessionID: id, Decision: d.Kind, Reason: d.Reason, ItemID: req.ItemID, Version: v,
 		Stream:              stream,
@@ -277,6 +283,42 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 		HeartbeatIntervalMs: s.heartbeat().Milliseconds(),
 	}
 	return out, nil, nil
+}
+
+// gate is the ladder after the decision, for versions and extras alike: will
+// the server convert the file for this client (and as HLS), or refuse it, by
+// the user's policy or because it cannot convert it for this device.
+func (s *Service) gate(pol policy.Policy, v catalog.Version, d Decision, caps Capabilities) (converted, hls bool, refusal *Refusal) {
+	hls = s.CanHLS && caps.HLSStream
+	converted = s.CanRemux && (caps.FMP4Stream || hls) && (((d.Kind == Remux || d.Kind == AudioTranscode) &&
+		remux.MP4Video(s2(v.VideoCodec))) || (d.Kind == Transcode && s.CanTranscode && decodesH264(caps)))
+	if d.Kind != DirectPlay {
+		switch {
+		case !pol.IsAdmin && !pol.AllowTranscode:
+			refusal = &Refusal{Status: 403, Code: "playback_refused", Message: "This needs converting on the server, and your account is not allowed to do that. Reason: " + d.Reason + "."}
+		case !pol.IsAdmin && !pol.Allow4KTranscode && policy.ResolutionRank(s2(v.Resolution)) >= policy.ResolutionRank("4K"):
+			refusal = &Refusal{Status: 403, Code: "playback_refused", Message: "4K files cannot be converted for your account. Ask for a 1080p version. Reason: " + d.Reason + "."}
+		case !converted:
+			refusal = &Refusal{Status: 422, Code: "transcode_unavailable", Message: "This file needs " + describeKind(d.Kind) + " for this device, which VCRX cannot do yet. Reason: " + d.Reason + "."}
+		}
+	}
+	return converted, hls, refusal
+}
+
+// streamFor is where an opened session streams from: fileURL for direct play,
+// else the session's converted stream.
+func streamFor(id, fileURL string, v catalog.Version, converted, hls bool) Stream {
+	stream := Stream{URL: fileURL, Protocol: "progressive", MimeType: mimeForContainer(s2(v.Container))}
+	seek := "/api/v1/playback/sessions/" + id + "/seek"
+	switch {
+	case converted && hls:
+		m3u8 := "application/vnd.apple.mpegurl"
+		stream = Stream{URL: seek, Protocol: "hls", MimeType: &m3u8, SeekURL: seek}
+	case converted:
+		mp4 := "video/mp4"
+		stream = Stream{URL: "/api/v1/playback/sessions/" + id + "/stream.mp4", Protocol: "fmp4", MimeType: &mp4, SeekURL: seek}
+	}
+	return stream
 }
 
 func (s *Service) heartbeat() time.Duration {
@@ -401,7 +443,7 @@ func sidecars(v catalog.Version) []SubtitleSource {
 			continue
 		}
 		out = append(out, SubtitleSource{TrackID: t.ID, URL: "/api/v1/subtitles/" + strconv.FormatInt(t.ID, 10), Codec: codec,
-			MimeType: mime, Language: t.Language, Title: t.Title, IsForced: t.IsForced})
+			MimeType: mime, Language: t.Language, Title: t.Title, IsForced: t.IsForced, Downloaded: t.IsDownloaded})
 	}
 	return out
 }
@@ -415,7 +457,7 @@ func webvtt(v catalog.Version) []SubtitleSource {
 			continue
 		}
 		out = append(out, SubtitleSource{TrackID: t.ID, URL: "/api/v1/subtitles/" + strconv.FormatInt(t.ID, 10) + "?format=vtt",
-			Codec: "webvtt", MimeType: "text/vtt", Language: t.Language, Title: t.Title, IsForced: t.IsForced, Embedded: !t.IsExternal})
+			Codec: "webvtt", MimeType: "text/vtt", Language: t.Language, Title: t.Title, IsForced: t.IsForced, Embedded: !t.IsExternal, Downloaded: t.IsDownloaded})
 	}
 	return out
 }
@@ -557,23 +599,25 @@ type StreamSession struct {
 	Caps       Capabilities
 	Ended      bool
 	Terminated *string
+	// ExtraID is set instead of VersionID when the session plays an extra.
+	ExtraID int64
 }
 
 // ForStream loads a session the user owns for its converted stream.
 func (s *Service) ForStream(ctx context.Context, userID int64, sessionID string) (StreamSession, error) {
 	var out StreamSession
-	var vid sql.NullInt64
+	var vid, xid sql.NullInt64
 	var caps sql.NullString
 	var ended sql.NullInt64
-	err := s.DB.QueryRowContext(ctx, `SELECT version_id, decision, capabilities, ended_at, terminated_message FROM playback_sessions
-		WHERE id = ? AND user_id = ?`, sessionID, userID).Scan(&vid, &out.Decision, &caps, &ended, &out.Terminated)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && !vid.Valid) {
+	err := s.DB.QueryRowContext(ctx, `SELECT version_id, extra_id, decision, capabilities, ended_at, terminated_message FROM playback_sessions
+		WHERE id = ? AND user_id = ?`, sessionID, userID).Scan(&vid, &xid, &out.Decision, &caps, &ended, &out.Terminated)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !vid.Valid && !xid.Valid) {
 		return out, ErrSessionNotFound
 	}
 	if err != nil {
 		return out, err
 	}
-	out.VersionID, out.Ended = vid.Int64, ended.Valid
+	out.VersionID, out.ExtraID, out.Ended = vid.Int64, xid.Int64, ended.Valid
 	if caps.Valid {
 		_ = json.Unmarshal([]byte(caps.String), &out.Caps)
 	}

@@ -16,17 +16,22 @@ import io.github.pete_builds.vcrx.tv.ui.connect.ConnectScreen
 import io.github.pete_builds.vcrx.tv.ui.connect.LoginScreen
 import io.github.pete_builds.vcrx.tv.ui.collection.CollectionScreen
 import io.github.pete_builds.vcrx.tv.ui.details.DetailsScreen
+import io.github.pete_builds.vcrx.tv.ui.profiles.ProfilePickerScreen
+import io.github.pete_builds.vcrx.tv.ui.profiles.StartScreen
+import io.github.pete_builds.vcrx.tv.ui.profiles.startScreen
 import io.github.pete_builds.vcrx.tv.ui.settings.AboutScreen
+import io.github.pete_builds.vcrx.tv.ui.settings.SettingsScreen
 import io.github.pete_builds.vcrx.tv.ui.theme.BrandTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val graph = graph
-        val start: Any = when {
-            graph.settings.serverUrl == null -> ConnectRoute
-            graph.tokens.token() == null -> LoginRoute
-            else -> BrowseRoute
+        val start: Any = when (startScreen(graph.settings.serverUrl != null, graph.tokens.token() != null, graph.profilePrefs.alwaysAsk)) {
+            StartScreen.CONNECT -> ConnectRoute
+            StartScreen.LOGIN -> LoginRoute
+            StartScreen.PICKER -> ProfilesRoute
+            StartScreen.BROWSE -> BrowseRoute
         }
         setContent {
             BrandTheme {
@@ -45,6 +50,8 @@ class MainActivity : ComponentActivity() {
                             CollectionScreen(route.collectionId, route.name)
                         }
                         composable<AboutRoute> { AboutScreen() }
+                        composable<ProfilesRoute> { ProfilePickerScreen() }
+                        composable<SettingsRoute> { entry -> SettingsScreen(entry.toRoute<SettingsRoute>().page) }
                     }
                 }
             }

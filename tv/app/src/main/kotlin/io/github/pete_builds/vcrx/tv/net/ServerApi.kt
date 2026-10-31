@@ -18,6 +18,7 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okio.Buffer
 
 /** The /api/v1 routes this client uses. Every call throws [ApiException] on failure. */
 class ServerApi(
@@ -40,6 +41,20 @@ class ServerApi(
     suspend fun autoLogin(request: AutoLoginRequest): LoginResponse =
         send(post("/api/v1/auth/auto", request, AutoLoginRequest.serializer()), LoginResponse.serializer(), authRoute = false)
 
+    /** The household for "Who's watching?". Needs no token from a trusted network when the server shows the picker. */
+    suspend fun profiles(): ProfilesResponse = get("/api/v1/profiles", ProfilesResponse.serializer())
+
+    /**
+     * Switches this device to a household profile and returns its new session; the
+     * server ends the current one. A 401 here is a missing or wrong PIN or password
+     * (its code says which), not a lost session. The client header is required of
+     * requests without a token, as the CSRF rule for the picker.
+     */
+    suspend fun switchProfile(request: SwitchRequest): LoginResponse {
+        val call = post("/api/v1/auth/switch", request, SwitchRequest.serializer()).newBuilder().header("X-VCRX-Client", "tv").build()
+        return send(call, LoginResponse.serializer(), authRoute = false)
+    }
+
     suspend fun logout() {
         send<Unit>(Request.Builder().url(url("/api/v1/auth/logout")).post(EMPTY_BODY).build(), null, authRoute = true)
     }
@@ -47,6 +62,29 @@ class ServerApi(
     suspend fun me(): User = get("/api/v1/me", User.serializer())
 
     suspend fun home(): List<HomeRow> = get("/api/v1/home", HomeResponse.serializer()).rows
+
+    /** A Home row's See all: the same row with up to 100 titles. */
+    suspend fun homeRow(rowId: String): HomeRow {
+        val url = url("/api/v1/rows").newBuilder().addPathSegment(rowId).build()
+        return send(Request.Builder().url(url).build(), HomeRow.serializer())
+    }
+
+    /**
+     * The Home layout the web's Customize Home edits too, so a TV Settings
+     * "Home rows" screen and the browser stay in step: read it, then save the
+     * whole order with [saveHomeLayout] or go back to the default with
+     * [resetHomeLayout]. Both answer with the layout now in effect.
+     */
+    suspend fun homeLayout(): HomeLayout = get("/api/v1/layout/home", HomeLayout.serializer())
+
+    suspend fun saveHomeLayout(rows: List<HomeLayoutRow>): HomeLayout {
+        val input = HomeLayoutInput(rows.map { HomeLayoutEntry(it.key, it.enabled) })
+        val body = json.encodeToString(HomeLayoutInput.serializer(), input).toRequestBody(JSON)
+        return send(Request.Builder().url(url("/api/v1/layout/home")).put(body).build(), HomeLayout.serializer())
+    }
+
+    suspend fun resetHomeLayout(): HomeLayout =
+        send(Request.Builder().url(url("/api/v1/layout/home")).delete().build(), HomeLayout.serializer())
 
     suspend fun libraries(): List<Library> = get("/api/v1/libraries", LibrariesResponse.serializer()).libraries
 
@@ -89,6 +127,14 @@ class ServerApi(
         send<Unit>(Request.Builder().url(url("/api/v1/items/$itemId/watched")).put(body).build(), null)
     }
 
+    /** The user's Skip intro choice, for the Settings screen. */
+    suspend fun playbackSettings(): PlaybackSettings = get("/api/v1/me/playback-settings", PlaybackSettings.serializer())
+
+    suspend fun setPlaybackSettings(settings: PlaybackSettings): PlaybackSettings {
+        val body = json.encodeToString(PlaybackSettings.serializer(), settings).toRequestBody(JSON)
+        return send(Request.Builder().url(url("/api/v1/me/playback-settings")).put(body).build(), PlaybackSettings.serializer())
+    }
+
     suspend fun startPlayback(request: PlaybackRequest): PlaybackSession =
         send(post("/api/v1/playback/sessions", request, PlaybackRequest.serializer()), PlaybackSession.serializer())
 
@@ -100,6 +146,55 @@ class ServerApi(
     suspend fun convertedStart(seekPath: String, positionMs: Long): ConvertedStart {
         val url = url(seekPath).newBuilder().setQueryParameter("position_ms", positionMs.coerceAtLeast(0).toString()).build()
         return send(Request.Builder().url(url).build(), ConvertedStart.serializer())
+    }
+
+    /**
+     * A subtitle file. An embedded track answers 202 while the server reads every text
+     * track out of the media file in one pass, which takes minutes on a large file.
+     */
+    suspend fun subtitle(path: String): SubtitleAnswer {
+        val answer = exchange(Request.Builder().url(url(path)).build())
+        return when (answer.status) {
+            200 -> SubtitleAnswer.Ready(answer.body)
+            202 -> SubtitleAnswer.Preparing(answer.retryAfter)
+            else -> {
+                val error = httpError(answer.status, answer.body.toString(Charsets.UTF_8), json)
+                if (error is ApiException.Unauthorized) onUnauthorized()
+                throw error
+            }
+        }
+    }
+
+    /**
+     * Downloads [bytes] from the speed test route and discards them. Returns the bytes
+     * read and the milliseconds from the request to the last byte.
+     */
+    suspend fun speedTest(bytes: Long): Pair<Long, Long> {
+        val request = Request.Builder().url(url("/api/v1/speedtest").newBuilder().setQueryParameter("bytes", bytes.toString()).build()).build()
+        return try {
+            withContext(Dispatchers.IO) {
+                val started = System.nanoTime()
+                client.newCall(request).await().use { response ->
+                    if (!response.isSuccessful) {
+                        val error = httpError(response.code, response.body.string(), json)
+                        if (error is ApiException.Unauthorized) onUnauthorized()
+                        throw error
+                    }
+                    val source = response.body.source()
+                    val buffer = Buffer()
+                    var total = 0L
+                    while (true) {
+                        val read = source.read(buffer, 64 * 1024)
+                        if (read < 0) break
+                        total += read
+                        buffer.clear()
+                    }
+                    total to (System.nanoTime() - started) / 1_000_000
+                }
+            }
+        } catch (e: IOException) {
+            throw ApiException.Unreachable(e)
+        }
     }
 
     /** Absolute artwork URL; the server answers 404 when there is none and the card draws a placeholder. */
@@ -120,6 +215,19 @@ class ServerApi(
 
     private fun <B> post(path: String, body: B, serializer: KSerializer<B>): Request =
         Request.Builder().url(url(path)).post(json.encodeToString(serializer, body).toRequestBody(JSON)).build()
+
+    private class Exchange(val status: Int, val body: ByteArray, val retryAfter: Int?)
+
+    /** Runs the call and returns the raw answer, for the routes that are not JSON. */
+    private suspend fun exchange(request: Request): Exchange = try {
+        withContext(Dispatchers.IO) {
+            client.newCall(request).await().use { response ->
+                Exchange(response.code, response.body.bytes(), response.header("Retry-After")?.trim()?.toIntOrNull())
+            }
+        }
+    } catch (e: IOException) {
+        throw ApiException.Unreachable(e)
+    }
 
     /**
      * Runs the call and decodes the body with [serializer], or ignores it when null.
@@ -156,6 +264,14 @@ class ServerApi(
         val JSON = "application/json; charset=utf-8".toMediaType()
         val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody(null)
     }
+}
+
+/** One answer from a subtitle URL. */
+sealed interface SubtitleAnswer {
+    class Ready(val bytes: ByteArray) : SubtitleAnswer
+
+    /** 202: still reading the track out of the file; ask again after [retryAfterSeconds]. */
+    data class Preparing(val retryAfterSeconds: Int?) : SubtitleAnswer
 }
 
 /** Suspends until the call completes, cancelling it if the coroutine is cancelled. */

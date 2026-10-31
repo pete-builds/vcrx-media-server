@@ -1,6 +1,8 @@
 import { api, ApiError } from "../api.js";
 import { h, icon, errorBox, episodeCode, clock, toast } from "../dom.js";
 import { capabilities } from "../caps.js";
+import { skipButtons } from "./skip.js";
+import { subtitleTiming, subtitleSearch } from "./subtitle-tools.js";
 
 // The player: asks the server for a session with this browser's capabilities,
 // plays it, and reports start, pause, seek, progress and stop so resume points
@@ -22,6 +24,8 @@ export async function playerView({ match, params }) {
   const body = { item_id: itemId, capabilities: capabilities() };
   if (params.get("version")) body.version_id = Number(params.get("version"));
   if (params.get("start") !== null) body.start_position_ms = Number(params.get("start")) || 0;
+  // A trailer or other extra of the item (views/extras.js) plays from its start.
+  if (params.get("extra")) Object.assign(body, { extra_id: Number(params.get("extra")), start_position_ms: 0 });
 
   const back = () => (history.length > 1 ? history.back() : (location.hash = `#/item/${itemId}`));
   const backBtn = h("button", { class: "btn btn-small", type: "button", onclick: back, "aria-label": "Back" }, icon("back"), "Back");
@@ -40,7 +44,8 @@ export async function playerView({ match, params }) {
   const hls = session.stream.protocol === "hls";
   const converted = hls || session.stream.protocol === "fmp4";
   const totalMs = session.version.duration_ms || 0;
-  const title = item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)} · ${item.title}` : item.title;
+  const playingExtra = body.extra_id ? (item.extras || []).find((x) => x.id === body.extra_id) : null;
+  const title = playingExtra ? `${item.title} · ${playingExtra.title}` : item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)} · ${item.title}` : item.title;
   const video = h("video", { autoplay: true, playsinline: true, preload: "auto" });
   video.controls = !converted;
   const status = h("div", { class: "status", hidden: true });
@@ -65,9 +70,27 @@ export async function playerView({ match, params }) {
   // of a large file unless someone wants it. Cues are kept and re-timed when a
   // converted stream restarts somewhere else.
   const subs = session.webvtt_subtitles || [];
-  const subSel = subs.length ? h("select", { "aria-label": "Subtitles" },
+  const canSearch = !!(session.subtitle_search && session.subtitle_search.enabled);
+  const subSel = subs.length || canSearch ? h("select", { "aria-label": "Subtitles" },
     h("option", { value: "" }, "Subtitles off"),
-    subs.map((t, i) => h("option", { value: String(i) }, subLabel(t)))) : null;
+    subs.map((t, i) => h("option", { value: String(i) }, subLabel(t))),
+    canSearch ? h("option", { value: "search" }, "Search for subtitles…") : null) : null;
+  // Search and timing live in subtitle-tools.js. The server shifts the cues it
+  // serves by the saved delay, so a change refetches the chosen track.
+  let subChoice = "";
+  const finder = canSearch ? subtitleSearch({ versionId: session.version.id, canDownload: session.subtitle_search.can_download,
+    onPicked: (t) => {
+      let i = subs.findIndex((x) => x.track_id === t.track_id);
+      if (i < 0) {
+        i = subs.push(t) - 1;
+        subSel.insertBefore(h("option", { value: String(i) }, subLabel(t)), subSel.querySelector('option[value="search"]'));
+      }
+      subSel.value = String(i);
+      subSel.dispatchEvent(new Event("change"));
+    } }) : null;
+  const timing = subSel ? subtitleTiming({ versionId: session.version.id, initialMs: session.subtitle_offset_ms,
+    onChange: () => { cueCache.clear(); if (subChoice !== "") subSel.dispatchEvent(new Event("change")); } }) : null;
+  if (timing) timing.el.hidden = true;
   const cueCache = new Map();
   let shownCues = null;
   let textTrack = null;
@@ -86,6 +109,9 @@ export async function playerView({ match, params }) {
     }
   }
   if (subSel) subSel.addEventListener("change", async () => {
+    if (subSel.value === "search") { subSel.value = subChoice; finder.open(); return; }
+    subChoice = subSel.value;
+    timing.el.hidden = subChoice === "";
     const token = ++subToken;
     if (subSel.value === "") { shownCues = null; applyCues(); return; }
     const t = subs[Number(subSel.value)];
@@ -101,7 +127,12 @@ export async function playerView({ match, params }) {
       applyCues();
       showStatus("");
     } catch (e) {
-      if (token === subToken) { showStatus(""); toast(e.message || "Subtitles could not be loaded."); subSel.value = ""; }
+      if (token === subToken) {
+        showStatus("");
+        toast(e.message || "Subtitles could not be loaded.");
+        subSel.value = subChoice = "";
+        timing.el.hidden = true;
+      }
     }
   });
 
@@ -194,9 +225,12 @@ export async function playerView({ match, params }) {
     });
   }
 
-  shell.append(video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title), audioSel,
+  // Native append, unlike h(), writes a null child as the text "null", and
+  // direct play has no VCRX controls.
+  shell.append(...[video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title), audioSel,
     converted ? h("span", { class: "pill", title: session.reason }, convertedLabel(session.decision)) : null,
-    subSel), controls, status, overlay);
+    subSel, timing && timing.el), controls, status, overlay, finder && finder.el].filter(Boolean));
+  skipButtons({ shell, video, session, pos, seekTo, durationMs: dur, hasNext: !!item.next_episode });
 
   video.addEventListener("loadedmetadata", () => {
     if (!converted && session.resume_position_ms > 0 && video.currentTime < 1) video.currentTime = session.resume_position_ms / 1000;
@@ -342,7 +376,7 @@ export async function playerView({ match, params }) {
 
 function subLabel(t) {
   const lang = t.language ? languageName(t.language) : "Unknown";
-  return [t.title || lang, t.is_forced ? "(forced)" : "", t.embedded ? "" : "(file)"].filter(Boolean).join(" ");
+  return [t.title || lang, t.is_forced ? "(forced)" : "", t.downloaded ? "(downloaded)" : t.embedded ? "" : "(file)"].filter(Boolean).join(" ");
 }
 
 function audioLabel(t) {

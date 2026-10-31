@@ -145,6 +145,10 @@ func (s *Server) trusted(a netip.Addr) bool {
 }
 
 // IsLAN covers loopback, RFC 1918, IPv6 unique local and link-local addresses.
+// It gates admin routes and webhooks. Tailscale IPv6 (fd7a:115c:a1e0::/48) is
+// unique local, so it passes on purpose: that is how Pete reaches admin away
+// from home. Tailscale IPv4 (100.64.0.0/10) is shared address space and does
+// not. Sign-in limits use limiterLAN, which leaves Tailscale out.
 func IsLAN(ip string) bool {
 	a, err := netip.ParseAddr(ip)
 	if err != nil {
@@ -176,6 +180,10 @@ func (s *Server) gate(rt route) http.Handler {
 			return
 		}
 		tok, viaCookie := sessionToken(r)
+		if rt.access == householdOnly && tok == "" {
+			s.pickerGate(w, r, rt)
+			return
+		}
 		if tok == "" {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Sign in first.")
 			return
@@ -186,6 +194,11 @@ func (s *Server) gate(rt route) http.Handler {
 		}
 		sess, err := s.Auth.Authenticate(r.Context(), tok, ri.IP)
 		if err != nil {
+			if errors.Is(err, auth.ErrInvalidToken) && rt.access == householdOnly {
+				// A stale cookie must not hide the picker from a trusted network.
+				s.pickerGate(w, r, rt)
+				return
+			}
 			if errors.Is(err, auth.ErrInvalidToken) {
 				writeError(w, http.StatusUnauthorized, "unauthorized", "Your session has expired. Sign in again.")
 				return

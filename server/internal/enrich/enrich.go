@@ -56,6 +56,8 @@ type Enricher struct {
 	// after a Fix Match: genres and ratings just changed, so smart collections
 	// and the labels they stamp rebuild at once instead of on their timer.
 	Changed func()
+	// Trailers also looks up each title's YouTube trailer (trailers_youtube).
+	Trailers bool
 }
 
 type Stats struct {
@@ -116,6 +118,9 @@ func (e *Enricher) Run(ctx context.Context, initial, interval time.Duration) {
 		}
 		if err != nil && ctx.Err() == nil {
 			e.log().Warn("tmdb enrichment pass did not complete", "err", err)
+		}
+		if e.Trailers && e.trailerPass(ctx) {
+			return
 		}
 	}
 }

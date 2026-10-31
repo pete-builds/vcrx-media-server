@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.res.Resources
 import android.os.Build
 import io.github.pete_builds.vcrx.tv.data.PlaybackEventSender
+import io.github.pete_builds.vcrx.tv.data.PreferencesStore
+import io.github.pete_builds.vcrx.tv.data.ProfilePrefs
 import io.github.pete_builds.vcrx.tv.data.SettingsStore
 import io.github.pete_builds.vcrx.tv.data.TokenStore
 import io.github.pete_builds.vcrx.tv.net.AuthInterceptor
@@ -29,6 +31,10 @@ class AppGraph(context: Context) {
 
     val settings = SettingsStore(context)
     val tokens = TokenStore(context)
+    val profilePrefs = ProfilePrefs(context)
+
+    /** Settings and remembered subtitle choices, kept per server and user. */
+    val preferences = PreferencesStore(context, settings)
 
     val json: Json = ApiJson
 

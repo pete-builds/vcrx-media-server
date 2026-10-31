@@ -50,6 +50,9 @@ export function icon(name) {
     restart: "M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z",
     menu: "M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z",
     star: "m12 17.3 6.2 3.7-1.6-7 5.4-4.7-7.2-.6L12 2 9.2 8.7 2 9.3l5.4 4.7-1.6 7z",
+    up: "M7.4 15.4 12 10.8l4.6 4.6L18 14l-6-6-6 6z",
+    down: "M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z",
+    grip: "M9 4h2v2H9zm4 0h2v2h-2zM9 9h2v2H9zm4 0h2v2h-2zm-4 5h2v2H9zm4 0h2v2h-2zm-4 5h2v2H9zm4 0h2v2h-2z",
   };
   return s("svg", { viewBox: "0 0 24 24", "aria-hidden": "true" }, s("path", { d: paths[name] }));
 }
@@ -155,8 +158,10 @@ export function card(item, { landscape = false, href } = {}) {
   const art = cardArt(item, { landscape });
   const title = item.kind === "episode" && landscape ? `${episodeCode(item)} ${item.title}`.trim() : item.title;
   const sub = item.kind === "episode" && landscape ? item.show_title || "" : subtitle(item);
+  // Some Home rows add a note, such as "3 new episodes"; it takes the sub line.
+  const line = item.note ? h("div", { class: "sub note" }, item.note) : sub ? h("div", { class: "sub" }, sub) : null;
   return h("a", { class: "card" + (landscape ? " landscape" : ""), href: href || `#/item/${item.id}`, title: item.title },
-    art, h("div", { class: "title" }, title), sub ? h("div", { class: "sub" }, sub) : null);
+    art, h("div", { class: "title" }, title), line);
 }
 
 // skeleton is what a page shows while it loads: grey shapes in the layout the
@@ -168,7 +173,7 @@ export function skeleton(path) {
   if (path.startsWith("/play/")) body = [];
   else if (path === "/") body = [bar("sk-feature"), bar("sk-heading"), posters(8), bar("sk-heading"), posters(8)];
   else if (path.startsWith("/item/")) body = [h("div", { class: "sk-hero" }, bar("sk-hero-poster"), h("div", { class: "sk-lines" }, bar("sk-title"), bar("sk-line"), bar("sk-line short"), bar("sk-button")))];
-  else if (/^\/(library|collection|search)/.test(path)) body = [bar("sk-title"), h("div", { class: "sk-grid" }, Array.from({ length: 18 }, () => bar("sk-poster")))];
+  else if (/^\/(library|collection|search|row)/.test(path)) body = [bar("sk-title"), h("div", { class: "sk-grid" }, Array.from({ length: 18 }, () => bar("sk-poster")))];
   else body = [bar("sk-title"), bar("sk-line"), bar("sk-line"), bar("sk-line short")];
   return h("div", { class: "skeleton" + (path === "/" || path.startsWith("/item/") ? " sk-over-hero" : ""), "aria-busy": "true" },
     h("span", { class: "sr-only", role: "status" }, "Loading"), body);
