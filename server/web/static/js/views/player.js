@@ -194,9 +194,11 @@ export async function playerView({ match, params }) {
     });
   }
 
-  shell.append(video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title), audioSel,
+  // Native append, unlike h(), writes a null child as the text "null", and
+  // direct play has no VCRX controls.
+  shell.append(...[video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title), audioSel,
     converted ? h("span", { class: "pill", title: session.reason }, convertedLabel(session.decision)) : null,
-    subSel), controls, status, overlay);
+    subSel), controls, status, overlay].filter(Boolean));
 
   video.addEventListener("loadedmetadata", () => {
     if (!converted && session.resume_position_ms > 0 && video.currentTime < 1) video.currentTime = session.resume_position_ms / 1000;

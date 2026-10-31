@@ -194,7 +194,10 @@ async function main() {
     if (!res.found) fail(`#${path}`, `no ${selector}`);
     if (res.error) fail(`#${path}`, `shows an error box: ${res.text.slice(0, 160).replace(/\n/g, " ")}`);
     const junk = res.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
-    if (junk) fail(`#${path}`, `shows "${junk[0]}"`);
+    if (junk) {
+      const at = res.text.slice(Math.max(0, junk.index - 60), junk.index + 20).replace(/\s+/g, " ");
+      fail(`#${path}`, `shows "${junk[0]}" in "...${at}..."`);
+    }
     if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
   }
 
@@ -409,9 +412,15 @@ async function main() {
       v.play().catch(() => {});
       for (let i = 0; i < 80 && !(v.currentTime > 1.5); i++) await new Promise((r) => setTimeout(r, 150));
       const pill = document.querySelector(".player .pill");
+      // All the player's text, hidden controls included: they show on the next
+      // mouse move, so a "null" there is one the viewer will see.
+      const shell = v.closest(".player");
       return { ok: v.currentTime > 1.5, t: v.currentTime, err: v.error && v.error.code, converted: !v.controls, pill: pill ? pill.textContent : null,
+        text: shell ? shell.textContent : "",
         why: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
     if (!res.ok) fail(`play ${label}`, `video did not advance (t=${res.t}, media error ${res.err}) ${res.why || ""}`);
+    const playerJunk = (res.text || "").match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+    if (playerJunk) fail(`play ${label}`, `the player shows "${playerJunk[0]}": ${res.text.slice(0, 160).replace(/\s+/g, " ")}`);
     if (res.converted !== (wantDecision === "converted")) fail(`play ${label}`, `expected a ${wantDecision} stream`);
     if (wantPill && res.pill !== wantPill) fail(`play ${label}`, `labelled "${res.pill}", expected "${wantPill}"`);
     if (exceptions.length) fail(`play ${label}`, `threw: ${exceptions[0]}`);
@@ -448,7 +457,10 @@ async function main() {
     if (!res.rows) fail(`#${path}`, "no History rows after playing the clip");
     if (res.error) fail(`#${path}`, "shows an error box");
     const junk = res.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
-    if (junk) fail(`#${path}`, `shows "${junk[0]}"`);
+    if (junk) {
+      const at = res.text.slice(Math.max(0, junk.index - 60), junk.index + 20).replace(/\s+/g, " ");
+      fail(`#${path}`, `shows "${junk[0]}" in "...${at}..."`);
+    }
     if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
   }
 }
