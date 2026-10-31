@@ -29,6 +29,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/activity"
 	"github.com/pete-builds/vcrx-media-server/server/internal/admin"
 	"github.com/pete-builds/vcrx-media-server/server/internal/api"
+	"github.com/pete-builds/vcrx-media-server/server/internal/arr"
 	"github.com/pete-builds/vcrx-media-server/server/internal/artwork"
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
@@ -293,6 +294,29 @@ func serve() error {
 		go enr.Run(ctx, 2*time.Minute, 15*time.Minute)
 	} else {
 		log.Info("TMDb enrichment is off: set VCRX_TMDB_API_KEY for posters and plots")
+	}
+
+	if cfg.ArrWebhookToken != "" {
+		srv.ArrToken = cfg.ArrWebhookToken
+		srv.Arr = &arr.Dispatcher{
+			Map: cfg.ArrPathMap, Log: log.With("component", "arr"),
+			Libraries: func(ctx context.Context) ([]arr.Library, error) {
+				libs, err := adm.Libraries(ctx)
+				out := make([]arr.Library, 0, len(libs))
+				for _, l := range libs {
+					out = append(out, arr.Library{ID: l.ID, Kind: l.Kind, RootPath: l.RootPath})
+				}
+				return out, err
+			},
+			Scan: func(ctx context.Context, libraryID int64, sub string) (int64, error) {
+				id, err := scanAdapter{scans}.StartScan(context.WithoutCancel(ctx), libraryID, sub, "webhook")
+				if errors.Is(err, admin.ErrScanRunning) {
+					return 0, arr.ErrBusy
+				}
+				return id, err
+			},
+		}
+		log.Info("Radarr and Sonarr webhooks on", "path_maps", len(cfg.ArrPathMap))
 	}
 
 	hs := srv.HTTPServer(cfg.Addr())

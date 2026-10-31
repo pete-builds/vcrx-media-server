@@ -16,6 +16,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/pete-builds/vcrx-media-server/server/internal/arr"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 )
 
@@ -73,6 +74,14 @@ type Config struct {
 	WebhookURLs []string `yaml:"-"`
 	// WebhookEvents limits which events are sent; empty sends all of them.
 	WebhookEvents []string `yaml:"webhook_events"`
+
+	// ArrWebhookToken turns on POST /api/v1/hooks/arr for Radarr and Sonarr. It
+	// is a secret, so it comes from VCRX_ARR_WEBHOOK_TOKEN or
+	// VCRX_ARR_WEBHOOK_TOKEN_FILE, never the YAML file.
+	ArrWebhookToken string `yaml:"-"`
+	// ArrPathMap rewrites a Radarr or Sonarr path into the same place as VCRX
+	// sees it. Without it, a folder is found by its name in the libraries.
+	ArrPathMap []arr.PathMap `yaml:"arr_path_map"`
 
 	// IMDbRatings downloads IMDb's public ratings file once a day and stores the
 	// rating and vote count for every movie and show with an IMDb id. Off by
@@ -199,6 +208,18 @@ func Load() (Config, error) {
 		}
 	}
 	list("VCRX_WEBHOOK_EVENTS", &c.WebhookEvents)
+	str("VCRX_ARR_WEBHOOK_TOKEN", &c.ArrWebhookToken)
+	if v := os.Getenv("VCRX_ARR_WEBHOOK_TOKEN_FILE"); v != "" && c.ArrWebhookToken == "" {
+		b, err := os.ReadFile(v) //nolint:gosec // the operator chooses this path
+		if err != nil {
+			errs = append(errs, fmt.Errorf("VCRX_ARR_WEBHOOK_TOKEN_FILE: %w", err))
+		} else {
+			c.ArrWebhookToken = strings.TrimSpace(string(b))
+		}
+	}
+	if t := c.ArrWebhookToken; t != "" && len(t) < 16 {
+		errs = append(errs, errors.New("VCRX_ARR_WEBHOOK_TOKEN must be at least 16 characters"))
+	}
 	ttlDays := int(c.SessionTTL / (24 * time.Hour))
 	integer("VCRX_SESSION_TTL_DAYS", &ttlDays)
 	c.SessionTTL = time.Duration(ttlDays) * 24 * time.Hour

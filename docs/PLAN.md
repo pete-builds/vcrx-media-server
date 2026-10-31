@@ -64,7 +64,7 @@ The reference says to group files into one item only when they share a folder an
 4. **Activity:** shipped 2026-10-30 (#5): now playing, history, stats, per-user totals, stop a stream with a message, webhooks (Discord-shaped for Discord URLs). Playback policy before stream start already existed. Still to come: IP to location, a newsletter.
 5. **Collections and overlays:** poster overlays shipped 2026-10-30 (#7): rating, resolution with HDR and DV, ribbon, drawn into the served poster like Kometa; IMDb ratings from IMDb's public file (opt-in). TMDb enrichment shipped earlier. Franchise collections shipped 2026-10-30 (#13): built from `tmdb_collection_id`, names from TMDb, rebuilt every 30 minutes; genre and decade are library filters rather than collections. Fix Match (pick the TMDb title by hand) shipped 2026-10-31; the TV app's collection screen is #15. Still to come: YAML collection rules, director and studio collections, matching versions by TMDb id.
 6. **Access policies and VA-API** hardware transcoding.
-7. **Ecosystem hooks:** Radarr and Sonarr import webhooks, watch state for media-reclaim.
+7. **Ecosystem hooks:** Radarr and Sonarr import webhooks shipped 2026-10-31 (targeted scans). Still to come: watch state for media-reclaim.
 8. **Web app** (pulled forward from "Comes later", 2026-10-30, #6, #10, #11): browse, details, search, browser playback with subtitles and Up Next, Activity, Settings for libraries and users, sign-in without a password on trusted networks (#3) by cookie with a CSRF header rule. Plain ES modules embedded in the binary, no build step. Gates: `server/web/check-js.sh` and `scripts/web-smoke.mjs` (headless Chrome) in CI.
 
 ### Merge order for the 2026-10-30 overnight stack
