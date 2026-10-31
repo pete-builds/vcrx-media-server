@@ -16,7 +16,7 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 
 | Works now | Comes later |
 |---|---|
-| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, genre and decade filters | Collections from YAML rules, manual match fixes |
+| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, genre and decade filters | Collections from YAML rules |
 | Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
 | Direct play over HTTP with Range; converted streams for clients that ask for them (video copied, audio converted to AAC, fragmented MP4); sidecar and embedded text subtitles (also as WebVTT for browsers) | Video transcoding, picture subtitle burn-in, VA-API hardware acceleration |
 | Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, stats, per-user totals, stop a stream, webhooks | Activity screens in a client |
@@ -91,6 +91,8 @@ Set `VCRX_TMDB_API_KEY` in `.env` to your own [TMDb](https://www.themoviedb.org/
 - **Your own data wins.** A value from an NFO, a local poster, or a field an admin locked is never replaced. Enrichment only writes a field that is empty or still holds what it wrote last time.
 - **No guessing.** A movie or show is matched by the TMDb or IMDb id in its NFO, or else by title and year, and only when exactly one result has that title in that year (or one year off). Anything doubtful is left alone and listed by `vcrx metadata status` with the reason; a year in the folder name usually fixes it.
 - Images are kept in `/config/metadata/tmdb`. `VCRX_TMDB_LANGUAGE` (default `en-US`) and `VCRX_TMDB_COUNTRY` (default `US`, for content ratings) are optional.
+
+**Fix Match:** when matching found nothing or the wrong title, an admin opens the title in the web app, presses Fix match, searches TMDb and picks. The item fills from that title at once and later passes keep the choice. Settings, Libraries lists every unmatched title with the reason and a link straight to its Fix Match. As everywhere, values from an NFO or set by hand are kept.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.
 

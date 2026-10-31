@@ -295,6 +295,7 @@ type Result struct {
 	Popularity    float64  `json:"popularity"`
 	VoteCount     int      `json:"vote_count"`
 	OriginCountry []string `json:"origin_country"`
+	Overview      string   `json:"overview"`
 }
 
 func (r Result) titles() []string {
@@ -305,6 +306,17 @@ func (r Result) titles() []string {
 		}
 	}
 	return out
+}
+
+// Year is the release or first air year, 0 when TMDb has none.
+func (r Result) Year() int { return r.year() }
+
+// DisplayTitle is a film's title or a show's name.
+func (r Result) DisplayTitle() string {
+	if r.Title != "" {
+		return r.Title
+	}
+	return r.Name
 }
 
 func (r Result) year() int {
