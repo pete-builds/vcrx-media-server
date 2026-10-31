@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -54,7 +55,8 @@ func safeMethod(m string) bool {
 }
 
 // webApp serves the browser client for every path outside /api/ and the health
-// checks. Unknown paths get index.html so a reload on a deep link still works.
+// checks. Unknown paths without a file extension get index.html so a reload
+// on a deep link still works; a missing file is a 404.
 func (s *Server) webApp() http.Handler {
 	sub, err := fs.Sub(web.Static, "static")
 	if err != nil {
@@ -83,6 +85,13 @@ func (s *Server) webApp() http.Handler {
 			p += "index.html"
 		}
 		if _, err := fs.Stat(sub, p); err != nil {
+			// A missing file (a script, style, image or font) is a 404. Answering
+			// it with the page instead hides a broken build behind a 200: the
+			// browser only reports a MIME error, and a probe sees success.
+			if path.Ext(p) != "" {
+				http.Error(w, "Not found.", http.StatusNotFound)
+				return
+			}
 			r = r.Clone(r.Context())
 			r.URL.Path = "/"
 			p = "index.html"
