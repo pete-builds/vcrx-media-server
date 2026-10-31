@@ -2888,7 +2888,7 @@ components:
             can_download: { type: boolean, description: The user may download a result. }
         markers:
           type: array
-          description: The item's intro and credits, each saying whether this user's settings skip it without asking.
+          description: The item's intro and credits, each saying whether this user's settings skip it without asking. A detected intro below confidence 0.5 is left out.
           items:
             allOf:
               - $ref: "#/components/schemas/Marker"
