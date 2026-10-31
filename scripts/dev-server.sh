@@ -12,6 +12,10 @@
 # VCRX_DEV_HOME_DATE (default 2026-10-31, so the Halloween row shows on any
 # day), and "vcrx dev-seed" gives the sample library a play history for
 # Trending, Most Watched and Because You Watched. Release builds have neither.
+#
+# A second one (its own VCRX_DEV_DIR and VCRX_PORT, and VCRX_DEV_NAME to tell
+# them apart) can be linked to the first as a friend's server: both allow
+# peers on loopback.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -229,7 +233,10 @@ nfo "$media/TV/North Ferry" tvshow.nfo 8.1 67000 '<genre>Drama</genre>'
 nfo "$media/TV/Signal Hill" tvshow.nfo 7.4 21000 '<genre>Comedy</genre>'
 
 cat > "$dir/config/vcrx.yaml" << YAML
-server_name: VCRX Dev
+server_name: ${VCRX_DEV_NAME:-VCRX Dev}
+# Two dev servers on this machine may link as friends' servers. Never in
+# production: there a peer on loopback is the server itself.
+peer_allow_loopback: true
 auto_sign_in_user: dev
 trusted_networks: [127.0.0.0/8, "::1/128"]
 # Detect intros and credits at any hour (a real server waits for the night).

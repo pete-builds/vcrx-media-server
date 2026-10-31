@@ -26,6 +26,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
+	"github.com/pete-builds/vcrx-media-server/server/internal/federation"
 	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
@@ -160,6 +161,8 @@ func newFixture(t *testing.T) *fixture {
 		Activity: &activity.Service{DB: conn}}
 	// Invited devices and TV pairing, as main wires them.
 	f.srv.Invites, f.srv.Pairings, f.srv.PairLimiter = &invites.Store{DB: conn}, &invites.Pairings{}, auth.NewLimiter(10, 15*time.Minute)
+	// Friends' servers. Tests run both servers on loopback.
+	f.srv.SetUpFederation(federation.Guard{AllowLoopback: true})
 	// httptest requests carry Host example.com; a real name must be allowed.
 	f.srv.AllowedHosts = []string{"example.com"}
 	f.h = f.srv.Handler()
