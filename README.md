@@ -82,7 +82,7 @@ vcrx healthcheck              what the container HEALTHCHECK runs
 
 ### Configuration
 
-Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its automatic pre-migration backups and the settings file live in `/config`; resized artwork and other caches live in `/cache` and can be deleted at any time.
+Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its backups (before every migration, and a nightly snapshot kept for seven days, in `/config/backups`) and the settings file live in `/config`; resized artwork and other caches live in `/cache` and can be deleted at any time.
 
 ### TMDb posters and plots (optional)
 
