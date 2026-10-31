@@ -178,6 +178,8 @@ async function main() {
     ["/activity/history", ".tabs"],
     ["/activity/stats?days=7", ".chart-box svg"],
     ["/activity/users", "table.list"],
+    ["/settings/users", ".household .profile-row"],
+    ["/profiles", ".picker .profile"],
     ["/settings", ".settings h1"],
     ["/settings/libraries", "table.list"],
     ["/settings/users", ".user-summary"],
@@ -650,6 +652,7 @@ async function main() {
       return gone ? { ok: true } : { why: "the subtitle was still listed after Delete" };`);
     if (!del.ok) fail("subtitles delete", del.why);
   }
+  await profilePicker(s, evaluate, () => exceptions, (v) => { exceptions = v; });
   await s("Page.navigate", { url: `${base}/#/` });
   await sleep(500);
 
@@ -854,6 +857,64 @@ async function hlsMSE(evaluate, ids) {
     return { ok: v.currentTime > 1.5, t: v.currentTime, total, duration: v.duration, err: v.error && v.error.code };`);
   if (!res.ok) fail("play HLS (MSE)", `video did not advance (t=${res.t}, media error ${res.err}) ${res.why || ""}`);
   if (!(Math.abs(res.total - 90) < 1 && Math.abs(res.duration - 90) < 1)) fail("play HLS (MSE)", `playlist ${res.total} s, media ${res.duration} s, want 90`);
+}
+
+// "Who's watching?" on a phone: a kid's profile with a PIN refuses a wrong
+// PIN on the pad and opens with the right one; back on the admin, reached
+// from the kid, it asks for the password. Leaves the browser as the admin.
+async function profilePicker(s, evaluate, getExceptions, setExceptions) {
+  console.log("profile picker (PIN pad, 390 px)");
+  setExceptions([]);
+  await s("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  const helpers = `
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const wait = async (sel) => { for (let i = 0; i < 40 && !document.querySelector(sel); i++) await sleep(150); return document.querySelector(sel); };
+    const me = () => fetch("/api/v1/me").then((r) => r.json()).then((m) => m.username);
+    const left = async () => { for (let i = 0; i < 40 && location.hash.startsWith("#/profiles"); i++) await sleep(150); };`;
+  const ids = await evaluate(`
+    const call = (p, method = "GET", body) => fetch("/api/v1" + p, { method, body: body && JSON.stringify(body),
+      headers: { "X-VCRX-Client": "web", "Content-Type": "application/json" } }).then((r) => (r.status === 204 ? null : r.json()));
+    const all = (await call("/admin/profiles")).profiles;
+    const kid = all.find((p) => p.username === "Smoke Kid") || (await call("/admin/profiles", "POST", { name: "Smoke Kid", kid: true }));
+    await call("/admin/profiles/" + kid.id + "/pin", "PUT", { pin: "2468" });
+    return { kid: kid.id, admin: all.find((p) => p.username === "dev").id };`);
+  await s("Page.navigate", { url: `${base}/#/profiles` });
+  const kid = await evaluate(`${helpers}
+    const card = await wait('.profile[data-id="${ids.kid}"]');
+    if (!card) return { why: "the kid's profile is not in the picker: " + document.getElementById("view").innerText.slice(0, 160) };
+    card.click();
+    if (!(await wait(".pin-keys"))) return { why: "choosing a profile with a PIN showed no PIN pad" };
+    const press = (k) => document.querySelector('.pin-key[data-key="' + k + '"]').click();
+    for (const k of "1111") press(k);
+    press("ok");
+    let wrong = "";
+    for (let i = 0; i < 40 && !wrong; i++) { wrong = document.querySelector(".pin-error").textContent; await sleep(150); }
+    const width = document.documentElement.scrollWidth;
+    for (const k of "2468") press(k);
+    press("ok");
+    await left();
+    return { wrong, width, screen: screen.width, me: await me() };`);
+  if (kid.why) fail("profile picker", kid.why);
+  else {
+    if (!kid.wrong) fail("profile picker", "a wrong PIN showed no error");
+    if (kid.width > kid.screen + 1) fail("profile picker on a phone", `PIN pad is ${kid.width}px wide on a ${kid.screen}px screen`);
+    if (kid.me !== "Smoke Kid") fail("profile picker", `the right PIN left the browser signed in as ${kid.me}`);
+  }
+  await s("Page.navigate", { url: `${base}/#/profiles` });
+  const back = await evaluate(`${helpers}
+    const card = await wait('.profile[data-id="${ids.admin}"]');
+    if (!card) return { why: "no admin profile in the picker" };
+    card.click();
+    const pw = await wait(".pin-password input");
+    if (!pw) return { why: "the admin, reached from a kid's profile, did not ask for a password" };
+    pw.value = "devpassword";
+    document.querySelector(".pin-password button").click();
+    await left();
+    return { me: await me() };`);
+  if (back.why) fail("profile picker", back.why);
+  else if (back.me !== "dev") fail("profile picker", `switching back left the browser as ${back.me}`);
+  if (getExceptions().length) fail("profile picker", `threw: ${getExceptions()[0]}`);
+  await s("Emulation.clearDeviceMetricsOverride");
 }
 
 try {

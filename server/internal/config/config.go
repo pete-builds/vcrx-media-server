@@ -66,6 +66,10 @@ type Config struct {
 	// "every private range" also covers the Docker and Incus bridges on a server
 	// host, so a compromised container could sign in. List your own networks.
 	TrustedNetworks []string `yaml:"trusted_networks"`
+	// AutoSignInPicker shows trusted-network clients the "Who's watching?"
+	// profile picker instead of signing them in as AutoSignInUser, who is then
+	// only the profile the picker starts on. Off (sign straight in) by default.
+	AutoSignInPicker bool `yaml:"auto_sign_in_picker"`
 	// AllowedHosts are host names the server answers to besides IP addresses
 	// and localhost (for example a Tailscale MagicDNS name). A request for any
 	// other name is refused, which stops DNS rebinding: a web page that points
@@ -240,6 +244,7 @@ func Load() (Config, error) {
 	list("VCRX_TRUSTED_PROXIES", &c.TrustedProxies)
 	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
 	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)
+	boolean("VCRX_AUTO_SIGN_IN_PICKER", &c.AutoSignInPicker)
 	list("VCRX_ALLOWED_HOSTS", &c.AllowedHosts)
 	str("VCRX_COLLECTIONS_DIR", &c.CollectionsDir)
 	boolean("VCRX_DETECT_MARKERS", &c.DetectMarkers)
@@ -379,6 +384,10 @@ func (c Config) SmartCollectionsDir() string {
 }
 
 func (c Config) BackupDir() string { return filepath.Join(c.ConfigDir, "backups") }
+
+// AvatarDir holds household profile pictures. It is data, not cache: an
+// upload cannot be rebuilt.
+func (c Config) AvatarDir() string { return filepath.Join(c.ConfigDir, "avatars") }
 
 func (c Config) ArtworkCacheDir() string { return filepath.Join(c.CacheDir, "artwork") }
 

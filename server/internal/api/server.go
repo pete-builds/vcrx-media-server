@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/activity"
@@ -18,6 +19,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
+	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
@@ -79,6 +81,16 @@ type Server struct {
 	// TrustedNetworks (POST /api/v1/auth/auto).
 	AutoSignInUser  string
 	TrustedNetworks []netip.Prefix
+	// ProfilePicker sends trusted-network clients to the "Who's watching?"
+	// picker instead of signing them in as AutoSignInUser.
+	ProfilePicker bool
+	// Household backs profile switching; PINs counts PIN attempts. Passwords
+	// offered at a switch count against Limiter, as sign-ins do.
+	Household *household.Store
+	PINs      *household.Limiter
+	// switchLocks serializes password checks per profile (*sync.Mutex by id),
+	// so the sign-in limiter's check and its count cannot be raced.
+	switchLocks sync.Map
 	// AllowedHosts are names, besides IP addresses and localhost, that a
 	// request's Host may carry. Anything else is refused (DNS rebinding).
 	AllowedHosts []string
@@ -101,6 +113,9 @@ const (
 	public access = iota
 	signedIn
 	adminOnly
+	// householdOnly routes serve the profile picker: a household member's session,
+	// or no session at all from a trusted network when the picker is on.
+	householdOnly
 )
 
 type route struct {
@@ -118,6 +133,9 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/server", public, s.serverInfo},
 		{"POST", "/api/v1/auth/login", public, s.login},
 		{"POST", "/api/v1/auth/auto", public, s.autoLogin},
+		{"GET", "/api/v1/profiles", householdOnly, s.profiles},
+		{"GET", "/api/v1/profiles/{user_id}/avatar", householdOnly, s.profileAvatar},
+		{"POST", "/api/v1/auth/switch", householdOnly, s.switchProfile},
 		{"POST", "/api/v1/hooks/arr", public, s.arrHook},
 		{"POST", "/api/v1/auth/logout", signedIn, s.logout},
 		{"GET", "/api/v1/me", signedIn, s.me},
@@ -152,6 +170,13 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/extras/{extra_id}/file", signedIn, s.streamExtra},
 		{"HEAD", "/api/v1/extras/{extra_id}/file", signedIn, s.streamExtra},
 		{"GET", "/api/v1/subtitles/{stream_id}", signedIn, s.subtitle},
+		{"GET", "/api/v1/admin/profiles", adminOnly, s.adminProfiles},
+		{"POST", "/api/v1/admin/profiles", adminOnly, s.adminCreateProfile},
+		{"PUT", "/api/v1/admin/profiles/{user_id}", adminOnly, s.adminUpdateProfile},
+		{"PUT", "/api/v1/admin/profiles/{user_id}/pin", adminOnly, s.adminSetPIN},
+		{"DELETE", "/api/v1/admin/profiles/{user_id}/pin", adminOnly, s.adminClearPIN},
+		{"PUT", "/api/v1/admin/profiles/{user_id}/avatar", adminOnly, s.adminSetAvatar},
+		{"DELETE", "/api/v1/admin/profiles/{user_id}/avatar", adminOnly, s.adminDeleteAvatar},
 		{"GET", "/api/v1/versions/{version_id}/subtitles/search", signedIn, s.searchSubtitles},
 		{"POST", "/api/v1/versions/{version_id}/subtitles/download", signedIn, s.downloadSubtitle},
 		{"PUT", "/api/v1/versions/{version_id}/subtitle-offset", signedIn, s.setSubtitleOffset},

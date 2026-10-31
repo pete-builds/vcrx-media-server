@@ -25,6 +25,9 @@ data class CollectionRoute(val collectionId: Long, val name: String)
 @Serializable
 object AboutRoute
 
+/** "Who's watching?", the household profile picker. */
+@Serializable
+object ProfilesRoute
 /** One page of Settings; [page] is a [io.github.pete_builds.vcrx.tv.ui.settings.SettingsPage] name. */
 @Serializable
 data class SettingsRoute(val page: String)
@@ -59,6 +62,20 @@ class AppActions(private val nav: NavController, private val activity: Activity)
             else -> StartRequest.Default
         }
         activity.startActivity(PlayerActivity.intent(activity, itemId, versionId, start, title))
+    }
+
+    /** The profile picker on top of the current screen; Back returns to it. */
+    fun openProfiles() = nav.navigate(ProfilesRoute) { launchSingleTop = true }
+
+    /** The profile picker as the only screen: after connecting, before anyone is signed in. */
+    fun toProfiles() = nav.navigate(ProfilesRoute) {
+        popUpTo(nav.graph.id) { inclusive = true }
+        launchSingleTop = true
+    }
+
+    /** Back out of the picker: to the screen under it, or out of the app when it is the only one. */
+    fun leaveProfiles() {
+        if (!nav.popBackStack()) activity.finish()
     }
 
     /** Plays one of an item's extras, such as its trailer, in the app's player. */

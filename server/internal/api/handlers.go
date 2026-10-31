@@ -94,6 +94,8 @@ func (s *Server) serverInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": s.ServerName, "product": "vcrx-media-server", "version": s.Version, "api_version": 1,
 		"auto_sign_in": s.autoSignIn(info(r).IP), "trailers_youtube": s.TrailersYouTube,
+		// On a trusted network, show "Who's watching?" instead of auto sign-in.
+		"profile_picker": s.pickerOpen(info(r).IP),
 	})
 }
 
@@ -146,6 +148,11 @@ func (s *Server) autoLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.autoSignIn(ip) {
 		writeError(w, http.StatusForbidden, "not_trusted", "Sign in with a username and password from this network.")
+		return
+	}
+	if s.ProfilePicker {
+		// The picker decides who is watching; POST /api/v1/auth/switch signs in.
+		writeError(w, http.StatusConflict, "choose_profile", "Choose who is watching: this server shows a profile picker on this network.")
 		return
 	}
 	dev := req.Device.device()

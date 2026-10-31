@@ -63,7 +63,7 @@ class LoginViewModel(private val graph: AppGraph) : ViewModel() {
      * password to type: the server says so in GET /api/v1/server, and
      * POST /api/v1/auth/auto signs this device in. Anything else shows the form.
      */
-    fun tryAutoSignIn(context: android.content.Context, onDone: () -> Unit) {
+    fun tryAutoSignIn(context: android.content.Context, onPicker: () -> Unit, onDone: () -> Unit) {
         if (autoTried) return
         autoTried = true
         val base = graph.settings.serverUrl
@@ -76,7 +76,13 @@ class LoginViewModel(private val graph: AppGraph) : ViewModel() {
         }
         viewModelScope.launch {
             try {
-                if (graph.api.serverInfo(base).autoSignIn) {
+                val info = graph.api.serverInfo(base)
+                if (info.profilePicker) {
+                    // This network gets "Who's watching?" rather than one fixed user.
+                    onPicker()
+                    return@launch
+                }
+                if (info.autoSignIn) {
                     val response = graph.api.autoLogin(AutoLoginRequest(DeviceInfo.device(context, graph.settings)))
                     graph.tokens.save(response.token)
                     graph.settings.username = response.user.displayName ?: response.user.username
@@ -133,7 +139,7 @@ fun LoginScreen() {
     // Back from Login means "wrong server": go to Connect rather than leave the app.
     BackHandler { actions.toConnect() }
 
-    LaunchedEffect(Unit) { vm.tryAutoSignIn(context) { actions.toBrowse() } }
+    LaunchedEffect(Unit) { vm.tryAutoSignIn(context, onPicker = { actions.toProfiles() }) { actions.toBrowse() } }
     if (vm.checkingAuto) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {

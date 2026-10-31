@@ -1,0 +1,59 @@
+/* "Who's watching?" picker, PIN pad, avatars, and Settings > Users > Household. */
+.avatar {
+  position: relative; display: inline-grid; place-items: center; flex: none; overflow: hidden;
+  width: 40px; height: 40px; border-radius: 50%; color: #fff;
+  font: 700 16px/1 Rajdhani, Inter, sans-serif; letter-spacing: .04em;
+}
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.avatar-big { width: clamp(84px, 22vw, 132px); height: clamp(84px, 22vw, 132px); border-radius: 18%; font-size: clamp(30px, 8vw, 48px); }
+.avatar-small { width: 30px; height: 30px; font-size: 13px; }
+
+.nav-profile { display: inline-flex; border-radius: 50%; }
+.nav-profile:hover .avatar { box-shadow: 0 0 0 2px var(--orange); }
+
+.picker {
+  min-height: calc(100vh - 88px); display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 28px; text-align: center; padding: 24px 0;
+}
+.picker-mark { height: 36px; width: auto; }
+.picker h1 { font-size: clamp(30px, 6vw, 52px); }
+.profiles { display: flex; flex-wrap: wrap; justify-content: center; gap: clamp(16px, 4vw, 36px); max-width: 900px; }
+.profile {
+  display: flex; flex-direction: column; align-items: center; gap: 10px; background: none; border: 0; cursor: pointer;
+  padding: 8px; border-radius: 12px; width: clamp(104px, 26vw, 160px); color: var(--muted);
+}
+.profile .avatar { outline: 3px solid transparent; outline-offset: 3px; transition: outline-color .12s, transform .12s; }
+.profile:hover .avatar, .profile:focus-visible .avatar { outline-color: var(--orange); transform: scale(1.04); }
+.profile:focus-visible { outline: none; }
+.profile:hover, .profile:focus-visible, .profile.current { color: var(--text); }
+.profile-name { font-weight: 500; overflow-wrap: anywhere; }
+.profile-tag, .profile-lock {
+  font: 600 12px/1 Rajdhani, sans-serif; letter-spacing: .06em; text-transform: uppercase;
+  padding: 3px 7px; border-radius: 4px; background: var(--surface-2); color: var(--muted);
+}
+.profile-tag { color: var(--good); }
+.profile-tags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.picker-actions, .picker-note { margin: 0; }
+
+.pin-pad { display: flex; flex-direction: column; align-items: center; gap: 14px; outline: none; width: min(320px, 100%); }
+.pin-pad p { margin: 0; }
+.pin-dots { display: flex; gap: 12px; min-height: 16px; }
+.pin-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--faint); }
+.pin-dots i.on { background: var(--orange); border-color: var(--orange); }
+.pin-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; }
+.pin-key {
+  height: 56px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer;
+  font: 600 24px/1 Rajdhani, Inter, sans-serif;
+}
+.pin-key:hover, .pin-key:focus-visible { border-color: var(--orange); }
+.pin-ok { background: var(--orange); color: #000; border-color: var(--orange); }
+.pin-password { display: grid; gap: 12px; width: 100%; text-align: left; }
+.pin-error { min-height: 1.5em; }
+
+.household .profile-rows { display: grid; gap: 12px; margin: 16px 0; }
+.profile-row { display: grid; gap: 12px; }
+.profile-row-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.profile-member { margin-left: auto; }
+.profile-row-body { display: grid; gap: 10px; }
+.pin-input { width: 9em; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 8px; }
+.add-profile { display: grid; gap: 12px; max-width: 900px; }

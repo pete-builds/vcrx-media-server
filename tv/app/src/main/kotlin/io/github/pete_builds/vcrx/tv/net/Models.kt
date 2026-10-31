@@ -20,6 +20,8 @@ data class ServerInfo(
     @SerialName("api_version") val apiVersion: Int = 0,
     /** True when this device's network may sign in without a password (POST /api/v1/auth/auto). */
     @SerialName("auto_sign_in") val autoSignIn: Boolean = false,
+    /** True when this network gets "Who's watching?" (GET /api/v1/profiles) instead of auto sign-in. */
+    @SerialName("profile_picker") val profilePicker: Boolean = false,
     /** True when the admin turned on YouTube trailers, so details may carry one with source "youtube". */
     @SerialName("trailers_youtube") val trailersYoutube: Boolean = false,
 )
