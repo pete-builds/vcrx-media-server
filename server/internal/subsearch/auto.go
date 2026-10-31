@@ -114,6 +114,19 @@ func (s *Service) AutoPass(ctx context.Context) (int, error) {
 			return fetched, ctx.Err()
 		}
 		result, err := s.autoOne(ctx, c)
+		var link *opensubtitles.LinkError
+		if errors.As(err, &link) {
+			// The download was counted but the file never came. Remember the
+			// try, or every pass would spend another download on it.
+			s.Log.Warn("automatic subtitle fetch: download link failed", "version", c.version, "language", c.lang, "err", err)
+			if rerr := s.recordAttempt(ctx, c, "link_failed"); rerr != nil {
+				return fetched, rerr
+			}
+			if link.Transient {
+				return fetched, err
+			}
+			continue
+		}
 		if err != nil {
 			if stopsPass(err) {
 				return fetched, err

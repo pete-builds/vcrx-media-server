@@ -53,6 +53,8 @@ type Server struct {
 	DownloadName string
 	// Down makes every API call answer 503; RateLimit makes them answer 429.
 	Down, RateLimit bool
+	// LinkStatus, when set, is what every download link answers.
+	LinkStatus int
 	// NoIDResults makes id searches find nothing, so the title stage runs.
 	NoIDResults bool
 	// LoginCount and the request log are for assertions.
@@ -120,6 +122,13 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	if strings.HasPrefix(r.URL.Path, "/files/") {
+		s.mu.Lock()
+		status := s.LinkStatus
+		s.mu.Unlock()
+		if status != 0 {
+			http.Error(w, "link failed", status)
+			return
+		}
 		w.Header().Set("Content-Type", "application/x-subrip")
 		_, _ = w.Write([]byte(Content))
 		return

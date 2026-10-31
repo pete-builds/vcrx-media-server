@@ -179,3 +179,26 @@ func TestOffWithoutKey(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+// A failed link comes after /download counted the download, so it is a
+// LinkError; only a network failure or 5xx also reads as "unavailable".
+func TestDownloadLinkFailureIsALinkError(t *testing.T) {
+	for _, c := range []struct {
+		status    int
+		transient bool
+	}{{410, false}, {404, false}, {503, true}} {
+		fake := ostest.New(t)
+		fake.LinkStatus = c.status
+		_, err := fake.Client("viewer", "secret").Download(context.Background(), 8000002)
+		var le *opensubtitles.LinkError
+		if !errors.As(err, &le) || le.Status != c.status || le.Transient != c.transient {
+			t.Fatalf("link %d: err %v", c.status, err)
+		}
+		if errors.Is(err, opensubtitles.ErrUnavailable) != c.transient {
+			t.Fatalf("link %d: unavailable %v", c.status, errors.Is(err, opensubtitles.ErrUnavailable))
+		}
+		if fake.Remaining != 19 {
+			t.Fatalf("link %d: quota %d, the stand-in should have counted the download", c.status, fake.Remaining)
+		}
+	}
+}

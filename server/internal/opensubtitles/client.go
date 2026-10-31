@@ -545,37 +545,71 @@ func (c *Client) noteQuota(remaining, allowed int, reset string) Quota {
 	return q
 }
 
-// fetch downloads the file behind a download link. The link is on another
-// host, so the API key and token are not sent with it.
+// LinkError means /download answered, so a download was already counted
+// against the quota, but the file behind its link could not be fetched.
+// Callers must remember the attempt: asking again spends another download.
+// Transient (network, 5xx) also matches ErrUnavailable.
+type LinkError struct {
+	Status    int
+	Transient bool
+	Err       error
+}
+
+func (e *LinkError) Error() string {
+	return "opensubtitles: download link failed after the quota was spent: " + e.Err.Error()
+}
+
+func (e *LinkError) Unwrap() []error {
+	if e.Transient {
+		return []error{e.Err, ErrUnavailable}
+	}
+	return []error{e.Err}
+}
+
+// fetch downloads the file behind a download link. Every failure is a
+// *LinkError, because the quota is already spent by now.
 func (c *Client) fetch(ctx context.Context, link string) ([]byte, error) {
+	b, status, err := c.fetchLink(ctx, link)
+	if err != nil {
+		var rl *RateLimitError
+		transient := status >= 500 || (status == 0 && (errors.Is(err, ErrUnavailable) || errors.As(err, &rl) ||
+			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)))
+		return nil, &LinkError{Status: status, Transient: transient, Err: err}
+	}
+	return b, nil
+}
+
+// fetchLink fetches a link on another host, so the API key and token are not
+// sent with it. status is 0 when no answer came.
+func (c *Client) fetchLink(ctx context.Context, link string) ([]byte, int, error) {
 	u, err := url.Parse(link)
 	if err != nil || u.Host == "" || !c.linkScheme(u.Scheme) {
-		return nil, fmt.Errorf("opensubtitles: refusing download link %q", link)
+		return nil, 0, fmt.Errorf("refusing download link %q", link)
 	}
 	if err := c.wait(ctx); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("User-Agent", c.userAgent())
 	res, err := c.http().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return nil, 0, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: download link answered %d", ErrUnavailable, res.StatusCode)
+		return nil, res.StatusCode, fmt.Errorf("download link answered %d", res.StatusCode)
 	}
 	b, err := io.ReadAll(io.LimitReader(res.Body, MaxFileSize+1))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return nil, 0, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	if len(b) > MaxFileSize {
-		return nil, errors.New("opensubtitles: subtitle file larger than 5 MB")
+		return nil, res.StatusCode, errors.New("subtitle file larger than 5 MB")
 	}
-	return b, nil
+	return b, res.StatusCode, nil
 }
 
 // linkScheme accepts https, and plain http only when the API itself is plain

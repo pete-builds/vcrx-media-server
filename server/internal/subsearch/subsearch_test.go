@@ -453,3 +453,40 @@ func TestAutoPassOffline(t *testing.T) {
 		t.Fatalf("%d attempts recorded while offline", n)
 	}
 }
+
+// A download whose link fails has already spent quota. The pass records the
+// attempt (with backoff) so the next passes do not spend again; a 4xx moves
+// on to the next file, a 5xx stops the pass.
+func TestAutoPassRecordsFailedLinks(t *testing.T) {
+	for _, c := range []struct {
+		status   int
+		stops    bool
+		attempts int
+	}{{410, false, 2}, {503, true, 1}} {
+		e := newEnv(t)
+		e.fake.LinkStatus = c.status
+		if err := e.svc.InitAuto(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		e.movie("Fresh Film", "tt1000002", 200_000)
+		e.movie("Second Film", "tt1000003", 200_000)
+		_, err := e.svc.AutoPass(context.Background())
+		if (err != nil) != c.stops {
+			t.Fatalf("link %d: pass err %v", c.status, err)
+		}
+		spent := e.fake.Count("/api/v1/download")
+		if n := e.count(`SELECT COUNT(*) FROM subtitle_fetch_attempts WHERE last_result = 'link_failed' AND done = 0 AND next_attempt_at > ?`,
+			e.now.UnixMilli()); n != c.attempts || spent != c.attempts {
+			t.Fatalf("link %d: %d attempts recorded, %d downloads spent; want %d", c.status, n, spent, c.attempts)
+		}
+		// Many more passes within the backoff spend at most one download per
+		// file in all (the 5xx pass stopped before the second file).
+		for range 6 {
+			e.now = e.now.Add(30 * time.Minute)
+			_, _ = e.svc.AutoPass(context.Background())
+		}
+		if got, tries := e.fake.Count("/api/v1/download"), e.count(`SELECT COUNT(*) FROM subtitle_fetch_attempts WHERE attempts = 1`); got != 2 || tries != 2 {
+			t.Fatalf("link %d: %d downloads spent on 2 files (first pass %d), %d single attempts", c.status, got, spent, tries)
+		}
+	}
+}
