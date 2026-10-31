@@ -269,6 +269,9 @@ func serve() error {
 		go (&imdb.Syncer{DB: a.db, Log: log.With("component", "imdb")}).Run(ctx)
 	}
 	go collectionBuilder(a).Run(ctx, 30*time.Minute)
+	smart := smartBuilder(a)
+	scanner.OnFinished = func(library.Library, library.Run) { smart.Trigger() }
+	go smart.Run(ctx, 15*time.Minute)
 	srv := &api.Server{
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
@@ -279,6 +282,7 @@ func serve() error {
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
 		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets, AllowedHosts: cfg.AllowedHosts,
 	}
+	srv.SmartCollections = smart
 	if users, err := authStore.CountUsers(ctx); err == nil && users == 0 {
 		log.Warn("no users yet: create the admin with `docker compose exec vcrx vcrx user add -username <name> -admin`")
 	}
@@ -630,7 +634,7 @@ func metadataCmd(args []string) error {
 			return err
 		}
 		fmt.Printf("collections: %d franchises, %d newly named, %d removed, %d waiting for a name\n", res.Collections, res.Named, res.Removed, res.Waiting)
-		return nil
+		return printSmart(ctx, smartBuilder(a))
 	case "imdb":
 		res, err := (&imdb.Syncer{DB: a.db, Log: a.log}).Sync(ctx, true)
 		if err != nil {
@@ -743,4 +747,36 @@ func collectionBuilder(a *app) *collections.Builder {
 		}
 	}
 	return b
+}
+
+// smartBuilder builds the smart collections defined in YAML files.
+func smartBuilder(a *app) *collections.SmartBuilder {
+	return &collections.SmartBuilder{DB: a.db, Dir: a.cfg.SmartCollectionsDir(), Log: a.log.With("component", "smart-collections")}
+}
+
+// printSmart builds the smart collections once and says what happened, with
+// every refused file and failed definition, so a typo is found at the shell.
+func printSmart(ctx context.Context, b *collections.SmartBuilder) error {
+	rep, err := b.Build(ctx)
+	if err != nil {
+		return err
+	}
+	if rep.Error != "" {
+		fmt.Printf("smart collections: %s (nothing changed)\n", rep.Error)
+	}
+	for _, f := range rep.Files {
+		if f.Error != "" {
+			fmt.Printf("smart collections: refused %s\n", f.Error)
+		}
+	}
+	failed := 0
+	for _, c := range rep.Collections {
+		if c.Error != "" {
+			failed++
+			fmt.Printf("smart collections: %s\n", c.Error)
+		}
+	}
+	fmt.Printf("smart collections: %d from %d files, %d failed, labels +%d -%d, %d removed\n",
+		len(rep.Collections), len(rep.Files), failed, rep.LabelsAdded, rep.LabelsRemoved, rep.Removed)
+	return nil
 }

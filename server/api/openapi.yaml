@@ -485,6 +485,63 @@ paths:
                 required: [scans]
                 properties:
                   scans: { type: array, items: { $ref: "#/components/schemas/ScanRun" } }
+  /api/v1/admin/collections:
+    get:
+      operationId: adminSmartCollections
+      summary: Smart collection definitions loaded from YAML and the last build of each
+      description: >-
+        Lists every YAML file in the collections directory, whether it loaded or
+        was refused (with the file and line of the error), and each definition's
+        last build: matching titles, its label and where it is visible. A refused
+        file's collections keep building from its last good load (last_good).
+        built is false until the first build after startup.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [built, files, collections]
+                properties:
+                  built: { type: boolean }
+                  dir: { type: string }
+                  built_at: { type: integer, description: Unix milliseconds. }
+                  error: { type: string, description: Set when the directory could not be read; nothing was changed. }
+                  labels_added: { type: integer }
+                  labels_removed: { type: integer }
+                  collections_removed: { type: integer }
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      required: [file, collections, last_good]
+                      properties:
+                        file: { type: string }
+                        error: { type: string }
+                        collections: { type: integer }
+                        last_good: { type: boolean }
+                  collections:
+                    type: array
+                    items:
+                      type: object
+                      required: [file, line, name, library, slug, visible, items, last_good]
+                      properties:
+                        file: { type: string }
+                        line: { type: integer }
+                        name: { type: string }
+                        library: { type: string }
+                        slug: { type: string }
+                        label: { type: string }
+                        visible:
+                          type: object
+                          properties:
+                            library: { type: boolean }
+                            home: { type: boolean }
+                            shared: { type: boolean }
+                        items: { type: integer }
+                        last_good: { type: boolean }
+                        error: { type: string }
   /api/v1/admin/users:
     get:
       operationId: adminListUsers

@@ -16,6 +16,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/artwork"
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
+	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
@@ -52,6 +53,9 @@ type Server struct {
 	Scans    ScanStarter
 	// LibraryRoots lists roots for the readiness check.
 	LibraryRoots func(ctx context.Context) (map[string]string, error)
+
+	// SmartCollections reports the YAML collection definitions and their builds.
+	SmartCollections *collections.SmartBuilder
 
 	AdminAllowRemote bool
 	TrustedProxies   []netip.Prefix
@@ -119,6 +123,7 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/admin/libraries", adminOnly, s.adminCreateLibrary},
 		{"POST", "/api/v1/admin/libraries/{library_id}/scan", adminOnly, s.adminScan},
 		{"GET", "/api/v1/admin/scans", adminOnly, s.adminScans},
+		{"GET", "/api/v1/admin/collections", adminOnly, s.adminSmartCollections},
 		{"GET", "/api/v1/admin/users", adminOnly, s.adminUsers},
 		{"POST", "/api/v1/admin/users", adminOnly, s.adminCreateUser},
 		{"PUT", "/api/v1/admin/users/{user_id}/grants", adminOnly, s.adminSetGrants},

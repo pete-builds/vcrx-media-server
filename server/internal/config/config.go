@@ -96,6 +96,10 @@ type Config struct {
 	TMDbCountry string `yaml:"tmdb_country"`
 
 	Libraries []LibrarySpec `yaml:"libraries"`
+
+	// CollectionsDir holds the smart collection YAML files. Empty means
+	// $VCRX_CONFIG_DIR/collections. VCRX_COLLECTIONS_DIR overrides it.
+	CollectionsDir string `yaml:"collections_dir"`
 }
 
 func defaults() Config {
@@ -186,6 +190,7 @@ func Load() (Config, error) {
 	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
 	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)
 	list("VCRX_ALLOWED_HOSTS", &c.AllowedHosts)
+	str("VCRX_COLLECTIONS_DIR", &c.CollectionsDir)
 	str("VCRX_TMDB_LANGUAGE", &c.TMDbLanguage)
 	str("VCRX_TMDB_COUNTRY", &c.TMDbCountry)
 	str("VCRX_TMDB_API_KEY", &c.TMDbAPIKey)
@@ -279,6 +284,14 @@ func (c *Config) validate() error {
 func (c Config) Addr() string { return fmt.Sprintf("%s:%d", c.Bind, c.Port) }
 
 func (c Config) DBPath() string { return filepath.Join(c.ConfigDir, "vcrx.db") }
+
+// SmartCollectionsDir is where smart collection definitions are read from.
+func (c Config) SmartCollectionsDir() string {
+	if c.CollectionsDir != "" {
+		return c.CollectionsDir
+	}
+	return filepath.Join(c.ConfigDir, "collections")
+}
 
 func (c Config) BackupDir() string { return filepath.Join(c.ConfigDir, "backups") }
 

@@ -16,7 +16,7 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 
 | Works now | Comes later |
 |---|---|
-| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, genre and decade filters | Collections from YAML rules |
+| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, smart collections and hidden labels from YAML rules, genre and decade filters | Online lists (IMDb Top 250 and the like), playlists, automatic director and studio collections |
 | Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
 | Direct play over HTTP with Range; converted streams for clients that ask for them (video copied, audio converted to AAC, fragmented MP4); sidecar and embedded text subtitles (also as WebVTT for browsers) | Video transcoding, picture subtitle burn-in, VA-API hardware acceleration |
 | Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, stats, per-user totals, stop a stream, webhooks | Activity screens in a client |
@@ -122,6 +122,26 @@ All three take `position`: `top_left`, `top_right`, `bottom_left` or `bottom_rig
 ### Collections
 
 Every film series (a TMDb collection) with two or more of its films in a movie library becomes a collection there, in release order, like Kometa's `franchise` default. The membership is rebuilt every 30 minutes, so a new sequel joins on its own; a series that drops to one film goes away. Names come from TMDb once, so this needs `VCRX_TMDB_API_KEY`; without it, series wait rather than get a made-up name. `vcrx metadata collections` builds them now. The web app shows them under a library's Collections button and links each film's page to its series. Libraries also filter by genre and decade.
+
+### Smart collections and hidden labels (Kometa style)
+
+Write collections as YAML files in `/config/collections/` (`collections_dir` in `vcrx.yaml` or `VCRX_COLLECTIONS_DIR` moves it); `deploy/collections.example.yaml` is a commented start. The files are the source of truth: the database copy is rebuilt from them after every scan and every 15 minutes, so losing the database loses nothing.
+
+```yaml
+collections:
+  - name: R-Rated Horror
+    library: Movies
+    smart:
+      all:                  # every rule matches; any: at least one does; lists nest
+        - genre: Horror
+        - content_rating: R
+    label: horror           # stamped on every match, taken off when a title stops matching
+    visible: { library: false, home: false, shared: false }   # label only, never listed
+```
+
+Rules use local metadata only: genre, studio, director, writer, actor, country, network, decade, year or a year range, resolution (of any present version), HDR, content rating, label and `added_within_days`. A list of values means any of them. A file with a mistake is refused whole, with the file and line in the log, in `vcrx metadata collections` (which builds everything now) and in `GET /api/v1/admin/collections`; its collections keep building from the last good copy, and nothing else changes. If the directory itself is missing, nothing changes at all.
+
+`label:` is how friends' access follows your rules: deny `horror` in a user's policy and a title disappears for them as soon as a rebuild finds it matches, and comes back when it stops matching. VCRX only ever takes off labels it stamped. A label you set by hand or that an NFO file carries is never removed, and an NFO naming a stamped label takes it over. Collections with `visible.library: false` are left out of library collection lists, title pages and Home; `home` and `shared` are stored for Home rows, which do not show collections yet.
 
 ### Radarr and Sonarr
 
