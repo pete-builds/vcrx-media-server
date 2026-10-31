@@ -53,6 +53,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/opensubtitles"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
+	"github.com/pete-builds/vcrx-media-server/server/internal/preroll"
 	"github.com/pete-builds/vcrx-media-server/server/internal/probe"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subsearch"
@@ -384,7 +385,7 @@ func serve() error {
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
 		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets, AllowedHosts: cfg.AllowedHosts,
-		TrailersYouTube: cfg.YouTubeTrailers(),
+		TrailersYouTube: cfg.YouTubeTrailers(), Prerolls: preroll.Folder{Dir: cfg.PrerollDir},
 	}
 	srv.SmartCollections = smart
 	// Music libraries: listings, covers, and tracks played directly or

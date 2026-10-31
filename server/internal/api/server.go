@@ -27,6 +27,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
+	"github.com/pete-builds/vcrx-media-server/server/internal/preroll"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subsearch"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
@@ -118,6 +119,9 @@ type Server struct {
 	// one embed. Off, the CSP allows no frames at all.
 	TrailersYouTube bool
 
+	// Prerolls is preroll_dir: clips a profile may see before a movie.
+	Prerolls preroll.Folder
+
 	// Friends' servers (milestone 9, item 3), set up by SetUpFederation.
 	// Peers are the servers this one has linked to; PeerClient talks to them
 	// and to nothing else; PeerCache keeps their catalogs for Home.
@@ -202,6 +206,9 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/search", signedIn, s.search},
 		{"GET", "/api/v1/items/{item_id}", signedIn, s.item},
 		{"GET", "/api/v1/items/{item_id}/children", signedIn, s.itemChildren},
+		{"GET", "/api/v1/items/{item_id}/before", signedIn, s.beforeMovie},
+		{"GET", "/api/v1/preroll", signedIn, s.prerollFile},
+		{"HEAD", "/api/v1/preroll", signedIn, s.prerollFile},
 		{"PUT", "/api/v1/items/{item_id}/watched", signedIn, s.setWatched},
 		{"DELETE", "/api/v1/items/{item_id}/progress", signedIn, s.clearProgress},
 		{"GET", "/api/v1/items/{item_id}/artwork/{kind}", signedIn, s.artwork},

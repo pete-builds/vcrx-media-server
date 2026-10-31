@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"time"
@@ -66,31 +67,80 @@ func (s *Server) sessionMarkers(ctx context.Context, pol policy.Policy, userID i
 
 type playbackSettings struct {
 	SkipMarkers string `json:"skip_markers"`
+	// Before a movie: local trailers for other unwatched titles (0 to 3) and
+	// a pre-roll clip from preroll_dir.
+	BeforeMovieTrailers int  `json:"before_movie_trailers"`
+	BeforeMoviePreroll  bool `json:"before_movie_preroll"`
+}
+
+func (s *Server) readPlaybackSettings(ctx context.Context, userID int64) (playbackSettings, error) {
+	mode, err := markers.SkipMode(ctx, s.DB, userID)
+	if err != nil {
+		return playbackSettings{}, err
+	}
+	out := playbackSettings{SkipMarkers: mode}
+	err = s.DB.QueryRowContext(ctx, `SELECT before_movie_trailers, before_movie_preroll FROM users WHERE id = ?`, userID).
+		Scan(&out.BeforeMovieTrailers, &out.BeforeMoviePreroll)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = nil
+	}
+	return out, err
 }
 
 func (s *Server) playbackSettings(w http.ResponseWriter, r *http.Request) {
-	mode, err := markers.SkipMode(r.Context(), s.DB, info(r).Session.User.ID)
+	out, err := s.readPlaybackSettings(r.Context(), info(r).Session.User.ID)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, playbackSettings{SkipMarkers: mode})
+	writeJSON(w, http.StatusOK, out)
 }
 
+// setPlaybackSettings saves the fields sent and keeps the rest, so a client
+// that knows only skip_markers never resets the others.
 func (s *Server) setPlaybackSettings(w http.ResponseWriter, r *http.Request) {
-	var req playbackSettings
+	var req struct {
+		SkipMarkers         *string `json:"skip_markers"`
+		BeforeMovieTrailers *int    `json:"before_movie_trailers"`
+		BeforeMoviePreroll  *bool   `json:"before_movie_preroll"`
+	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if !markers.ValidMode(req.SkipMarkers) {
+	if req.SkipMarkers != nil && !markers.ValidMode(*req.SkipMarkers) {
 		writeError(w, http.StatusBadRequest, "bad_request", "skip_markers must be button, auto or off.")
 		return
 	}
-	if err := markers.SetSkipMode(r.Context(), s.DB, info(r).Session.User.ID, req.SkipMarkers); err != nil {
+	if req.BeforeMovieTrailers != nil && (*req.BeforeMovieTrailers < 0 || *req.BeforeMovieTrailers > 3) {
+		writeError(w, http.StatusBadRequest, "bad_request", "before_movie_trailers must be 0 to 3.")
+		return
+	}
+	userID := info(r).Session.User.ID
+	ctx := r.Context()
+	if req.SkipMarkers != nil {
+		if err := markers.SetSkipMode(ctx, s.DB, userID, *req.SkipMarkers); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
+	if req.BeforeMovieTrailers != nil {
+		if _, err := s.DB.ExecContext(ctx, `UPDATE users SET before_movie_trailers = ? WHERE id = ?`, *req.BeforeMovieTrailers, userID); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
+	if req.BeforeMoviePreroll != nil {
+		if _, err := s.DB.ExecContext(ctx, `UPDATE users SET before_movie_preroll = ? WHERE id = ?`, *req.BeforeMoviePreroll, userID); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
+	out, err := s.readPlaybackSettings(ctx, userID)
+	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, req)
+	writeJSON(w, http.StatusOK, out)
 }
 
 // markerError answers for the marker package's refusals.

@@ -52,6 +52,9 @@ services:
       # with kind: music and path: /media/Music to vcrx.yaml. Unset, an empty
       # folder is mounted so the path never points at anything.
       - ${VCRX_MUSIC_DIR:-./data/no-music}:/media/Music:ro
+      # Optional pre-roll clips for Before a movie: set VCRX_PREROLL_DIR in .env
+      # and preroll_dir: /media/Pre-Roll in vcrx.yaml.
+      - ${VCRX_PREROLL_DIR:-./data/no-preroll}:/media/Pre-Roll:ro
     labels:
       # Built locally, so there is no registry image for Watchtower to pull.
       com.centurylinklabs.watchtower.enable: "false"
