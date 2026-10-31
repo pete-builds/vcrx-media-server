@@ -22,6 +22,11 @@ server_name: VCRX
 # downloaded once a day. IMDb licenses it for personal, non-commercial use.
 #imdb_ratings: true
 
+# Radarr and Sonarr webhooks find the folder by name in a library. If they see
+# the NAS at another path and folder names differ, map their prefix to VCRX's.
+#arr_path_map:
+#  - { from: /volume1/data/media/movies, to: /media/Movies }
+
 libraries:
   - name: Movies
     kind: movie

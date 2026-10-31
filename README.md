@@ -123,6 +123,16 @@ All three take `position`: `top_left`, `top_right`, `bottom_left` or `bottom_rig
 
 Every film series (a TMDb collection) with two or more of its films in a movie library becomes a collection there, in release order, like Kometa's `franchise` default. The membership is rebuilt every 30 minutes, so a new sequel joins on its own; a series that drops to one film goes away. Names come from TMDb once, so this needs `VCRX_TMDB_API_KEY`; without it, series wait rather than get a made-up name. `vcrx metadata collections` builds them now. The web app shows them under a library's Collections button and links each film's page to its series. Libraries also filter by genre and decade.
 
+### Radarr and Sonarr
+
+New imports can show up in seconds instead of at the next scan. Set `VCRX_ARR_WEBHOOK_TOKEN` in `.env` (16 characters or more), restart, then in Radarr and in Sonarr add Settings, Connect, Webhook:
+
+- URL: `http://<server-ip>:3750/api/v1/hooks/arr`, method POST
+- Password: the token (the username can be anything), or put `?token=<token>` on the URL
+- Triggers: On Import, On Upgrade, On Rename, and the delete triggers
+
+VCRX scans just that movie's or series' folder. It finds the folder by its name inside a library of the right kind; if Radarr or Sonarr see the NAS at a different path and the names differ, map the prefix with `arr_path_map` in `vcrx.yaml`. Webhooks are accepted only from the LAN. A Test from Radarr or Sonarr answers 200.
+
 ### Activity and notifications
 
 Like Tautulli, without a second program. Every play request is logged with the device, address, version, decision and reason, and the admin API reads it back (admin account, from the LAN):

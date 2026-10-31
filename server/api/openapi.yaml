@@ -82,6 +82,37 @@ paths:
         "200": { description: Logged in, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } } }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/hooks/arr:
+    post:
+      operationId: arrWebhook
+      summary: >-
+        Radarr and Sonarr Webhook connection target. Scans the movie or series folder named in an import, upgrade,
+        rename or delete, within seconds rather than at the next scheduled scan. LAN only, and needs the server's
+        VCRX_ARR_WEBHOOK_TOKEN as ?token=, an X-VCRX-Token header, or the basic-auth password. Off (404) without one.
+      security: []
+      parameters:
+        - { name: token, in: query, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, description: "The Radarr or Sonarr webhook body, unchanged." } } }
+      responses:
+        "200": { description: A test or an event that changes no files. }
+        "202":
+          description: Scan started, or queued behind a running scan.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [action]
+                properties:
+                  action: { type: string, enum: [scanned, queued, ignored, test] }
+                  library_id: { type: integer }
+                  path: { type: string }
+                  scan_id: { type: integer }
+                  reason: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/auth/logout:
     post:
       operationId: logout

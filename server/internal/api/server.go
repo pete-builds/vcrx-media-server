@@ -12,6 +12,7 @@ import (
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/activity"
 	"github.com/pete-builds/vcrx-media-server/server/internal/admin"
+	"github.com/pete-builds/vcrx-media-server/server/internal/arr"
 	"github.com/pete-builds/vcrx-media-server/server/internal/artwork"
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
@@ -40,6 +41,9 @@ type Server struct {
 	Artwork    *artwork.Service
 	Subtitles  *subtitles.Service
 	Remux      *remux.Service
+	// Arr turns Radarr and Sonarr webhooks into scans; ArrToken guards it.
+	Arr      *arr.Dispatcher
+	ArrToken string
 	// Metadata, when TMDb is set up, backs Fix Match.
 	Metadata *enrich.Enricher
 	Activity *activity.Service
@@ -89,6 +93,7 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/server", public, s.serverInfo},
 		{"POST", "/api/v1/auth/login", public, s.login},
 		{"POST", "/api/v1/auth/auto", public, s.autoLogin},
+		{"POST", "/api/v1/hooks/arr", public, s.arrHook},
 		{"POST", "/api/v1/auth/logout", signedIn, s.logout},
 		{"GET", "/api/v1/me", signedIn, s.me},
 		{"GET", "/api/v1/home", signedIn, s.home},
