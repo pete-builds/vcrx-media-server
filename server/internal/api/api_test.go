@@ -26,6 +26,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
+	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
@@ -157,6 +158,8 @@ func newFixture(t *testing.T) *fixture {
 		Catalog: cat, Playback: &playback.Service{DB: conn, Catalog: cat}, Artwork: artwork.New(conn, filepath.Join(dir, "cache"), "ffmpeg"),
 		Admin: adm, Scans: &fakeScans{}, Subtitles: subtitles.New(filepath.Join(dir, "subs"), "ffmpeg", log),
 		Activity: &activity.Service{DB: conn}}
+	// Invited devices and TV pairing, as main wires them.
+	f.srv.Invites, f.srv.Pairings, f.srv.PairLimiter = &invites.Store{DB: conn}, &invites.Pairings{}, auth.NewLimiter(10, 15*time.Minute)
 	// httptest requests carry Host example.com; a real name must be allowed.
 	f.srv.AllowedHosts = []string{"example.com"}
 	f.h = f.srv.Handler()
@@ -194,6 +197,10 @@ func (f *fixture) do(method, path, token string, body any, hdr ...string) resp {
 	for i := 0; i+1 < len(hdr); i += 2 {
 		if hdr[i] == "RemoteAddr" {
 			req.RemoteAddr = hdr[i+1]
+			continue
+		}
+		if hdr[i] == "Host" {
+			req.Host = hdr[i+1]
 			continue
 		}
 		req.Header.Set(hdr[i], hdr[i+1])

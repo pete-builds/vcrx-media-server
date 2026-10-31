@@ -16,6 +16,7 @@ import io.github.pete_builds.vcrx.tv.ui.connect.ConnectScreen
 import io.github.pete_builds.vcrx.tv.ui.connect.LoginScreen
 import io.github.pete_builds.vcrx.tv.ui.collection.CollectionScreen
 import io.github.pete_builds.vcrx.tv.ui.details.DetailsScreen
+import io.github.pete_builds.vcrx.tv.ui.pair.PairScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.ProfilePickerScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.StartScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.startScreen
@@ -26,7 +27,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val graph = graph
-        val start: Any = when (startScreen(graph.settings.serverUrl != null, graph.tokens.token() != null, graph.profilePrefs.alwaysAsk)) {
+        val start: Any = when (
+            startScreen(graph.settings.serverUrl != null, graph.tokens.token() != null, graph.profilePrefs.alwaysAsk, graph.tokens.isInvitedDevice)
+        ) {
             StartScreen.CONNECT -> ConnectRoute
             StartScreen.LOGIN -> LoginRoute
             StartScreen.PICKER -> ProfilesRoute
@@ -50,6 +53,7 @@ class MainActivity : ComponentActivity() {
                         }
                         composable<AboutRoute> { AboutScreen() }
                         composable<ProfilesRoute> { ProfilePickerScreen() }
+                        composable<PairRoute> { PairScreen() }
                     }
                 }
             }

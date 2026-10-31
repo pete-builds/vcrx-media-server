@@ -16,6 +16,7 @@ import { loginView } from "./views/login.js";
 import { searchSuggest } from "./suggest.js";
 import { installShortcuts } from "./shortcuts.js";
 import { pickerView, drawProfileButton } from "./views/profiles.js";
+import { pairView, inviteView } from "./views/devices.js";
 
 export const state = { me: null, server: null, libraries: [] };
 
@@ -28,10 +29,15 @@ const routes = [
   [/^\/search$/, () => searchView],
   [/^\/play\/(\d+)$/, () => playerView],
   [/^\/activity(?:\/(now|history|stats|users))?$/, () => activityView],
-  [/^\/settings(?:\/(account|libraries|users|newsletter))?$/, () => settingsView],
+  [/^\/settings(?:\/(account|libraries|users|devices|newsletter))?$/, () => settingsView],
   [/^\/login$/, () => loginView],
   [/^\/profiles$/, () => pickerView],
+  [/^\/pair\/([A-Za-z-]{1,16})$/, () => pairView],
+  [/^\/invite\/([A-Za-z2-7-]{16,64})$/, () => inviteView],
 ];
+
+// An invite link opens on a device that has no session yet.
+const isInvite = (path) => path.startsWith("/invite/");
 
 let cleanup = null;
 let renderSeq = 0;
@@ -55,7 +61,7 @@ async function render() {
   }
   const { path, params } = parseHash();
   const view = document.getElementById("view");
-  if (!state.me && path !== "/login" && path !== "/profiles") {
+  if (!state.me && path !== "/login" && path !== "/profiles" && !isInvite(path)) {
     go(signInPath() + "?next=" + encodeURIComponent(path));
     return;
   }
@@ -64,7 +70,7 @@ async function render() {
     match = path.match(re);
     if (match) { viewFn = fn(); break; }
   }
-  document.getElementById("topbar").hidden = !state.me || path.startsWith("/play/") || path === "/profiles";
+  document.getElementById("topbar").hidden = !state.me || path.startsWith("/play/") || path === "/profiles" || isInvite(path);
   markNav(path);
   setMenu(false);
   // While a page with a hero loads, its skeleton already sits under the
@@ -192,7 +198,9 @@ async function boot() {
     await signedIn();
   } catch (err) {
     if (!(err instanceof ApiError) || err.status !== 401) throw err;
-    if (state.server.auto_sign_in && !state.server.profile_picker) {
+    // An invite link joins as the invited device: signing this browser in as
+    // the household first would only be undone.
+    if (state.server.auto_sign_in && !state.server.profile_picker && !isInvite(parseHash().path)) {
       try {
         await autoSignIn();
         await signedIn();

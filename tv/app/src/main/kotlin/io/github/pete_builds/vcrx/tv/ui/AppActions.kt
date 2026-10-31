@@ -28,6 +28,10 @@ object AboutRoute
 @Serializable
 object ProfilesRoute
 
+/** Pair with a phone, or type an invite: signs in as an invited device. */
+@Serializable
+object PairRoute
+
 /** Navigation any screen may need, without threading callbacks through every layer. */
 class AppActions(private val nav: NavController, private val activity: Activity) {
     /** Connect on top of the current screen; Back returns to it. */
@@ -63,6 +67,9 @@ class AppActions(private val nav: NavController, private val activity: Activity)
     fun leaveProfiles() {
         if (!nav.popBackStack()) activity.finish()
     }
+
+    /** Pairing on top of Connect or Login; Back returns to it. */
+    fun openPair() = nav.navigate(PairRoute) { launchSingleTop = true }
 
     fun toLogin() = nav.navigate(LoginRoute) {
         popUpTo(nav.graph.id) { inclusive = true }

@@ -181,6 +181,8 @@ fun LoginScreen() {
                     primary = true,
                     modifier = Modifier.focusRequester(signInFocus),
                 )
+                // No account needed: an admin's phone approves this TV as an invited device.
+                BrandButton("Pair with a phone", onClick = { actions.openPair() })
                 BrandButton(if (vm.unreachable) "Change server" else "Other server", onClick = { actions.toConnect() })
             }
         }

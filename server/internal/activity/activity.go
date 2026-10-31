@@ -75,31 +75,41 @@ type Session struct {
 	LastEventAt       int64    `json:"last_event_at"`
 	EndedAt           *int64   `json:"ended_at"`
 	TerminatedMessage *string  `json:"terminated_message"`
+	// PrincipalKind is who played: "user" (an account), "profile" (a
+	// household profile) or "token" (an invited device, TokenID). TokenActive
+	// says whether that device can still be revoked.
+	PrincipalKind string `json:"principal_kind"`
+	TokenID       *int64 `json:"token_id"`
+	TokenActive   bool   `json:"token_active"`
 }
 
 const sessionColumns = `ps.id, ps.state, ps.decision, ps.decision_reason, ps.user_id, ps.username, ps.item_id, ps.item_kind,
 	ps.item_title, CASE WHEN ps.item_kind = 'episode' THEN sh.id END, ps.version_summary, ps.bitrate, ps.device_name,
 	ps.device_model, ps.platform, ps.client, ps.client_version, ps.ip, ps.start_position_ms, ps.last_position_ms,
-	ps.duration_ms, ps.played_ms, ps.started_at, ps.last_event_at, ps.ended_at, ps.terminated_message`
+	ps.duration_ms, ps.played_ms, ps.started_at, ps.last_event_at, ps.ended_at, ps.terminated_message,
+	ps.principal_kind, ps.token_id, dt.revoked_at IS NULL AND dt.expires_at > CAST(strftime('%s', 'now') AS INTEGER) * 1000`
 
 // sessionJoins reach an episode's show for its poster and for show totals.
 const sessionJoins = ` FROM playback_sessions ps
 	LEFT JOIN items ep ON ep.id = ps.item_id
 	LEFT JOIN items se ON se.id = ep.parent_id
-	LEFT JOIN items sh ON sh.id = se.parent_id`
+	LEFT JOIN items sh ON sh.id = se.parent_id
+	LEFT JOIN device_tokens dt ON dt.id = ps.token_id`
 
 func scanSessions(rows *sql.Rows) ([]Session, error) {
 	defer func() { _ = rows.Close() }()
 	out := []Session{}
 	for rows.Next() {
 		var x Session
-		var uid, iid, show, bitrate, dur, ended sql.NullInt64
+		var uid, iid, show, bitrate, dur, ended, token sql.NullInt64
 		var uname, kind, title, vsum, dname, dmodel, platform, client, cver, ip, term sql.NullString
+		var tokenActive sql.NullBool
 		if err := rows.Scan(&x.ID, &x.State, &x.Decision, &x.DecisionReason, &uid, &uname, &iid, &kind, &title, &show, &vsum,
 			&bitrate, &dname, &dmodel, &platform, &client, &cver, &ip, &x.StartPositionMs, &x.PositionMs, &dur, &x.PlayedMs,
-			&x.StartedAt, &x.LastEventAt, &ended, &term); err != nil {
+			&x.StartedAt, &x.LastEventAt, &ended, &term, &x.PrincipalKind, &token, &tokenActive); err != nil {
 			return nil, err
 		}
+		x.TokenID, x.TokenActive = i64(token), tokenActive.Valid && tokenActive.Bool
 		x.UserID, x.ItemID, x.ShowID, x.Bitrate, x.DurationMs, x.EndedAt = i64(uid), i64(iid), i64(show), i64(bitrate), i64(dur), i64(ended)
 		x.Username, x.ItemKind, x.ItemTitle, x.VersionSummary = str(uname), str(kind), str(title), str(vsum)
 		x.DeviceName, x.DeviceModel, x.Platform, x.Client = str(dname), str(dmodel), str(platform), str(client)
@@ -389,11 +399,14 @@ type UserStat struct {
 	LastIP     *string `json:"last_ip"`
 	// LastLocation names the kind of network LastIP is on.
 	LastLocation string `json:"last_location"`
+	// Device is true for an invited device; Username is then its name.
+	Device bool `json:"device"`
 }
 
 // Users lists every account with its play totals and its latest session.
 func (s *Service) Users(ctx context.Context) ([]UserStat, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT u.id, u.username, u.is_admin,
+	rows, err := s.DB.QueryContext(ctx, `SELECT u.id, CASE WHEN u.device_token = 1 THEN COALESCE(u.display_name, u.username) ELSE u.username END,
+			u.is_admin, u.device_token,
 			(SELECT COUNT(*) FROM playback_sessions p WHERE p.user_id = u.id AND p.decision != 'refused' AND p.played_ms >= ?),
 			(SELECT COALESCE(SUM(p.played_ms), 0) FROM playback_sessions p WHERE p.user_id = u.id AND p.decision != 'refused' AND p.played_ms >= ?),
 			l.last_event_at, l.item_title, l.device_name, l.ip
@@ -409,7 +422,7 @@ func (s *Service) Users(ctx context.Context) ([]UserStat, error) {
 		var u UserStat
 		var seen sql.NullInt64
 		var title, device, ip sql.NullString
-		if err := rows.Scan(&u.UserID, &u.Username, &u.IsAdmin, &u.Plays, &u.WatchMs, &seen, &title, &device, &ip); err != nil {
+		if err := rows.Scan(&u.UserID, &u.Username, &u.IsAdmin, &u.Device, &u.Plays, &u.WatchMs, &seen, &title, &device, &ip); err != nil {
 			return nil, err
 		}
 		u.LastSeen, u.LastTitle, u.LastDevice, u.LastIP = i64(seen), str(title), str(device), str(ip)

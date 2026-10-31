@@ -123,6 +123,21 @@ fun ConnectScreen() {
             vm.error?.let { ErrorLine(it) }
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 BrandButton(if (vm.busy) "Connecting" else "Connect", onClick = submit, primary = true)
+                // Connect, then pair as an invited device rather than sign in. Back
+                // from pairing lands on the sign-in form.
+                BrandButton(
+                    "Pair with a phone",
+                    onClick = {
+                        vm.connect { needsLogin ->
+                            if (needsLogin) {
+                                actions.toLogin()
+                                actions.openPair()
+                            } else {
+                                actions.toBrowse()
+                            }
+                        }
+                    },
+                )
             }
         }
     }

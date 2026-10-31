@@ -4,7 +4,9 @@
 // missing its main content, a video that does not play, search as you type that
 // lists nothing, a Continue Watching Remove control that does not remove, a
 // keyboard shortcuts list that does not open, a Home feature whose Play does
-// not play, season tabs that do not switch, or a phone menu that does not open.
+// not play, season tabs that do not switch, a phone menu that does not open, or
+// an invited device that is not signed in by its invite, sees past its scope,
+// reaches the profile picker, or survives being revoked.
 //
 //   node scripts/web-smoke.mjs [base-url]      (default http://127.0.0.1:3751)
 //
@@ -179,6 +181,7 @@ async function main() {
     ["/settings/libraries", "table.list"],
     ["/settings/users", ".user-summary"],
     ["/settings/newsletter", ".newsletter-form"],
+    ["/settings/devices", ".scope-form"],
   ];
   for (const [path, selector] of pages) {
     console.log(`page #${path}`);
@@ -426,6 +429,7 @@ async function main() {
   if (nativeHLS) await hlsPlayer(s, evaluate, ids);
   else await hlsMSE(evaluate, ids);
   await profilePicker(s, evaluate, () => exceptions, (v) => { exceptions = v; });
+  await inviteLoop(s, evaluate, () => exceptions, (v) => { exceptions = v; });
   await s("Page.navigate", { url: `${base}/#/` });
   await sleep(500);
 
@@ -604,6 +608,159 @@ async function profilePicker(s, evaluate, getExceptions, setExceptions) {
   await s("Emulation.clearDeviceMetricsOverride");
 }
 
+// The invite is the account: the admin mints an invite for Movies only, a
+// second browser (its own cookie jar, so not the admin) opens the link and
+// joins with no password, sees Movies and nothing else, never the profile
+// picker, and cannot replay the link; then the admin revokes it from Settings
+// and its next request is refused. Then a TV's pairing code is approved from
+// the admin's phone page and the TV's poll gets its session.
+async function inviteLoop(s, evaluate, getExceptions, setExceptions) {
+  console.log("invite: mint, redeem, scope, revoke; pair a TV");
+  setExceptions([]);
+  const helpers = `
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const wait = async (sel, n = 40) => { for (let i = 0; i < n && !document.querySelector(sel); i++) await sleep(150); return document.querySelector(sel); };`;
+  await s("Page.navigate", { url: `${base}/#/settings/devices` });
+  const minted = await evaluate(`${helpers}
+    const form = await wait(".scope-form");
+    if (!form) return { why: "no invite form under Settings > Devices" };
+    form.elements.name.value = "Smoke Phone";
+    const libs = (await fetch("/api/v1/libraries").then((r) => r.json())).libraries;
+    const movies = libs.find((l) => l.name === "Movies");
+    for (const box of form.querySelectorAll(".checks input[type=checkbox][value]")) box.checked = box.value === String(movies.id);
+    form.querySelector("button[type=submit]").click();
+    const link = await wait(".invite-card .invite-link");
+    const img = await wait(".invite-card img.qr");
+    if (!link || !img) return { why: "minting showed no invite: " + document.getElementById("view").innerText.slice(0, 200) };
+    for (let i = 0; i < 20 && !img.naturalWidth; i++) await sleep(100);
+    let decoded = null;
+    if ("BarcodeDetector" in window) {
+      try { decoded = ((await new BarcodeDetector({ formats: ["qr_code"] }).detect(img))[0] || {}).rawValue || ""; } catch { decoded = null; }
+    }
+    return { url: link.value, qr: img.naturalWidth, decoded, card: document.querySelector(".invite-card").innerText };`);
+  if (minted.why) return fail("invite", minted.why);
+  if (!/#\/invite\/[a-z2-7]{32}$/.test(minted.url)) fail("invite", `the invite link looks wrong: ${minted.url}`);
+  if (!minted.qr) fail("invite", "the QR code image did not load");
+  if (minted.decoded !== null && minted.decoded !== minted.url) fail("invite", `the QR code reads "${minted.decoded}", not the link`);
+  if (minted.decoded !== null) console.log("  QR code decodes to the invite link");
+  // The invited device: a browser context of its own, at phone width.
+  const { browserContextId } = await send("Target.createBrowserContext");
+  const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId });
+  const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
+  const d = (m, p) => send(m, p, sessionId);
+  const devErrors = [];
+  listeners.push((m) => {
+    if (m.sessionId === sessionId && m.method === "Runtime.exceptionThrown") devErrors.push(m.params.exceptionDetails.text);
+  });
+  await d("Runtime.enable");
+  await d("Page.enable");
+  await d("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  const devEval = async (expr) => {
+    const r = await d("Runtime.evaluate", { expression: `(async () => { ${helpers} ${expr} })()`, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+    return r.result.value;
+  };
+  const call = `const call = (p, method = "GET", body) => fetch("/api/v1" + p, { method, body: body && JSON.stringify(body),
+      headers: { "X-VCRX-Client": "web", "Content-Type": "application/json" } }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));`;
+  try {
+    await d("Page.navigate", { url: minted.url });
+    const joined = await devEval(`${call}
+      const join = await wait(".invite-page button");
+      if (!join) return { why: "the invite link showed no Join button: " + document.getElementById("view").innerText.slice(0, 160) };
+      const before = (await call("/me")).status;
+      const width = document.documentElement.scrollWidth;
+      join.click();
+      for (let i = 0; i < 40 && location.hash.startsWith("#/invite/"); i++) await sleep(150);
+      await wait(".row .card, .empty, .grid .card");
+      const me = (await call("/me")).body || {};
+      const libs = ((await call("/libraries")).body || {}).libraries || [];
+      const picker = (await call("/profiles")).status;
+      const switched = (await call("/auth/switch", "POST", { user_id: 1 })).status;
+      const replay = (await call("/invites/redeem", "POST", { invite: ${JSON.stringify(minted.url.split("/").pop())} })).status;
+      const avatarBtn = !document.getElementById("nav-profile").hidden;
+      location.hash = "#/settings";
+      await wait(".settings dl");
+      return { before, width, screen: screen.width, hash: location.hash, me, libs: libs.map((l) => l.name), picker, switched, replay, avatarBtn,
+        settings: document.querySelector(".settings dl").innerText };`);
+    if (joined.why) fail("invite", joined.why);
+    else {
+      if (joined.before !== 401) fail("invite", `before joining, the new browser was already signed in (${joined.before})`);
+      if (joined.width > joined.screen + 1) fail("invite on a phone", `the invite page is ${joined.width}px wide on a ${joined.screen}px screen`);
+      if (joined.me.kind !== "token" || joined.me.display_name !== "Smoke Phone") fail("invite", `joined as ${JSON.stringify(joined.me)}, not the invited device`);
+      if (joined.libs.join() !== "Movies") fail("invite", `the invited device sees ${joined.libs.join(", ") || "nothing"}, not Movies only`);
+      if (joined.picker !== 403 || joined.switched !== 403) fail("invite", `the invited device reached the profile picker (${joined.picker}) or a switch (${joined.switched})`);
+      if (joined.avatarBtn) fail("invite", "the invited device shows the Switch profile button");
+      if (joined.replay !== 401) fail("invite", `replaying the spent invite answered ${joined.replay}, not 401`);
+      if (!/Smoke Phone \(invited\)/.test(joined.settings)) fail("invite", `Settings does not say this is an invited device: ${joined.settings.slice(0, 120)}`);
+    }
+    // The admin revokes it from Settings > Devices (a fresh load of the list).
+    await s("Page.navigate", { url: `${base}/#/settings/devices?after=join` });
+    const revoked = await evaluate(`${helpers}
+      window.confirm = () => true;
+      let row = null;
+      for (let i = 0; i < 40 && !row; i++) {
+        row = [...document.querySelectorAll(".device-row")].find((r) => r.innerText.includes("Smoke Phone") && r.dataset.state === "active");
+        if (!row) await sleep(150);
+      }
+      if (!row) return { why: "the redeemed device is not listed as active: " + document.getElementById("view").innerText.slice(0, 200) };
+      const seen = row.innerText;
+      row.querySelector("button").click();
+      let state = "";
+      for (let i = 0; i < 40 && state !== "revoked"; i++) {
+        await sleep(150);
+        const r = [...document.querySelectorAll(".device-row")].find((x) => x.innerText.includes("Smoke Phone"));
+        state = r ? r.dataset.state : "";
+      }
+      return { state, seen };`);
+    if (revoked.why) fail("invite", revoked.why);
+    else {
+      if (revoked.state !== "revoked") fail("invite", `after Revoke the device shows ${revoked.state}`);
+      if (!/Last seen/.test(revoked.seen)) fail("invite", `the device row has no last seen: ${revoked.seen}`);
+    }
+    const after = await devEval(`${call}
+      const me = (await call("/me")).status;
+      location.hash = "#/";
+      for (let i = 0; i < 40 && !location.hash.startsWith("#/login"); i++) await sleep(150);
+      return { me, hash: location.hash };`);
+    if (after.me !== 401) fail("invite", `after the revoke the device's next request answered ${after.me}, not 401`);
+    if (!after.hash.startsWith("#/login")) fail("invite", `after the revoke the device stayed on ${after.hash}`);
+
+    // A TV pairs: it asks for a code (here from the signed-out browser), the
+    // admin approves it on #/pair/<code>, and the TV's poll gets its session.
+    const tv = await devEval(`${call}
+      const r = await call("/pair", "POST", { device: { id: "smoke-tv", name: "Smoke TV", platform: "android_tv", client: "vcrx-tv", client_version: "1" } });
+      return r.body;`);
+    if (!tv || !tv.user_code) fail("pair", `no pairing code: ${JSON.stringify(tv)}`);
+    else {
+      await s("Page.navigate", { url: `${base}/#/pair/${tv.user_code.replace("-", "")}` });
+      const approved = await evaluate(`${helpers}
+        const form = await wait(".pair-page .scope-form");
+        if (!form) return { why: "the approval page has no scope form: " + document.getElementById("view").innerText.slice(0, 200) };
+        const who = document.querySelector(".pair-who").innerText;
+        form.querySelector("button[type=submit]").click();
+        for (let i = 0; i < 40 && document.querySelector(".pair-page .scope-form"); i++) await sleep(150);
+        return { who, text: document.getElementById("view").innerText };`);
+      if (approved.why) fail("pair", approved.why);
+      else {
+        if (!approved.who.includes("Smoke TV") || !approved.who.includes(tv.user_code)) fail("pair", `the approval page does not name the TV and its code: ${approved.who}`);
+        if (!/is paired/.test(approved.text)) fail("pair", `approving did not confirm: ${approved.text.slice(0, 160)}`);
+      }
+      const polled = await devEval(`${call}
+        const r = await call("/pair/poll", "POST", { device_code: ${JSON.stringify(tv.device_code)} });
+        const again = await call("/pair/poll", "POST", { device_code: ${JSON.stringify(tv.device_code)} });
+        const me = r.body && r.body.token ? await fetch("/api/v1/me", { headers: { Authorization: "Bearer " + r.body.token } }).then((x) => x.json()) : null;
+        return { status: r.body && r.body.status, me, again: again.status };`);
+      if (polled.status !== "approved" || !polled.me || polled.me.kind !== "token") fail("pair", `the TV's poll after approval: ${JSON.stringify(polled)}`);
+      if (polled.again !== 404) fail("pair", `a second poll answered ${polled.again}, not 404: the code is single-use`);
+    }
+    if (devErrors.length) fail("invite", `the invited device threw: ${devErrors[0]}`);
+  } finally {
+    await send("Target.closeTarget", { targetId }).catch(() => {});
+    await send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
+  }
+  if (getExceptions().length) fail("invite", `threw: ${getExceptions()[0]}`);
+}
+
 try {
   await main();
 } catch (e) {
@@ -618,4 +775,4 @@ if (failures.length) {
   process.exit(1);
 }
 console.log("\nweb-smoke: every page, every playback path (HLS included), Continue Watching removal, search as you type, the shortcuts list, " +
-  "the Home feature, season tabs and the phone menu, and the History section passed");
+  "the Home feature, season tabs and the phone menu, the History section, and the invite and pairing loop passed");

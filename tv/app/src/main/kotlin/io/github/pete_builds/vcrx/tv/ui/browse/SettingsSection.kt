@@ -46,9 +46,11 @@ fun SettingsSection(focus: BrowseFocus) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Info("Server", graph.settings.serverName ?: stringResource(R.string.server_product), graph.settings.serverUrl.orEmpty())
-        Info("Signed in as", graph.settings.username ?: "Unknown user", null)
+        val invited = graph.tokens.isInvitedDevice
+        Info("Signed in as", graph.settings.username ?: "Unknown user", if (invited) "Invited device" else null)
         Info("App", "${stringResource(R.string.app_title)} ${BuildConfig.VERSION_NAME}", null)
-        SwitchProfileRow()
+        // An invited device is its own principal: there are no profiles to switch to.
+        if (!invited) SwitchProfileRow()
         BrandRow(onClick = { actions.openConnect() }, icon = Icons.Filled.Refresh, modifier = Modifier.focusRequester(first)) {
             Label("Change server")
         }
@@ -66,7 +68,8 @@ fun SettingsSection(focus: BrowseFocus) {
             },
             icon = Icons.Filled.Person,
         ) {
-            Label(if (signingOut) "Signing out" else "Sign out")
+            // An invited device has no password: signing out gives its invite up.
+            Label(if (signingOut) "Signing out" else if (invited) "Sign out (needs a new invite)" else "Sign out")
         }
         BrandRow(onClick = { actions.openAbout() }, icon = Icons.Filled.Info) {
             Label("About")

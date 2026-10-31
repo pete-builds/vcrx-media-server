@@ -52,6 +52,10 @@ type Client struct {
 	ClientName    string
 	ClientVersion string
 	IP            string
+	// PrincipalKind is "user", "profile" or "token" (auth.Session.Kind), and
+	// TokenID the invited device, so history can name it and revoke it.
+	PrincipalKind string
+	TokenID       int64
 }
 
 type StartRequest struct {
@@ -252,12 +256,12 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO playback_sessions (id, user_id, auth_session_id, item_id, version_id, username, item_title,
 			item_kind, version_summary, device_id, device_name, device_model, platform, client, client_version, ip, decision,
 			decision_reason, video_decision, audio_decision, bitrate, capabilities, state, start_position_ms, last_position_ms,
-			duration_ms, started_at, last_event_at, ended_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			duration_ms, started_at, last_event_at, ended_at, principal_kind, token_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, c.UserID, nullID(c.AuthSessionID), req.ItemID, v.ID, c.Username, title, kind, summarize(v),
 		c.DeviceID, c.DeviceName, c.DeviceModel, c.Platform, c.ClientName, c.ClientVersion, c.IP,
 		decision, reason, d.VideoDecision, d.AudioDecision, v.Bitrate, string(capsJSON), state, resume, resume,
-		v.DurationMs, now, now, endedAt)
+		v.DurationMs, now, now, endedAt, principalKind(c.PrincipalKind), nullID(c.TokenID))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -310,6 +314,14 @@ func s2(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// principalKind defaults to "user" for callers that do not say.
+func principalKind(k string) string {
+	if k == "" {
+		return "user"
+	}
+	return k
 }
 
 func nullID(id int64) any {

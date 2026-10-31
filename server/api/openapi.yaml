@@ -134,6 +134,93 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+  /api/v1/invites/redeem:
+    post:
+      operationId: redeemInvite
+      summary: >-
+        Spend an invite (from its link or QR code) and sign this device in as its own principal: no username,
+        password or email. Each invite works once; a replay, a revoked or an expired invite is refused with
+        invalid_invite, and wrong invites are limited per address like wrong passwords. The device sees only
+        the invite's scope, never the profile picker. With cookie set, the X-VCRX-Client header is required.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invite]
+              properties:
+                invite: { type: string, description: The secret from the invite link, 32 characters; case, spaces and dashes are ignored. }
+                device: { $ref: "#/components/schemas/Device" }
+                cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers." }
+      responses:
+        "200":
+          description: Signed in as the invited device
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/LoginResponse" }
+                  - { type: object, properties: { device: { $ref: "#/components/schemas/InvitedDevice" } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /api/v1/pair:
+    post:
+      operationId: pairStart
+      summary: >-
+        A TV asks to pair. It gets a device code to keep and a user code to show, with a QR code of the
+        approval page; an admin approves it from a phone on the local network, and the TV polls
+        POST /api/v1/pair/poll. Codes last ten minutes and work once. Ten starts per address per 15 minutes.
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { device: { $ref: "#/components/schemas/Device" } } } } }
+      responses:
+        "200":
+          description: Pairing started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_code, user_code, verification_url, qr_png, expires_in, interval]
+                properties:
+                  device_code: { type: string, description: Secret; only the TV holds it. }
+                  user_code: { type: string, example: BCDF-GHJK }
+                  verification_url: { type: string, description: "The web app's approval page for this code, as the TV reached the server." }
+                  qr_png: { type: string, format: byte, description: A QR code of verification_url, as base64 PNG. }
+                  expires_in: { type: integer, description: Seconds. }
+                  interval: { type: integer, description: Seconds between polls. }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/v1/pair/poll:
+    post:
+      operationId: pairPoll
+      summary: >-
+        The TV asks whether it was approved. Pending until then; once approved, the answer carries the TV's
+        session token, once. An expired, denied, used or unknown code is pairing_not_found; ten of those per
+        address per 15 minutes lock the address out.
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [device_code], properties: { device_code: { type: string } } } } }
+      responses:
+        "200":
+          description: Pending, or approved with the session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [pending, approved] }
+                  interval: { type: integer }
+                  token: { type: string }
+                  expires_at: { type: integer }
+                  user: { $ref: "#/components/schemas/User" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /api/v1/hooks/arr:
     post:
       operationId: arrWebhook
@@ -168,14 +255,27 @@ paths:
   /api/v1/auth/logout:
     post:
       operationId: logout
-      summary: Revoke the token used for this request.
+      summary: >-
+        Revoke the token used for this request. On an invited device this gives the invite up: the device is
+        revoked and needs a new invite.
       responses:
         "204": { description: Logged out }
   /api/v1/me:
     get:
       operationId: getMe
       responses:
-        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/User" }
+                  - type: object
+                    required: [kind]
+                    properties:
+                      kind: { type: string, enum: [user, profile, token], description: "token: an invited device, which never sees the profile picker." }
+                      device_expires_at: { type: integer, description: When an invited device's access ends. }
         "401": { $ref: "#/components/responses/Error" }
 
   /api/v1/home:
@@ -513,10 +613,12 @@ paths:
       operationId: streamVersion
       summary: |
         The media file itself, for direct play. Supports Range, If-Range and HEAD.
-        Access is checked on every request against the caller's policy.
+        Access is checked on every request against the caller's policy. An invited device must name one
+        of its own open playback sessions for this version: it streams, and is never handed the file to
+        keep (403 stream_only).
       parameters:
         - { name: version_id, in: path, required: true, schema: { type: integer } }
-        - { name: session, in: query, schema: { type: string }, description: Playback session id, for activity accounting. }
+        - { name: session, in: query, schema: { type: string }, description: "Playback session id, for activity accounting; required for invited devices." }
       responses:
         "200": { description: Whole file }
         "206": { description: Partial content }
@@ -649,6 +751,107 @@ paths:
       responses:
         "204": { description: Removed }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/devices:
+    get:
+      operationId: adminListDevices
+      summary: Every invited device, pending, active, revoked or expired, newest first. Never carries an invite secret.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [devices], properties: { devices: { type: array, items: { $ref: "#/components/schemas/InvitedDevice" } } } }
+    post:
+      operationId: adminMintInvite
+      summary: >-
+        Mint an invite: a link and a QR code that sign one device in with this scope. The secret is in this
+        answer only; the server keeps its SHA-256.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/InviteScope" } } }
+      responses:
+        "201":
+          description: Minted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device, invite, url, qr_png]
+                properties:
+                  device: { $ref: "#/components/schemas/InvitedDevice" }
+                  invite: { type: string, description: The secret, 160 random bits as 32 base32 characters. Shown once. }
+                  url: { type: string, description: "The invite link: the web app's #/invite/ page with the secret." }
+                  qr_png: { type: string, format: byte, description: A QR code of url, as base64 PNG. }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/devices/{device_id}:
+    delete:
+      operationId: adminRevokeDevice
+      summary: >-
+        Revoke one device. Its sessions end, so its next request is refused, and any stream it has open stops
+        now, with a message in history. Other devices are untouched.
+      parameters:
+        - { name: device_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device: { $ref: "#/components/schemas/InvitedDevice" }
+                  streams_stopped: { type: integer }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/pairings/{code}:
+    get:
+      operationId: adminPairing
+      summary: >-
+        The TV waiting with this code, so the phone can show which device it is approving. Wrong codes are
+        limited per address: ten per 15 minutes.
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, example: BCDF-GHJK } }
+      responses:
+        "200":
+          description: Waiting
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_code: { type: string }
+                  device_name: { type: [string, "null"] }
+                  device_model: { type: [string, "null"] }
+                  platform: { type: [string, "null"] }
+                  client: { type: [string, "null"] }
+                  ip: { type: string }
+                  location: { type: string }
+                  created_at: { type: integer }
+                  expires_at: { type: integer }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: adminDenyPairing
+      summary: Turn the TV away; its next poll learns the code is gone.
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Denied }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/pairings/{code}/approve:
+    post:
+      operationId: adminApprovePairing
+      summary: Approve the TV with a scope. Works once per code. An empty name takes the TV's own.
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/InviteScope" } } }
+      responses:
+        "201": { description: Approved, content: { application/json: { schema: { type: object, properties: { device: { $ref: "#/components/schemas/InvitedDevice" } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /api/v1/admin/libraries:
     get:
       operationId: adminListLibraries
@@ -1146,6 +1349,7 @@ paths:
                         last_device: { type: [string, "null"] }
                         last_ip: { type: [string, "null"] }
                         last_location: { $ref: "#/components/schemas/Location" }
+                        device: { type: boolean, description: "An invited device; username is then the name it was given." }
         "403": { $ref: "#/components/responses/Error" }
 
   /api/v1/admin/activity/sessions/{session_id}/terminate:
@@ -1342,6 +1546,43 @@ components:
         password: { type: string, format: password, description: The target's password instead of its PIN (not for managed profiles). }
         device: { $ref: "#/components/schemas/Device" }
         cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers." }
+    InviteScope:
+      type: object
+      required: [library_ids, expires_in_days]
+      properties:
+        name: { type: string, description: "What to call the device, 1 to 64 characters, e.g. Mark's TV." }
+        library_ids: { type: array, items: { type: integer }, minItems: 1 }
+        max_resolution: { type: string, enum: ["", SD, 480p, 576p, 720p, 1080p, 4K, 8K], description: '"" for no limit.' }
+        allow_transcode: { type: boolean, description: Whether the server may convert files for it, 4K included. }
+        expires_in_days: { type: integer, minimum: 1, maximum: 365 }
+    InvitedDevice:
+      type: object
+      required: [id, user_id, name, source, state, scope, summary, created_at]
+      properties:
+        id: { type: integer }
+        user_id: { type: integer, description: The device's own principal. }
+        name: { type: string }
+        source: { type: string, enum: [invite, pairing] }
+        state: { type: string, enum: [pending, active, revoked, expired] }
+        scope:
+          type: object
+          properties:
+            library_ids: { type: array, items: { type: integer } }
+            max_resolution: { type: string }
+            allow_transcode: { type: boolean }
+            expires_at: { type: integer }
+        summary: { type: string, example: "Sees Movies, up to 1080p, direct play only." }
+        created_by: { type: [string, "null"] }
+        created_at: { type: integer }
+        redeemed_at: { type: [integer, "null"] }
+        revoked_at: { type: [integer, "null"] }
+        revoked_by: { type: [string, "null"] }
+        last_seen_at: { type: [integer, "null"] }
+        last_ip: { type: [string, "null"] }
+        device_name: { type: [string, "null"] }
+        device_model: { type: [string, "null"] }
+        platform: { type: [string, "null"] }
+        client: { type: [string, "null"] }
     LoginResponse:
       type: object
       required: [token, user, expires_at]
@@ -1692,6 +1933,9 @@ components:
         last_event_at: { type: integer }
         ended_at: { type: [integer, "null"] }
         terminated_message: { type: [string, "null"] }
+        principal_kind: { type: string, enum: [user, profile, token], description: "Who played: an account, a household profile, or an invited device." }
+        token_id: { type: [integer, "null"], description: "The invited device, for DELETE /api/v1/admin/devices/{device_id}." }
+        token_active: { type: boolean, description: The device can still be revoked. }
     TitleWatch:
       type: object
       required: [item_id, kind, title, year, library_id, library, paths, size_bytes, added_at, last_played_at, play_count, finished_by]

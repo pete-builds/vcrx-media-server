@@ -123,9 +123,13 @@ object PickerLogic {
 /** Where the app opens: the picker when this device always asks who is watching. */
 enum class StartScreen { CONNECT, LOGIN, PICKER, BROWSE }
 
-fun startScreen(hasServer: Boolean, hasToken: Boolean, alwaysAsk: Boolean): StartScreen = when {
+/**
+ * An [invited] device (signed in by an invite or by pairing) is its own
+ * principal: it never opens on the picker, whatever "always ask" says.
+ */
+fun startScreen(hasServer: Boolean, hasToken: Boolean, alwaysAsk: Boolean, invited: Boolean = false): StartScreen = when {
     !hasServer -> StartScreen.CONNECT
     !hasToken -> StartScreen.LOGIN
-    alwaysAsk -> StartScreen.PICKER
+    alwaysAsk && !invited -> StartScreen.PICKER
     else -> StartScreen.BROWSE
 }
