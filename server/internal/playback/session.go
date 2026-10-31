@@ -155,8 +155,18 @@ func newID() string {
 // Start chooses a version and a decision, records the session, and returns it. A
 // refusal is recorded too, and returned with a nil error.
 func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req StartRequest) (*Session, *Refusal, error) {
+	// The item itself first: its library, labels and rating. Checking only the
+	// versions would let a friend start a title they cannot see and read its
+	// file name and tracks from the answer.
+	visible, err := s.Catalog.Visible(ctx, pol, req.ItemID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !visible {
+		return nil, nil, catalog.ErrNotFound
+	}
 	var kind, title string
-	err := s.DB.QueryRowContext(ctx, `SELECT kind, title FROM items WHERE id = ?`, req.ItemID).Scan(&kind, &title)
+	err = s.DB.QueryRowContext(ctx, `SELECT kind, title FROM items WHERE id = ?`, req.ItemID).Scan(&kind, &title)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, catalog.ErrNotFound
 	}

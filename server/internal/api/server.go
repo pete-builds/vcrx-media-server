@@ -140,6 +140,7 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/admin/users", adminOnly, s.adminCreateUser},
 		{"PUT", "/api/v1/admin/users/{user_id}/grants", adminOnly, s.adminSetGrants},
 		{"PUT", "/api/v1/admin/users/{user_id}/policy", adminOnly, s.adminSetPolicy},
+		{"GET", "/api/v1/admin/labels", adminOnly, s.adminLabels},
 		{"GET", "/api/v1/admin/activity/sessions", adminOnly, s.adminSessions},
 		{"GET", "/api/v1/admin/metadata/unmatched", adminOnly, s.unmatched},
 		{"GET", "/api/v1/admin/items/{item_id}/match", adminOnly, s.matchSearch},

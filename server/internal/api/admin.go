@@ -162,6 +162,17 @@ func (s *Server) adminSetPolicy(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// adminLabels lists the labels on titles, for the policy editor's allow and
+// deny lists.
+func (s *Server) adminLabels(w http.ResponseWriter, r *http.Request) {
+	labels, err := s.Admin.Labels(r.Context())
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"labels": labels})
+}
+
 func (s *Server) adminSessions(w http.ResponseWriter, r *http.Request) {
 	active, _ := strconv.ParseBool(r.URL.Query().Get("active"))
 	sessions, err := s.Admin.PlaybackSessions(r.Context(), active, int64(queryInt(r, "user_id", 0)), queryInt(r, "limit", 50), queryInt(r, "offset", 0))
