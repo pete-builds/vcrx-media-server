@@ -11,6 +11,10 @@ import (
 	"testing"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"time"
 )
 
 // browserCaps is what the web app reports in Chrome on a Mac: MP4 and
@@ -325,5 +329,86 @@ func TestTranscodeEndToEnd(t *testing.T) {
 	f.do("GET", "/api/v1/admin/activity/now", f.adminTok, nil).json(t, &now)
 	if now.Converting != 1 || len(now.Sessions) != 1 || now.Sessions[0].Decision != "transcode" {
 		t.Fatalf("now playing: %+v", now)
+	}
+}
+
+// Stop and error events end the session's open streams, so a client that keeps
+// reading after it stopped does not hold a conversion slot. Other events leave
+// them alone.
+func TestStopEventCutsOpenStreams(t *testing.T) {
+	f := newFixture(t)
+	f.srv.Playback.CanRemux = true
+	f.srv.Remux = remux.New("ffmpeg", "ffprobe", 2, nil)
+	start := func() string {
+		t.Helper()
+		var sess struct {
+			SessionID string `json:"session_id"`
+		}
+		r := f.do("POST", "/api/v1/playback/sessions", f.adminTok, map[string]any{"item_id": f.movieID, "version_id": f.v1080, "capabilities": browserCaps(true)})
+		if r.code != 201 {
+			t.Fatalf("start: %d %s", r.code, r.body)
+		}
+		r.json(t, &sess)
+		return sess.SessionID
+	}
+	open := func(id string) context.Context {
+		ctx, cancel := context.WithCancel(context.Background())
+		f.srv.streams.add(id, &cancel)
+		t.Cleanup(func() { f.srv.streams.remove(id, &cancel); cancel() })
+		return ctx
+	}
+	event := func(id, typ string) {
+		t.Helper()
+		if r := f.do("POST", "/api/v1/playback/sessions/"+id+"/events", f.adminTok, map[string]any{"type": typ, "position_ms": 1000}); r.code != 204 {
+			t.Fatalf("%s event: %d %s", typ, r.code, r.body)
+		}
+	}
+	for _, typ := range []string{"stop", "error"} {
+		id := start()
+		ctx := open(id)
+		event(id, "progress")
+		if ctx.Err() != nil {
+			t.Fatalf("a progress event cut the stream")
+		}
+		event(id, typ)
+		if ctx.Err() == nil {
+			t.Fatalf("after a %s event the stream is still open", typ)
+		}
+	}
+}
+
+// A cancelled stream must not wait for a client that has stopped reading: the
+// pending write fails at once, so the conversion slot frees.
+func TestCancelledStreamDoesNotWaitForASlowReader(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	returned := make(chan time.Duration, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = streamUntilCancelled(ctx, w, func() error {
+			chunk := make([]byte, 64<<10)
+			for {
+				if _, err := w.Write(chunk); err != nil {
+					return err
+				}
+			}
+		})
+		returned <- 0
+	}))
+	defer srv.Close()
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	// Ask for the stream and never read it, so the server's writes fill the
+	// socket buffers and block.
+	if _, err := conn.Write([]byte("GET / HTTP/1.1\r\nHost: x\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	select {
+	case <-returned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the stream kept writing to a reader that had stopped, after it was cancelled")
 	}
 }
