@@ -90,6 +90,9 @@ object CapabilityBuilder {
             subtitleCodecs = CodecNames.SUBTITLE_CODECS,
             maxWidth = displayWidth ?: videoCodecs.mapNotNull { it.maxWidth }.maxOrNull(),
             maxHeight = displayHeight ?: videoCodecs.mapNotNull { it.maxHeight }.maxOrNull(),
+            // The player plays a converted fragmented MP4 and seeks it by asking the server
+            // for a new stream, so files it cannot play directly can still be converted.
+            fmp4Stream = true,
         )
     }
 

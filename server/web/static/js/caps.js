@@ -41,11 +41,24 @@ export function capabilities() {
   add("eac3", 'audio/mp4; codecs="ec-3"');
 
   const hdr = window.matchMedia && window.matchMedia("(dynamic-range: high)").matches ? ["hdr10", "hlg"] : [];
+  // The player handles converted streams. Safari plays video only from a
+  // server that answers byte ranges, which a stream made on the fly cannot,
+  // so it gets them as HLS, which it plays natively; every other browser gets
+  // one fragmented MP4 stream. A <video> plays only the file's default audio
+  // track.
+  const safari = isSafari();
   return {
     containers, video_codecs: video, audio_codecs: audio, hdr_types: hdr, subtitle_codecs: ["webvtt"],
     max_width: 3840, max_height: 2160, max_bitrate: 0,
-    // The player handles converted streams, and a <video> plays only the
-    // file's default audio track.
-    fmp4_stream: true, default_audio_only: true,
+    fmp4_stream: !safari, hls_stream: safari && can("application/vnd.apple.mpegurl"), default_audio_only: true,
   };
+}
+
+// isSafari is true for Safari on a Mac, iPhone or iPad, and for every other
+// browser on an iPhone or iPad, which all run Safari's engine. It is false
+// for Chromium, Edge and Firefox elsewhere, whose user agents also mention
+// Safari.
+export function isSafari() {
+  const ua = navigator.userAgent;
+  return /iPhone|iPad|iPod/.test(ua) || (/Safari\//.test(ua) && !/Chrome\/|Chromium\/|Edg\/|Firefox\//.test(ua));
 }

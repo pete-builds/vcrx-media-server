@@ -189,6 +189,30 @@ func migrateOnly() error {
 	return nil
 }
 
+// canTranscode reports whether video transcoding is on: allowed by the
+// config and possible with this ffmpeg, which needs libx264. It logs which.
+func canTranscode(ctx context.Context, rmx *remux.Service, limit int, log *slog.Logger) bool {
+	if limit == 0 {
+		log.Info("video transcoding is off (max_transcodes is 0): clients that cannot decode a file's video are refused")
+		return false
+	}
+	f, err := rmx.Detect(ctx)
+	switch {
+	case err != nil:
+		log.Error("video transcoding is off: cannot ask ffmpeg for its encoders", "ffmpeg", rmx.FFmpeg, "err", err)
+		return false
+	case !f.X264:
+		log.Warn("video transcoding is off: this ffmpeg has no libx264 encoder", "ffmpeg", rmx.FFmpeg)
+		return false
+	case !f.ToneMap:
+		log.Info("video transcoding is on, without HDR tone mapping: this ffmpeg has no zscale filter, so HDR sent to an SDR browser looks washed out",
+			"max_transcodes", limit)
+	default:
+		log.Info("video transcoding is on, with HDR tone mapping", "max_transcodes", limit)
+	}
+	return true
+}
+
 // scanAdapter lets the API start scans without depending on the library package.
 type scanAdapter struct{ m *library.Manager }
 
@@ -234,10 +258,22 @@ func serve() error {
 	scans := library.NewManager(scanner, log.With("component", "scans"))
 	cat := &catalog.Catalog{DB: a.db}
 	authStore := &auth.Store{DB: a.db, TTL: cfg.SessionTTL}
-	// Converted streams copy the video and convert at most the audio, a small
+	// Converted streams that copy the video convert at most the audio, a small
 	// fraction of a core each; four at once is well within nix1's budget.
+	// Video transcodes cost whole cores and have their own, smaller limit.
 	rmx := remux.New(cfg.FFmpegPath, cfg.FFprobePath, 4, log.With("component", "remux"))
-	pb := &playback.Service{DB: a.db, Catalog: cat, CanRemux: true}
+	rmx.SetMaxTranscodes(cfg.MaxTranscodes)
+	pb := &playback.Service{DB: a.db, Catalog: cat, CanRemux: true, CanTranscode: canTranscode(ctx, rmx, cfg.MaxTranscodes, log)}
+	// Safari plays converted streams only as HLS, written to disk per session
+	// under the same slot limits.
+	hls, err := remux.NewHLS(rmx, cfg.HLSDir(), log.With("component", "hls"))
+	if err != nil {
+		log.Error("HLS streams are off, so Safari cannot play files that need converting", "err", err)
+	} else {
+		pb.CanHLS = true
+		defer hls.Close()
+		go hls.Run(ctx)
+	}
 	hooks := notify.New(cfg.WebhookURLs, cfg.WebhookEvents, cfg.ServerName, log.With("component", "webhooks"))
 	if len(cfg.WebhookURLs) > 0 {
 		pb.Notify = hooks.Send
@@ -278,16 +314,20 @@ func serve() error {
 		go (&imdb.Syncer{DB: a.db, Log: log.With("component", "imdb")}).Run(ctx)
 	}
 	go collectionBuilder(a).Run(ctx, 30*time.Minute)
+	smart := smartBuilder(a)
+	scanner.OnFinished = func(library.Library, library.Run) { smart.Trigger() }
+	go smart.Run(ctx, 15*time.Minute)
 	srv := &api.Server{
 		DB: a.db, Log: log.With("component", "http"), Version: version, ServerName: cfg.ServerName,
 		Auth: authStore, Limiter: auth.NewLimiter(10, 15*time.Minute), Catalog: cat, Playback: pb,
 		Artwork: art, Admin: adm, Scans: scanAdapter{scans},
-		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, Remux: rmx, WebDir: os.Getenv("VCRX_WEB_DIR"),
+		Activity: &activity.Service{DB: a.db}, Webhooks: hooks, Remux: rmx, HLS: hls, WebDir: os.Getenv("VCRX_WEB_DIR"),
 		Subtitles:        subtitles.New(cfg.SubtitleCacheDir(), cfg.FFmpegPath, log.With("component", "subtitles")),
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
 		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets, AllowedHosts: cfg.AllowedHosts,
 	}
+	srv.SmartCollections = smart
 	// The weekly newsletter checks once a minute whether its time has come; it
 	// does nothing until switched on in Settings.
 	srv.Newsletter = &newsletter.Service{DB: a.db, Hooks: hooks, Log: log.With("component", "newsletter")}
@@ -303,6 +343,7 @@ func serve() error {
 	if cfg.TMDbAPIKey != "" {
 		enr := newEnricher(a)
 		enr.Busy = scans.Running
+		enr.Changed = smart.Trigger
 		srv.Metadata = enr
 		go enr.Run(ctx, 2*time.Minute, 15*time.Minute)
 	} else {
@@ -712,7 +753,7 @@ func metadataCmd(args []string) error {
 			return err
 		}
 		fmt.Printf("collections: %d franchises, %d newly named, %d removed, %d waiting for a name\n", res.Collections, res.Named, res.Removed, res.Waiting)
-		return nil
+		return printSmart(ctx, smartBuilder(a))
 	case "imdb":
 		res, err := (&imdb.Syncer{DB: a.db, Log: a.log}).Sync(ctx, true)
 		if err != nil {
@@ -825,4 +866,36 @@ func collectionBuilder(a *app) *collections.Builder {
 		}
 	}
 	return b
+}
+
+// smartBuilder builds the smart collections defined in YAML files.
+func smartBuilder(a *app) *collections.SmartBuilder {
+	return &collections.SmartBuilder{DB: a.db, Dir: a.cfg.SmartCollectionsDir(), Log: a.log.With("component", "smart-collections")}
+}
+
+// printSmart builds the smart collections once and says what happened, with
+// every refused file and failed definition, so a typo is found at the shell.
+func printSmart(ctx context.Context, b *collections.SmartBuilder) error {
+	rep, err := b.Build(ctx)
+	if err != nil {
+		return err
+	}
+	if rep.Error != "" {
+		fmt.Printf("smart collections: %s (nothing changed)\n", rep.Error)
+	}
+	for _, f := range rep.Files {
+		if f.Error != "" {
+			fmt.Printf("smart collections: refused %s\n", f.Error)
+		}
+	}
+	failed := 0
+	for _, c := range rep.Collections {
+		if c.Error != "" {
+			failed++
+			fmt.Printf("smart collections: %s\n", c.Error)
+		}
+	}
+	fmt.Printf("smart collections: %d from %d files, %d failed, labels +%d -%d, %d removed\n",
+		len(rep.Collections), len(rep.Files), failed, rep.LabelsAdded, rep.LabelsRemoved, rep.Removed)
+	return nil
 }
