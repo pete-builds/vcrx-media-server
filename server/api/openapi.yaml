@@ -502,6 +502,19 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
 
+  /api/v1/speedtest:
+    get:
+      operationId: speedTest
+      summary: >-
+        Filler bytes for a client to time its connection to the server (the TV app's Settings > About speed test).
+        Random, so a compressing proxy cannot flatter the result. Reads nothing from the library.
+      parameters:
+        - { name: bytes, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 64000000, default: 8000000 } }
+      responses:
+        "200": { description: The bytes asked for, application/octet-stream }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
   /api/v1/admin/libraries:
     get:
       operationId: adminListLibraries

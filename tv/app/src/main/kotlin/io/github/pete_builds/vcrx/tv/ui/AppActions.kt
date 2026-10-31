@@ -4,6 +4,7 @@ import android.app.Activity
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.navigation.NavController
 import io.github.pete_builds.vcrx.tv.player.PlayerActivity
+import io.github.pete_builds.vcrx.tv.player.StartRequest
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -24,6 +25,10 @@ data class CollectionRoute(val collectionId: Long, val name: String)
 @Serializable
 object AboutRoute
 
+/** One page of Settings; [page] is a [io.github.pete_builds.vcrx.tv.ui.settings.SettingsPage] name. */
+@Serializable
+data class SettingsRoute(val page: String)
+
 /** Navigation any screen may need, without threading callbacks through every layer. */
 class AppActions(private val nav: NavController, private val activity: Activity) {
     /** Connect on top of the current screen; Back returns to it. */
@@ -41,9 +46,19 @@ class AppActions(private val nav: NavController, private val activity: Activity)
 
     fun openAbout() = nav.navigate(AboutRoute) { launchSingleTop = true }
 
-    /** Starts playback. [fromStart] ignores the saved position; otherwise the server resumes it. */
-    fun play(itemId: Long, title: String, versionId: Long? = null, fromStart: Boolean = false) {
-        activity.startActivity(PlayerActivity.intent(activity, itemId, versionId, fromStart, title))
+    fun openSettings(page: String) = nav.navigate(SettingsRoute(page)) { launchSingleTop = true }
+
+    /**
+     * Starts playback. [fromStart] ignores the saved position and [resume] uses it (the
+     * explicit buttons); a plain Play leaves it to Settings > Playback > Resume.
+     */
+    fun play(itemId: Long, title: String, versionId: Long? = null, fromStart: Boolean = false, resume: Boolean = false) {
+        val start = when {
+            fromStart -> StartRequest.Beginning
+            resume -> StartRequest.Resume
+            else -> StartRequest.Default
+        }
+        activity.startActivity(PlayerActivity.intent(activity, itemId, versionId, start, title))
     }
 
     fun toLogin() = nav.navigate(LoginRoute) {

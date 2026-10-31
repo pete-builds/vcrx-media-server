@@ -19,6 +19,14 @@ class SettingsStore(context: Context) {
         get() = prefs.getString(KEY_USERNAME, null)
         set(value) = prefs.edit().putString(KEY_USERNAME, value).apply()
 
+    /**
+     * Set by Switch user: the next Login screen shows the form instead of signing
+     * this device straight back in on a trusted network. Cleared when read.
+     */
+    var skipAutoSignIn: Boolean
+        get() = prefs.getBoolean(KEY_SKIP_AUTO, false)
+        set(value) = prefs.edit().putBoolean(KEY_SKIP_AUTO, value).apply()
+
     /** Random, generated on first launch, stable until the app's data is cleared. */
     val deviceId: String
         @Synchronized get() {
@@ -33,5 +41,6 @@ class SettingsStore(context: Context) {
         const val KEY_SERVER_NAME = "server_name"
         const val KEY_USERNAME = "username"
         const val KEY_DEVICE_ID = "device_id"
+        const val KEY_SKIP_AUTO = "skip_auto_sign_in"
     }
 }
