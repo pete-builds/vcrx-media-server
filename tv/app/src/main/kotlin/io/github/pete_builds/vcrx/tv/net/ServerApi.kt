@@ -217,15 +217,15 @@ class ServerApi(
     fun absoluteUrl(path: String): String? =
         baseUrl()?.let { ServerAddress.resolve(it, path)?.toString() }
 
-    private fun url(path: String): HttpUrl {
+    internal fun url(path: String): HttpUrl {
         val base = baseUrl() ?: throw ApiException.BadResponse("No server is configured.")
         return ServerAddress.resolve(base, path) ?: throw ApiException.BadResponse("The server address is not valid.")
     }
 
-    private suspend fun <T> get(path: String, serializer: KSerializer<T>): T =
+    internal suspend fun <T> get(path: String, serializer: KSerializer<T>): T =
         send(Request.Builder().url(url(path)).build(), serializer)
 
-    private fun <B> post(path: String, body: B, serializer: KSerializer<B>): Request =
+    internal fun <B> post(path: String, body: B, serializer: KSerializer<B>): Request =
         Request.Builder().url(url(path)).post(json.encodeToString(serializer, body).toRequestBody(JSON)).build()
 
     private class Exchange(val status: Int, val body: ByteArray, val retryAfter: Int?)
@@ -249,7 +249,7 @@ class ServerApi(
      * dispatcher: callers are often on Main, and a body larger than OkHttp's first
      * buffer is still on the socket.
      */
-    private suspend fun <T> send(request: Request, serializer: KSerializer<T>?, authRoute: Boolean = true): T {
+    internal suspend fun <T> send(request: Request, serializer: KSerializer<T>?, authRoute: Boolean = true): T {
         val (status, body) = try {
             withContext(Dispatchers.IO) {
                 client.newCall(request).await().use { response -> response.code to response.body.string() }

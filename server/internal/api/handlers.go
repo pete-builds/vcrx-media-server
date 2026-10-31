@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/netip"
 	"path/filepath"
@@ -507,6 +506,15 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A listen is the same: the caller must still be allowed the track.
+	if ok, err := s.musicListenAllowed(r.Context(), ri.Policy, ri.Session.User.ID, r.PathValue("session_id")); err != nil || !ok {
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		writeError(w, http.StatusNotFound, "not_found", "Unknown playback session.")
+		return
+	}
 	err := s.Playback.RecordEvent(r.Context(), ri.Session.User.ID, r.PathValue("session_id"), ev)
 	if err == nil && (ev.Type == "stop" || ev.Type == "error") {
 		// The client is done with this session, so any stream still open for it
@@ -573,15 +581,21 @@ func (s *Server) streamVersion(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", m)
 	}
 	w.Header().Set("Cache-Control", "private, no-transform")
-	var body io.ReadSeeker = f
-	if session != "" {
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		s.streams.add(session, &cancel)
-		defer s.streams.remove(session, &cancel)
-		body = ctxReader{ctx: ctx, rs: f}
+	if session == "" {
+		http.ServeContent(w, r, filepath.Base(v.Path), fi.ModTime(), f)
+		return
 	}
-	http.ServeContent(w, r, filepath.Base(v.Path), fi.ModTime(), body)
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	s.streams.add(session, &cancel)
+	defer s.streams.remove(session, &cancel)
+	// A cut (a stop, a terminate, a revoked invite or link) also fails the
+	// write in progress, which on a slow or capped connection may hold a
+	// whole read buffer of the file.
+	_ = streamUntilCancelled(ctx, w, func() error {
+		http.ServeContent(w, r, filepath.Base(v.Path), fi.ModTime(), ctxReader{ctx: ctx, rs: f})
+		return nil
+	})
 }
 
 func playbackMime(c *string) string {

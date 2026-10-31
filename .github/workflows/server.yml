@@ -91,16 +91,32 @@ jobs:
           cache-dependency-path: server/go.sum
       - name: Install ffmpeg for the sample clips
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
-      - name: Start the dev server and wait for its first scans
+      - name: Start the dev servers and wait for their first scans
         run: |
+          # One scan line per library on each server: Movies, TV and Music.
+          scans() { grep -c '^scan ' "$1" || true; }
           VCRX_DEV_DIR="$RUNNER_TEMP/vcrx-dev" ./scripts/dev-server.sh > "$RUNNER_TEMP/dev.log" 2>&1 &
-          for _ in $(seq 1 180); do
-            [ "$(grep -c '^scan ' "$RUNNER_TEMP/dev.log" || true)" -ge 2 ] && exit 0
+          for _ in $(seq 1 240); do
+            [ "$(scans "$RUNNER_TEMP/dev.log")" -ge 3 ] && break
             sleep 1
           done
-          echo "dev server did not finish its scans"; tail -50 "$RUNNER_TEMP/dev.log"; exit 1
+          [ "$(scans "$RUNNER_TEMP/dev.log")" -ge 3 ] || { echo "dev server did not finish its scans"; tail -n 50 "$RUNNER_TEMP/dev.log"; exit 1; }
+          # A second server, linked to the first as a friend's server. It starts
+          # with a copy of the first one's sample media, which dev-server.sh
+          # keeps: built twice at once, the two outran the wait on this runner.
+          mkdir -p "$RUNNER_TEMP/vcrx-peer"
+          cp -R "$RUNNER_TEMP/vcrx-dev/media" "$RUNNER_TEMP/vcrx-peer/"
+          VCRX_DEV_DIR="$RUNNER_TEMP/vcrx-peer" VCRX_PORT=3752 VCRX_DEV_NAME="VCRX Peer" ./scripts/dev-server.sh > "$RUNNER_TEMP/peer.log" 2>&1 &
+          for _ in $(seq 1 120); do
+            [ "$(scans "$RUNNER_TEMP/peer.log")" -ge 3 ] && exit 0
+            sleep 1
+          done
+          echo "peer server did not finish its scans"; tail -n 50 "$RUNNER_TEMP/peer.log"; exit 1
       - name: Web smoke test in headless Chrome
         run: node scripts/web-smoke.mjs http://127.0.0.1:3751
+        env:
+          VCRX_SMOKE_PEER: http://127.0.0.1:3752
       - name: Server log
         if: failure()
-        run: tail -100 "$RUNNER_TEMP/dev.log"
+        # -n: GNU tail refuses the bare -100 form once it is given two files.
+        run: tail -n 100 "$RUNNER_TEMP/dev.log" "$RUNNER_TEMP/peer.log"

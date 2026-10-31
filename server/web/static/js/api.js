@@ -39,8 +39,9 @@ export async function api(path, { method = "GET", body, signal, keepalive } = {}
   return data;
 }
 
-export function artUrl(itemId, kind, width) {
-  return `/api/v1/items/${encodeURIComponent(itemId)}/artwork/${kind}?width=${width}`;
+// artUrl is a title's artwork; base "/peers/<id>" is a friend's server's.
+export function artUrl(itemId, kind, width, base = "") {
+  return `/api/v1${base}/items/${encodeURIComponent(itemId)}/artwork/${kind}?width=${width}`;
 }
 
 // A stable id for this browser, so Activity can tell devices apart.

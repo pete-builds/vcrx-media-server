@@ -209,9 +209,25 @@ func (s *Server) gate(rt route) http.Handler {
 			s.internal(w, r, err)
 			return
 		}
-		if rt.access == adminOnly && !sess.User.IsAdmin {
+		if rt.access == adminOnly && (!sess.User.IsAdmin || sess.TokenID != 0) {
+			// An invited device or a linked server is never an admin, whatever
+			// its users row says: the token is the whole of its authority.
 			writeError(w, http.StatusForbidden, "forbidden", "Only an admin can do that.")
 			return
+		}
+		if rt.access == peerOnly && !sess.Peer {
+			writeError(w, http.StatusForbidden, "peers_only", "Only a linked friend's server can do that.")
+			return
+		}
+		if rt.access == friendsServers {
+			if ok, err := s.inHousehold(r.Context(), sess); err != nil || !ok {
+				if err != nil {
+					s.internal(w, r, err)
+					return
+				}
+				writeError(w, http.StatusForbidden, "not_household", "Friends' servers are shared with this server's household only.")
+				return
+			}
 		}
 		if rt.access == householdOnly && sess.TokenID != 0 {
 			// An invited device is its own principal: the profile picker and
@@ -225,6 +241,10 @@ func (s *Server) gate(rt route) http.Handler {
 			return
 		}
 		ri.Session, ri.Policy, ri.Authed = sess, pol, true
+		if sess.BandwidthKbps > 0 {
+			// A linked server's cap covers everything it streams at once.
+			w = s.buckets.writer(r.Context(), w, sess.TokenID, sess.BandwidthKbps)
+		}
 		rt.handler(w, r)
 	})
 }

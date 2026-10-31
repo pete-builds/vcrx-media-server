@@ -19,6 +19,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
+	"github.com/pete-builds/vcrx-media-server/server/internal/federation"
 	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
 	"github.com/pete-builds/vcrx-media-server/server/internal/loans"
@@ -77,6 +78,9 @@ type Server struct {
 	// Newsletter is the weekly recently-added digest, set up in Settings.
 	Newsletter *newsletter.Service
 
+	// Music serves music libraries (music.go).
+	Music *Music
+
 	AdminAllowRemote bool
 	TrustedProxies   []netip.Prefix
 	// AutoSignInUser, when set, is signed in without a password for clients on
@@ -114,7 +118,25 @@ type Server struct {
 	// one embed. Off, the CSP allows no frames at all.
 	TrailersYouTube bool
 
+	// Friends' servers (milestone 9, item 3), set up by SetUpFederation.
+	// Peers are the servers this one has linked to; PeerClient talks to them
+	// and to nothing else; PeerCache keeps their catalogs for Home.
+	Peers      *federation.Store
+	PeerClient *federation.Client
+	PeerCache  *federation.Cache
+
 	streams streamRegistry
+	// buckets hold each linked server's bandwidth cap, shared by all its
+	// streams; peerSessions are this server's own users' streams from peers.
+	buckets      bandwidthBuckets
+	peerSessions peerSessionTable
+}
+
+// SetUpFederation turns on linking with friends' servers.
+func (s *Server) SetUpFederation(g federation.Guard) {
+	s.Peers = &federation.Store{DB: s.DB}
+	s.PeerClient = federation.NewClient(g, "VCRX/"+s.Version)
+	s.PeerCache = &federation.Cache{TTL: 5 * time.Minute, Fetch: s.fetchPeerCatalog}
 }
 
 type access int
@@ -126,6 +148,14 @@ const (
 	// householdOnly routes serve the profile picker: a household member's session,
 	// or no session at all from a trusted network when the picker is on.
 	householdOnly
+	// peerOnly routes answer only a linked friend's server: its catalog and
+	// its own unlinking. Everything else a peer does goes through the
+	// ordinary signed-in routes, under its policy like anyone's.
+	peerOnly
+	// friendsServers routes show this server's household what linked
+	// friends' servers share: never to an invited device, a linked server or
+	// an account outside the household, so a link is never passed on.
+	friendsServers
 )
 
 type route struct {
@@ -136,7 +166,7 @@ type route struct {
 
 // Routes is the full route table. The OpenAPI drift test reads it.
 func (s *Server) Routes() []route {
-	return []route{
+	return append([]route{
 		{"GET", "/healthz", public, s.healthz},
 		{"GET", "/readyz", public, s.readyz},
 		{"GET", "/api/v1/openapi.yaml", public, s.openapi},
@@ -150,6 +180,11 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/invites/redeem", public, s.redeemInvite},
 		{"POST", "/api/v1/pair", public, s.pairStart},
 		{"POST", "/api/v1/pair/poll", public, s.pairPoll},
+		// Federation, the serving side: a friend's server links with a
+		// server invite, reads what its scope shares, and may unlink itself.
+		{"POST", "/api/v1/federation/link", public, s.federationLink},
+		{"GET", "/api/v1/federation/catalog", peerOnly, s.federationCatalog},
+		{"DELETE", "/api/v1/federation/link", peerOnly, s.federationUnlink},
 		{"POST", "/api/v1/auth/logout", signedIn, s.logout},
 		{"GET", "/api/v1/me", signedIn, s.me},
 		{"GET", "/api/v1/me/playback-settings", signedIn, s.playbackSettings},
@@ -183,6 +218,23 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/extras/{extra_id}/file", signedIn, s.streamExtra},
 		{"HEAD", "/api/v1/extras/{extra_id}/file", signedIn, s.streamExtra},
 		{"GET", "/api/v1/subtitles/{stream_id}", signedIn, s.subtitle},
+		// Federation, the watching side: friends' servers' titles on Home,
+		// their pages, and their streams, proxied (peers.go).
+		{"GET", "/api/v1/peers/home", friendsServers, s.peersHome},
+		{"GET", "/api/v1/peers/{peer_id}/items/{item_id}", friendsServers, s.peerItem},
+		{"GET", "/api/v1/peers/{peer_id}/items/{item_id}/children", friendsServers, s.peerChildren},
+		{"GET", "/api/v1/peers/{peer_id}/items/{item_id}/artwork/{kind}", friendsServers, s.peerArtwork},
+		{"POST", "/api/v1/peers/{peer_id}/playback/sessions", friendsServers, s.peerStartPlayback},
+		{"POST", "/api/v1/peers/{peer_id}/playback/sessions/{session_id}/events", friendsServers, s.peerPlaybackEvent},
+		{"GET", "/api/v1/peers/{peer_id}/playback/sessions/{session_id}/seek", friendsServers, s.peerSeek},
+		{"GET", "/api/v1/peers/{peer_id}/playback/sessions/{session_id}/file", friendsServers, s.peerFile},
+		{"HEAD", "/api/v1/peers/{peer_id}/playback/sessions/{session_id}/file", friendsServers, s.peerFile},
+		{"GET", "/api/v1/peers/{peer_id}/playback/sessions/{session_id}/stream.mp4", friendsServers, s.peerConverted},
+		{"HEAD", "/api/v1/peers/{peer_id}/playback/sessions/{session_id}/stream.mp4", friendsServers, s.peerConverted},
+		{"GET", "/api/v1/peers/{peer_id}/playback/sessions/{session_id}/hls/{run}/index.m3u8", friendsServers, s.peerHLSPlaylist},
+		{"HEAD", "/api/v1/peers/{peer_id}/playback/sessions/{session_id}/hls/{run}/index.m3u8", friendsServers, s.peerHLSPlaylist},
+		{"GET", "/api/v1/peers/{peer_id}/playback/sessions/{session_id}/hls/{run}/{segment}", friendsServers, s.peerHLSSegment},
+		{"GET", "/api/v1/peers/{peer_id}/playback/sessions/{session_id}/subtitles/{stream_id}", friendsServers, s.peerSubtitle},
 		{"GET", "/api/v1/admin/profiles", adminOnly, s.adminProfiles},
 		{"POST", "/api/v1/admin/profiles", adminOnly, s.adminCreateProfile},
 		{"PUT", "/api/v1/admin/profiles/{user_id}", adminOnly, s.adminUpdateProfile},
@@ -201,6 +253,12 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/admin/loans", adminOnly, s.adminLoans},
 		{"POST", "/api/v1/admin/loans", adminOnly, s.adminLend},
 		{"POST", "/api/v1/admin/loans/{loan_id}/return", adminOnly, s.adminReturnLoan},
+		// Friends' servers: link to one with its invite, unlink, and mint a
+		// server invite for a friend's server to link to this one.
+		{"GET", "/api/v1/admin/peers", adminOnly, s.adminPeers},
+		{"POST", "/api/v1/admin/peers", adminOnly, s.adminLinkPeer},
+		{"DELETE", "/api/v1/admin/peers/{peer_id}", adminOnly, s.adminUnlinkPeer},
+		{"POST", "/api/v1/admin/peers/invites", adminOnly, s.adminMintServerInvite},
 		{"GET", "/api/v1/versions/{version_id}/subtitles/search", signedIn, s.searchSubtitles},
 		{"POST", "/api/v1/versions/{version_id}/subtitles/download", signedIn, s.downloadSubtitle},
 		{"PUT", "/api/v1/versions/{version_id}/subtitle-offset", signedIn, s.setSubtitleOffset},
@@ -242,7 +300,7 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/admin/newsletter/preview", adminOnly, s.newsletterPreview},
 		{"GET", "/api/v1/admin/items/{item_id}/subtitles", adminOnly, s.adminItemSubtitles},
 		{"DELETE", "/api/v1/admin/subtitles/{stream_id}", adminOnly, s.adminDeleteSubtitle},
-	}
+	}, s.musicRoutes()...)
 }
 
 // Handler builds the mux with middleware applied.

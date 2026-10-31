@@ -18,6 +18,9 @@ import io.github.pete_builds.vcrx.tv.ui.connect.ConnectScreen
 import io.github.pete_builds.vcrx.tv.ui.connect.LoginScreen
 import io.github.pete_builds.vcrx.tv.ui.collection.CollectionScreen
 import io.github.pete_builds.vcrx.tv.ui.details.DetailsScreen
+import io.github.pete_builds.vcrx.tv.ui.music.LocalMusicNav
+import io.github.pete_builds.vcrx.tv.ui.music.MusicNav
+import io.github.pete_builds.vcrx.tv.ui.music.musicScreens
 import io.github.pete_builds.vcrx.tv.ui.pair.PairScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.ProfilePickerScreen
 import io.github.pete_builds.vcrx.tv.ui.rewind.RewindScreen
@@ -48,7 +51,8 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(nav) { graph.signedOut.collect { actions.toLogin() } }
                 // A lent tape that came back: "Be kind, rewind." rather than Login.
                 LaunchedEffect(nav) { graph.rewind.filterNotNull().collect { actions.toRewind() } }
-                CompositionLocalProvider(LocalAppActions provides actions) {
+                val musicNav = remember(nav) { MusicNav(nav) }
+                CompositionLocalProvider(LocalAppActions provides actions, LocalMusicNav provides musicNav) {
                     NavHost(navController = nav, startDestination = start) {
                         composable<ConnectRoute> { ConnectScreen() }
                         composable<LoginRoute> { LoginScreen() }
@@ -66,6 +70,7 @@ class MainActivity : ComponentActivity() {
                             val rewound by graph.rewind.collectAsState()
                             RewindScreen(rewound)
                         }
+                        musicScreens()
                     }
                 }
             }

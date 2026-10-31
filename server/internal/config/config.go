@@ -75,6 +75,10 @@ type Config struct {
 	// other name is refused, which stops DNS rebinding: a web page that points
 	// its own domain at this server cannot talk to it.
 	AllowedHosts []string `yaml:"allowed_hosts"`
+	// PeerAllowLoopback lets this server link to a friend's server on
+	// 127.0.0.1 or ::1. For running two servers on one machine in
+	// development only: a production peer on loopback is this server itself.
+	PeerAllowLoopback bool `yaml:"peer_allow_loopback"`
 
 	// WebhookURLs receive playback events (play, stop, refused, terminated). A
 	// Discord webhook URL gets Discord's message shape. The URLs carry tokens, so
@@ -245,6 +249,7 @@ func Load() (Config, error) {
 	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
 	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)
 	boolean("VCRX_AUTO_SIGN_IN_PICKER", &c.AutoSignInPicker)
+	boolean("VCRX_PEER_ALLOW_LOOPBACK", &c.PeerAllowLoopback)
 	list("VCRX_ALLOWED_HOSTS", &c.AllowedHosts)
 	str("VCRX_COLLECTIONS_DIR", &c.CollectionsDir)
 	boolean("VCRX_DETECT_MARKERS", &c.DetectMarkers)
@@ -352,8 +357,8 @@ func (c *Config) validate() error {
 		if l.Name == "" || l.Path == "" {
 			errs = append(errs, errors.New("every library in vcrx.yaml needs a name and a path"))
 		}
-		if l.Kind != "movie" && l.Kind != "show" {
-			errs = append(errs, fmt.Errorf("library %q: kind must be movie or show", l.Name))
+		if l.Kind != "movie" && l.Kind != "show" && l.Kind != "music" {
+			errs = append(errs, fmt.Errorf("library %q: kind must be movie, show or music", l.Name))
 		}
 		if l.Grouping != "" && l.Grouping != "folder" && l.Grouping != "title_year" {
 			errs = append(errs, fmt.Errorf("library %q: grouping must be folder or title_year", l.Name))

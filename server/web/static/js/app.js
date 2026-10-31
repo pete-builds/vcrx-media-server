@@ -16,9 +16,12 @@ import { settingsView } from "./views/settings.js";
 import { loginView } from "./views/login.js";
 import { searchSuggest } from "./suggest.js";
 import { installShortcuts } from "./shortcuts.js";
+import { musicLibraryView, musicArtistView, musicAlbumView } from "./views/music.js";
+import { installMusicPlayer } from "./music/player.js";
 import { pickerView, drawProfileButton } from "./views/profiles.js";
 import { pairView, inviteView } from "./views/devices.js";
 import { lendView, rewindView } from "./views/lend.js";
+import { peerItemView } from "./views/peer.js";
 
 // rewind is set once a lent tape's loan is over: {title, message}.
 export const state = { me: null, server: null, libraries: [], rewind: null };
@@ -32,9 +35,14 @@ const routes = [
   [/^\/item\/(\d+)$/, () => itemView],
   [/^\/search$/, () => searchView],
   [/^\/play\/(\d+)$/, () => playerView],
+  [/^\/peer\/(\d+)\/item\/(\d+)$/, () => peerItemView],
+  [/^\/peer\/(\d+)\/play\/(\d+)$/, () => playerView],
   [/^\/activity(?:\/(now|history|stats|users|loans))?$/, () => activityView],
-  [/^\/settings(?:\/(account|home|libraries|users|devices|newsletter|markers))?$/, () => settingsView],
+  [/^\/settings(?:\/(account|home|libraries|users|devices|friends|newsletter|markers))?$/, () => settingsView],
   [/^\/login$/, () => loginView],
+  [/^\/music\/(\d+)$/, () => musicLibraryView],
+  [/^\/music\/artist\/(\d+)$/, () => musicArtistView],
+  [/^\/music\/album\/(\d+)$/, () => musicAlbumView],
   [/^\/profiles$/, () => pickerView],
   [/^\/pair\/([A-Za-z-]{1,16})$/, () => pairView],
   [/^\/invite\/([A-Za-z2-7-]{16,64})$/, () => inviteView],
@@ -80,12 +88,13 @@ async function render() {
     match = path.match(re);
     if (match) { viewFn = fn(); break; }
   }
-  document.getElementById("topbar").hidden = !state.me || path.startsWith("/play/") || path === "/profiles" || path === "/rewind" || isInvite(path);
+  const playing = /^\/(peer\/\d+\/)?play\//.test(path);
+  document.getElementById("topbar").hidden = !state.me || playing || path === "/profiles" || path === "/rewind" || isInvite(path);
   markNav(path);
   setMenu(false);
   // While a page with a hero loads, its skeleton already sits under the
   // translucent top bar, so the bar does not flash solid and back.
-  setHero(path === "/" || path.startsWith("/item/"));
+  setHero(path === "/" || path.startsWith("/item/") || /^\/peer\/\d+\/item\//.test(path));
   view.replaceChildren(skeleton(path));
   if (!viewFn) {
     setHero(false);
@@ -124,11 +133,16 @@ function markNav(path) {
 export function drawNav() {
   const nav = document.getElementById("nav");
   const links = [h("a", { class: "nav-link", href: "#/" }, "Home")];
-  for (const lib of state.libraries) links.push(h("a", { class: "nav-link", href: `#/library/${lib.id}` }, lib.name));
+  for (const lib of state.libraries) links.push(h("a", { class: "nav-link", href: libraryHref(lib) }, lib.name));
   if (state.me && state.me.is_admin) links.push(h("a", { class: "nav-link", href: "#/activity" }, "Activity"));
   // On a phone the top bar has no room for Settings, so the menu carries it.
   links.push(h("a", { class: "nav-link nav-phone-only", href: "#/settings" }, "Settings"));
   nav.replaceChildren(...links);
+}
+
+// A music library has its own pages.
+export function libraryHref(lib) {
+  return lib.kind === "music" ? `#/music/${lib.id}` : `#/library/${lib.id}`;
 }
 
 // The top bar is see-through over a page's hero art until the page scrolls.
@@ -217,6 +231,7 @@ async function boot() {
   });
   searchSuggest(document.getElementById("search"));
   installShortcuts();
+  installMusicPlayer();
   installChrome();
   try {
     state.server = await api("/server");

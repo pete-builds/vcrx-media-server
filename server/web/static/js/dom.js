@@ -135,12 +135,12 @@ export function placeholderArt(text) {
 
 // cardArt is a card's picture: the poster (or, landscape, a still or backdrop)
 // with its watched badge and progress bar, or a placeholder when there is none.
-export function cardArt(item, { landscape = false } = {}) {
+export function cardArt(item, { landscape = false, base = "" } = {}) {
   const kind = landscape ? (item.has_thumb ? "thumb" : "backdrop") : "poster";
   const has = landscape ? (item.has_thumb || item.has_backdrop) : item.has_poster;
   const art = h("div", { class: "art" });
   const placeholder = () => art.prepend(placeholderArt(item.kind === "episode" ? episodeCode(item) || item.title : item.title));
-  if (has) art.append(fadeImg(artUrl(item.id, kind, landscape ? 480 : 320), { onFail: placeholder }));
+  if (has) art.append(fadeImg(artUrl(item.id, kind, landscape ? 480 : 320, base), { onFail: placeholder }));
   else placeholder();
   const w = item.watch || {};
   if (item.kind === "show" || item.kind === "season") {
@@ -156,8 +156,11 @@ export function cardArt(item, { landscape = false } = {}) {
 }
 
 // card draws a poster (or, landscape, a thumbnail) linking to the item page.
-export function card(item, { landscape = false, href } = {}) {
-  const art = cardArt(item, { landscape });
+// A friend's title passes base (its server's API path) and badge, which says
+// where it lives.
+export function card(item, { landscape = false, href, base = "", badge = "" } = {}) {
+  const art = cardArt(item, { landscape, base });
+  if (badge) art.append(h("span", { class: "source-badge" }, badge));
   const title = item.kind === "episode" && landscape ? `${episodeCode(item)} ${item.title}`.trim() : item.title;
   const sub = item.kind === "episode" && landscape ? item.show_title || "" : subtitle(item);
   // Some Home rows add a note, such as "3 new episodes"; it takes the sub line.

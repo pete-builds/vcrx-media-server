@@ -11,9 +11,16 @@
 // the profile picker, or survives being revoked, or a lent tape whose card does
 // not print or decode to its invite, whose borrower sees more than the one
 // title or cannot play it, whose owner can still play it, or whose borrower
-// is not told "Be kind, rewind." when it comes back.
+// is not told "Be kind, rewind." when it comes back, or music that stops when
+// the page changes; and, given a second dev server, a friend's server that
+// does not link, badge its titles on Home, play through this one, or leave
+// Home when unlinked.
 //
 //   node scripts/web-smoke.mjs [base-url]      (default http://127.0.0.1:3751)
+//   VCRX_SMOKE_PEER=http://127.0.0.1:3752 node scripts/web-smoke.mjs ...
+//
+// VCRX_SMOKE_PEER names a second ./scripts/dev-server.sh (its own VCRX_DEV_DIR
+// and VCRX_PORT) to link to as a friend's server.
 //
 // Run it against ./scripts/dev-server.sh, which signs the local browser in and
 // has the sample clips this expects (one plays directly, one has its audio
@@ -33,6 +40,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const base = (process.argv[2] || "http://127.0.0.1:3751").replace(/\/$/, "");
+const peer = (process.env.VCRX_SMOKE_PEER || "").replace(/\/$/, "");
 const chrome = process.env.CHROME || [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser",
@@ -109,8 +117,19 @@ async function main() {
   const ids = await evaluate(`
     const j = (p) => fetch("/api/v1" + p).then((r) => r.json());
     const libs = (await j("/libraries")).libraries;
-    const out = { libs: libs.map((l) => l.id), movie: null, show: null, direct: null, converted: null, transcoded: null };
+    const out = { libs: libs.filter((l) => l.kind !== "music").map((l) => l.id), movie: null, show: null, direct: null, converted: null,
+      transcoded: null, music: null, liveAlbum: null, alacAlbum: null, artist: null };
     for (const l of libs) {
+      if (l.kind === "music") {
+        out.music = l.id;
+        const albums = (await j("/music/libraries/" + l.id + "/albums?limit=50")).albums;
+        const live = albums.find((a) => a.live);
+        out.liveAlbum = live ? live.id : null;
+        out.artist = live ? live.artist_id : null;
+        const alac = albums.find((a) => a.title === "Low Orbit");
+        out.alacAlbum = alac ? alac.id : null;
+        continue;
+      }
       const items = (await j("/libraries/" + l.id + "/items?limit=50")).items;
       if (l.kind === "movie") {
         out.movie = items[0] && items[0].id;
@@ -191,7 +210,18 @@ async function main() {
     ["/settings/home", ".layout-list li"],
     ["/row/trending", ".grid .card"],
     ["/settings/newsletter", ".newsletter-form"],
+    // Music: artists, albums, live shows, an album's tracklist, an artist, and
+    // music in search results.
+    ...(ids.music ? [
+      [`/music/${ids.music}`, ".music-grid .artist-card"],
+      [`/music/${ids.music}?view=albums`, ".music-grid .music-card"],
+      [`/music/${ids.music}?view=live`, ".music-grid .live-badge"],
+      [`/music/album/${ids.liveAlbum}`, ".tracklist .track .track-btn"],
+      [`/music/artist/${ids.artist}`, ".music-head h1"],
+      ["/search?q=tide", ".music-results .tracklist .track"],
+    ] : []),
     ["/settings/devices", ".scope-form"],
+    ["/settings/friends", ".link-form"],
     ["/settings/markers", "table.list"],
   ];
   for (const [path, selector] of pages) {
@@ -481,6 +511,7 @@ async function main() {
   }
   if (exceptions.length) fail("season tabs", `threw: ${exceptions[0]}`);
 
+  await music(s, evaluate, press, ids, { reset: () => { exceptions = []; }, first: () => exceptions[0] });
   // Extras: Harbor Lights has a -trailer file and two extras folders, and Quiet
   // Street a theme.mp3 (scripts/dev-server.sh). None may become a title of its
   // own. The film's page shows an Extras row and a Trailer button; the trailer,
@@ -660,6 +691,8 @@ async function main() {
   }
   await profilePicker(s, evaluate, () => exceptions, (v) => { exceptions = v; });
   await inviteLoop(s, evaluate, () => exceptions, (v) => { exceptions = v; });
+  if (peer) await friendsLoop(s, evaluate, () => exceptions, (v) => { exceptions = v; });
+  else console.log("friends' servers: skipped (set VCRX_SMOKE_PEER to a second dev server)");
   await s("Page.navigate", { url: `${base}/#/` });
   await sleep(500);
 
@@ -770,6 +803,100 @@ async function main() {
     }
   }
   await lendLoop(s, evaluate, ids, () => exceptions, (v) => { exceptions = v; });
+}
+
+// Music: Play on a live album with a real mouse click; the bar keeps playing
+// across a page change (it lives outside the routed view); the next track was
+// loaded before the first ended, so the hand-over is near gapless; Space
+// pauses and plays; the lock screen gets the track; the listen reaches
+// Activity; a track Chrome cannot decode (ALAC) plays converted.
+async function music(s, evaluate, press, ids, ex) {
+  if (!ids.music || !ids.liveAlbum) {
+    fail("music", "no music library with a live show (run against scripts/dev-server.sh)");
+    return;
+  }
+  const wait = (cond, n = 60) => `for (let i = 0; i < ${n} && !(${cond}); i++) await new Promise((r) => setTimeout(r, 150));`;
+  console.log(`music: play #/music/album/${ids.liveAlbum}`);
+  ex.reset();
+  await s("Page.navigate", { url: `${base}/#/music/album/${ids.liveAlbum}` });
+  const btn = await evaluate(`${wait(`document.querySelector(".music-head .btn-primary")`)}
+    const b = document.querySelector(".music-head .btn-primary");
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    return { x, y, hit: document.elementFromPoint(x, y)?.closest("button") === b };`);
+  if (!btn) {
+    fail("music", "the album page has no Play button");
+    return;
+  }
+  if (!btn.hit) fail("music", "the Play button is covered by something else");
+  await s("Input.dispatchMouseEvent", { type: "mouseMoved", x: btn.x, y: btn.y });
+  await s("Input.dispatchMouseEvent", { type: "mousePressed", x: btn.x, y: btn.y, button: "left", clickCount: 1 });
+  await s("Input.dispatchMouseEvent", { type: "mouseReleased", x: btn.x, y: btn.y, button: "left", clickCount: 1 });
+  const playing = `(() => { const a = [...document.querySelectorAll("audio.mb-audio")].find((e) => e.getAttribute("src") && !e.paused); return a ? a.currentTime : -1; })()`;
+  const started = await evaluate(`${wait(`${playing} > 0.5`)}
+    const bar = document.getElementById("music-bar");
+    return { t: ${playing}, bar: !!bar && !bar.hidden, title: bar ? bar.querySelector(".mb-title").textContent : "" };`);
+  if (!(started.t > 0.5)) fail("music", `the album did not start playing (t=${started.t})`);
+  if (!started.bar) fail("music", "no player bar while music plays");
+
+  // A page change: the router replaces #view, never the bar or the audio.
+  await s("Page.navigate", { url: `${base}/#/library/${ids.libs[0]}` });
+  const across = await evaluate(`${wait(`document.querySelector("#view .grid .card")`)}
+    const before = ${playing};
+    await new Promise((r) => setTimeout(r, 1200));
+    const bar = document.getElementById("music-bar");
+    return { before, after: ${playing}, bar: !!bar && !bar.hidden, hash: location.hash };`);
+  if (!(across.after > across.before && across.before >= 0)) fail("music", `the music stopped on a page change (${across.before} then ${across.after})`);
+  if (!across.bar) fail("music", "the player bar went away on a page change");
+
+  // Into the second track: it was loaded while the first played.
+  const handover = await evaluate(`
+    const p = await import("/js/music/player.js");
+    ${wait(`p.debug.transitions.length > 0 && p.debug.transitions[0].gapMs !== null`, 80)}
+    const t = p.debug.transitions[0];
+    const c = p.current();
+    const ms = navigator.mediaSession && navigator.mediaSession.metadata;
+    return { t: t || null, current: c ? c.title : "", session: ms ? ms.title : "", playing: p.isPlaying() };`);
+  if (!handover.t) fail("music", "the first track never handed over to the second");
+  else {
+    if (!handover.t.preloaded) fail("music", "the next track was not loaded before the first ended (not gapless)");
+    console.log(`  track change: next track preloaded ${handover.t.preloaded}, ${handover.t.gapMs} ms from ended to playing`);
+  }
+  if (handover.session !== handover.current) fail("music", `lock screen shows "${handover.session}", playing "${handover.current}"`);
+
+  // Space pauses and plays again, from anywhere outside a text field.
+  await evaluate(`document.activeElement && document.activeElement.blur && document.activeElement.blur();`);
+  await press(" ", "Space", 32, " ");
+  const paused = await evaluate(`${wait(`document.getElementById("music-bar").dataset.state === "paused"`, 20)}
+    return document.getElementById("music-bar").dataset.state;`);
+  if (paused !== "paused") fail("music", "Space did not pause the music");
+  await press(" ", "Space", 32, " ");
+  const resumed = await evaluate(`${wait(`document.getElementById("music-bar").dataset.state === "playing"`, 20)}
+    return document.getElementById("music-bar").dataset.state;`);
+  if (resumed !== "playing") fail("music", "Space did not start the music again");
+
+  // The listens are in Activity, as tracks.
+  const listens = await evaluate(`${wait(`false`, 8)}
+    const h = await fetch("/api/v1/admin/activity/history?limit=50").then((r) => r.json());
+    return JSON.stringify(h).includes("Glass Harbor · Low Tide");`);
+  if (!listens) fail("music", "the listen is not in Activity history");
+
+  // ALAC, which Chrome does not decode, plays as AAC made on the fly.
+  if (ids.alacAlbum) {
+    const conv = await evaluate(`
+      const p = await import("/js/music/player.js");
+      await p.playAlbum(${ids.alacAlbum});
+      ${wait(`${playing} > 0.5`)}
+      const c = p.current();
+      return { t: ${playing}, protocol: c && c.stream ? c.stream.protocol : null };`);
+    if (!(conv.t > 0.5)) fail("music", `the ALAC track did not play (t=${conv.t})`);
+    if (conv.protocol !== "converted") fail("music", `ALAC came as ${conv.protocol}, expected a converted stream`);
+  } else {
+    fail("music", "no Low Orbit album (the ALAC sample)");
+  }
+  await evaluate(`const b = document.querySelector("#music-bar .mb-btn[aria-label^='Stop']"); if (b) b.click();`);
+  if (ex.first()) fail("music", `threw: ${ex.first()}`);
 }
 
 const safariUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
@@ -1240,6 +1367,126 @@ async function lendLoop(s, evaluate, ids, getExceptions, setExceptions) {
   if (getExceptions().length) fail("lend", `threw: ${getExceptions()[0]}`);
 }
 
+// Friends' servers (milestone 9, item 3), against a second dev server: its
+// admin mints a server invite (over its API: that server signs this machine
+// in without a password), this server's admin pastes it into Settings >
+// Friends, Home shows the friend's titles badged with where they live, one
+// plays from the friend's server through this one, and once this side
+// unlinks, the friend's titles leave Home.
+async function friendsLoop(s, evaluate, getExceptions, setExceptions) {
+  console.log(`friends' servers: link ${peer}, badge, play, unlink`);
+  setExceptions([]);
+  const helpers = `
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const wait = async (sel, n = 40) => { for (let i = 0; i < n && !document.querySelector(sel); i++) await sleep(150); return document.querySelector(sel); };`;
+  const json = { "Content-Type": "application/json" };
+  const auto = await fetch(`${peer}/api/v1/auth/auto`, { method: "POST", headers: json,
+    body: JSON.stringify({ device: { id: "smoke-peer-admin", name: "Smoke", platform: "web", client: "web-smoke" } }) }).then((r) => r.json());
+  const auth = { ...json, Authorization: `Bearer ${auto.token}` };
+  const libs = ((await fetch(`${peer}/api/v1/libraries`, { headers: auth }).then((r) => r.json())).libraries || []).map((l) => l.id);
+  const minted = await fetch(`${peer}/api/v1/admin/peers/invites`, { method: "POST", headers: auth,
+    body: JSON.stringify({ name: "Smoke server", library_ids: libs, max_resolution: "1080p", allow_transcode: true, expires_in_days: 1 }) })
+    .then((r) => r.json());
+  if (!/#\/link\/[a-z2-7]{32}$/.test(minted.url || "")) return fail("friends", `the friend's server minted no server invite: ${JSON.stringify(minted).slice(0, 200)}`);
+
+  await s("Page.navigate", { url: `${base}/#/settings/friends` });
+  const linked = await evaluate(`${helpers}
+    const form = await wait(".link-form");
+    if (!form) return { why: "no link form under Settings > Friends" };
+    form.elements.invite.value = ${JSON.stringify(minted.url)};
+    form.elements.name.value = "Smoke Friend";
+    form.querySelector("button[type=submit]").click();
+    let row = null;
+    for (let i = 0; i < 60 && !row; i++) {
+      row = [...document.querySelectorAll(".peer-row")].find((r) => r.innerText.includes("Smoke Friend"));
+      if (!row) await sleep(150);
+    }
+    if (!row) return { why: "the friend's server is not listed after linking: " + form.querySelector(".form-error").textContent };
+    return { id: Number(row.dataset.id), state: row.dataset.state };`);
+  if (linked.why) return fail("friends", linked.why);
+  try {
+    if (linked.state !== "online") fail("friends", `the linked server shows ${linked.state}, not online`);
+    await s("Page.navigate", { url: `${base}/#/?friends=1` });
+    const home = await evaluate(`${helpers}
+      if (!(await wait(".friends-row .card", 80))) return { why: "Home has no row from friends' servers: " + document.getElementById("view").innerText.slice(0, 200) };
+      const cards = [...document.querySelectorAll(".friends-row .card")];
+      const copper = cards.find((c) => c.title === "Copper Valley");
+      return { badges: cards.map((c) => (c.querySelector(".source-badge") || {}).textContent || ""), href: copper && copper.getAttribute("href"),
+        text: document.querySelector(".friends-row").innerText };`);
+    if (home.why) return fail("friends", home.why);
+    if (!home.badges.length || home.badges.some((b) => !b.startsWith("on Smoke Friend"))) fail("friends", `cards without a source badge: ${JSON.stringify(home.badges)}`);
+    if (!home.badges.some((b) => b === "on Smoke Friend, 720p")) fail("friends", `no badge names the resolution: ${JSON.stringify(home.badges)}`);
+    const junk = home.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+    if (junk) fail("friends", `the friends row shows "${junk[0]}"`);
+    if (!home.href) return fail("friends", "Copper Valley is not in the friends row");
+    console.log(`  ${home.badges.length} titles badged "${home.badges[0]}"`);
+
+    // The phone: the friends row fits.
+    await s("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await s("Page.navigate", { url: `${base}/#/?friends=phone` });
+    const phone = await evaluate(`${helpers}
+      await wait(".friends-row .card", 80);
+      await sleep(200);
+      return { row: !!document.querySelector(".friends-row .source-badge"), scroll: document.documentElement.scrollWidth, width: screen.width };`);
+    await s("Emulation.clearDeviceMetricsOverride");
+    if (!phone.row) fail("friends on a phone", "no badged friends row");
+    if (phone.scroll > phone.width + 1) fail("friends on a phone", `Home is ${phone.scroll}px wide on a ${phone.width}px screen`);
+
+    // The title's page, then Play: it streams from the friend's server.
+    await s("Page.navigate", { url: `${base}/${home.href}` });
+    const page = await evaluate(`${helpers}
+      const btn = await wait(".hero .actions .btn-primary", 60);
+      if (!btn) return { why: "the friend's title page has no Play: " + document.getElementById("view").innerText.slice(0, 200) };
+      const text = document.getElementById("view").innerText;
+      document.querySelectorAll("video").forEach((v) => { v.dataset.stale = "1"; });
+      btn.click();
+      const fresh = () => document.querySelector("video:not([data-stale])");
+      for (let i = 0; i < 60 && !fresh(); i++) await sleep(150);
+      const v = fresh();
+      if (!v) return { why: "Play showed no video: " + document.getElementById("view").innerText.slice(0, 200), text };
+      v.muted = true;
+      v.play().catch(() => {});
+      for (let i = 0; i < 80 && !(v.currentTime > 1.5); i++) await sleep(150);
+      return { text, t: v.currentTime, src: v.currentSrc, hash: location.hash, err: v.error && v.error.code,
+        overlay: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
+    if (page.why) fail("friends", page.why);
+    else {
+      if (!/on Smoke Friend/i.test(page.text)) fail("friends", `the title page does not say where it lives: ${page.text.slice(0, 160)}`);
+      const junk2 = page.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+      if (junk2) fail("friends", `the title page shows "${junk2[0]}"`);
+      if (!(page.t > 1.5)) fail("friends", `the friend's title did not play (t=${page.t}, media error ${page.err}) ${page.overlay}`);
+      if (!new RegExp(`/api/v1/peers/${linked.id}/playback/sessions/[0-9a-f]{32}/`).test(page.src)) fail("friends", `the video did not stream through this server: ${page.src}`);
+      else console.log(`  played ${page.hash} through ${new URL(page.src).pathname.replace(/[0-9a-f]{32}/, "<session>")}`);
+    }
+    await s("Page.navigate", { url: `${base}/#/settings/friends?after=play` });
+    await sleep(300);
+  } finally {
+    // Unlink from Settings > Friends; the friend's titles leave Home.
+    const gone = await evaluate(`${helpers}
+      window.confirm = () => true;
+      let row = null;
+      for (let i = 0; i < 40 && !row; i++) {
+        row = document.querySelector('.peer-row[data-id="${linked.id}"]');
+        if (!row) await sleep(150);
+      }
+      if (!row) return { why: "the linked server is not listed to unlink" };
+      row.querySelector("button").click();
+      for (let i = 0; i < 40 && document.querySelector('.peer-row[data-id="${linked.id}"]'); i++) await sleep(150);
+      return { listed: !!document.querySelector('.peer-row[data-id="${linked.id}"]') };`);
+    if (gone.why || gone.listed) fail("friends", gone.why || "Unlink left the server listed");
+  }
+  await s("Page.navigate", { url: `${base}/#/?friends=gone` });
+  const after = await evaluate(`${helpers}
+    await wait("#view .row", 40);
+    await sleep(1500);
+    return { row: !!document.querySelector(".friends-row .card") };`);
+  if (after.row) fail("friends", "the friend's titles are still on Home after unlinking");
+  const told = await fetch(`${peer}/api/v1/admin/peers`, { headers: auth }).then((r) => r.json());
+  const mine = (told.linked_servers || []).find((d) => d.name === "Smoke server" && d.state === "active");
+  if (mine) fail("friends", "the friend's server still lists the link as active after unlinking");
+  if (getExceptions().length) fail("friends", `threw: ${getExceptions()[0]}`);
+}
+
 try {
   await main();
 } catch (e) {
@@ -1255,4 +1502,5 @@ if (failures.length) {
 }
 console.log("\nweb-smoke: every page, every playback path (HLS included), Continue Watching removal, search as you type, the shortcuts list, " +
   "the Home feature and rows, Customize Home, season tabs and the phone menu, the History section, the trailer, extras and theme music, " +
-  "Skip Intro and Next Episode, the invite and pairing loop, and lending a tape passed");
+  "Skip Intro and Next Episode, the invite and pairing loop, lending a tape, music (playing across pages, gapless hand-over, Space)" +
+  (peer ? ", and linking, badging, playing and unlinking a friend's server" : "") + " passed");

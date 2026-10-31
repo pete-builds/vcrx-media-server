@@ -1,16 +1,21 @@
 import { api, artUrl } from "../api.js";
 import { h, card, icon, toast, fadeImg, runtime, episodeCode } from "../dom.js";
 import { go } from "../app.js";
+import { sourceBadge } from "./peer.js";
 
 // Home shows a featured title, then the server's rows in the order the user
 // chose (Customize Home): Continue Watching, recently added, seasonal picks,
-// trending, top rated and the rest. The client draws whatever rows come.
+// trending, top rated and the rest. The client draws whatever rows come. Friends' servers' titles
+// come in after Continue Watching once they arrive.
 export async function homeView() {
   const data = await api("/home");
   const rows = (data.rows || []).filter((r) => r.items && r.items.length);
   const customize = h("p", { class: "home-foot" }, h("a", { class: "btn btn-small", href: "#/settings/home" }, "Customize Home"));
   if (!rows.length) {
-    return { el: h("div", {}, h("div", { class: "empty" }, "Nothing here yet. Once a library has been scanned, its titles show up here."), customize), title: "Home" };
+    const empty = h("div", { class: "empty" }, "Nothing here yet. Once a library has been scanned, its titles show up here.");
+    const list = h("div", { class: "rows" }, empty);
+    friendsRow(list, () => empty.remove());
+    return { el: h("div", { class: "home" }, list, customize), title: "Home" };
   }
   const featured = await feature(rows);
   const el = h("div", { class: "home" + (featured ? " with-feature" : "") }, featured, h("div", { class: "rows" }, rows.map((row) => {
@@ -23,7 +28,45 @@ export async function homeView() {
     section.append(scroller(strip, row.title));
     return section;
   })), customize);
+  friendsRow(el.querySelector(".rows"));
   return { el, title: "Home", hero: !!featured };
+}
+
+const PEER_STATES = { offline: "offline", checking: "not answering yet", bad_answer: "answering badly", unlinked: "ended the link" };
+
+// friendsRow adds what linked friends' servers share: their newest titles in
+// one row, each badged with the server it lives on ("on Mark's server, 4K"),
+// and a note for any server that is down. It loads after the local rows, so
+// a slow friend never holds Home up, and a failure only leaves it out.
+async function friendsRow(rowsEl, onShown) {
+  let data;
+  try {
+    data = await api("/peers/home");
+  } catch {
+    return;
+  }
+  const peers = data.peers || [];
+  const items = data.items || [];
+  if (!peers.length || !rowsEl.isConnected) return;
+  const title = "From friends' servers";
+  const section = h("section", { class: "row friends-row", "data-row": "friends", "aria-label": title },
+    h("div", { class: "row-head" }, h("h2", {}, title)));
+  const down = peers.filter((p) => p.state !== "online");
+  if (down.length) {
+    section.append(h("div", { class: "peer-states" }, down.map((p) =>
+      h("span", { class: `pill peer-state ${p.state}` }, `${p.name} is ${PEER_STATES[p.state] || p.state}`))));
+  }
+  if (items.length) {
+    const strip = h("div", { class: "strip" }, items.map((i) => card(i, { href: `#/peer/${i.peer_id}/item/${i.id}`,
+      base: `/peers/${i.peer_id}`, badge: sourceBadge(i.peer_name, i.resolution) })));
+    section.append(scroller(strip, title));
+  } else {
+    section.append(h("p", { class: "muted" }, "Nothing from friends' servers right now."));
+  }
+  // After Continue Watching, else first.
+  const cw = rowsEl.querySelector('[data-row="continue_watching"]');
+  rowsEl.insertBefore(section, cw ? cw.nextSibling : rowsEl.firstChild);
+  if (onShown) onShown();
 }
 
 // seeAll links a row to its full list: a library's own page for Recently
