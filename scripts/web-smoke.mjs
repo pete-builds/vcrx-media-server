@@ -181,6 +181,32 @@ async function main() {
   }
   await s("Page.navigate", { url: `${base}/#/` });
   await sleep(500);
+
+  // History: the clip just played is listed on its details page for an admin.
+  // The player reports stop as it unloads, so give that a moment to land.
+  if (ids.direct) {
+    const path = `/item/${ids.direct}`;
+    console.log(`page #${path} (history)`);
+    exceptions = [];
+    let res = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await s("Page.navigate", { url: `${base}/#${path}?try=${attempt}` });
+      res = await evaluate(`
+        for (let i = 0; i < 40 && !document.querySelector(".hero h1"); i++) await new Promise((r) => setTimeout(r, 150));
+        await new Promise((r) => setTimeout(r, 300));
+        const sec = document.querySelector(".item-history");
+        return { hero: !!document.querySelector(".hero h1"), rows: sec ? sec.querySelectorAll("tbody tr").length : 0,
+          text: document.getElementById("view").innerText, error: !!document.querySelector("#view .error-box") };`);
+      if (res.rows > 0) break;
+      await sleep(500);
+    }
+    if (!res.hero) fail(`#${path}`, "no .hero h1 with history on the page");
+    if (!res.rows) fail(`#${path}`, "no History rows after playing the clip");
+    if (res.error) fail(`#${path}`, "shows an error box");
+    const junk = res.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+    if (junk) fail(`#${path}`, `shows "${junk[0]}"`);
+    if (exceptions.length) fail(`#${path}`, `threw: ${exceptions[0]}`);
+  }
 }
 
 try {
@@ -196,4 +222,4 @@ if (failures.length) {
   console.log(`\nweb-smoke: ${failures.length} failure(s)\n` + failures.map((f) => "  " + f).join("\n"));
   process.exit(1);
 }
-console.log("\nweb-smoke: every page and both playback paths passed");
+console.log("\nweb-smoke: every page, both playback paths and the History section passed");

@@ -163,12 +163,8 @@ type History struct {
 	Total    int       `json:"total"`
 }
 
-// History lists ended sessions, newest first.
-func (s *Service) History(ctx context.Context, f HistoryFilter) (History, error) {
-	if f.Limit <= 0 || f.Limit > 500 {
-		f.Limit = 50
-	}
-	f.Offset = max(0, f.Offset)
+// where turns the filter into a WHERE clause over sessionJoins.
+func (f HistoryFilter) where() (string, []any) {
 	where := []string{"ps.ended_at IS NOT NULL"}
 	var args []any
 	if !f.IncludeRefused {
@@ -182,7 +178,16 @@ func (s *Service) History(ctx context.Context, f HistoryFilter) (History, error)
 		where = append(where, "(ps.item_id = ? OR sh.id = ?)")
 		args = append(args, f.ItemID, f.ItemID)
 	}
-	cond := " WHERE " + strings.Join(where, " AND ")
+	return " WHERE " + strings.Join(where, " AND "), args
+}
+
+// History lists ended sessions, newest first.
+func (s *Service) History(ctx context.Context, f HistoryFilter) (History, error) {
+	if f.Limit <= 0 || f.Limit > 500 {
+		f.Limit = 50
+	}
+	f.Offset = max(0, f.Offset)
+	cond, args := f.where()
 	var out History
 	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*)`+sessionJoins+cond, args...).Scan(&out.Total); err != nil {
 		return out, err
