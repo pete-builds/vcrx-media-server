@@ -20,7 +20,6 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
-import io.github.pete_builds.vcrx.tv.ui.theme.Gray
 import io.github.pete_builds.vcrx.tv.ui.theme.Orange
 
 /** What every screen that loads data can be showing. */
@@ -45,10 +44,11 @@ fun <T> LoadStateContent(
     }
 }
 
+/** A screen still loading: the loading bar top left, nothing else (no spinner, no word). */
 @Composable
 fun LoadingView(modifier: Modifier = Modifier, message: String = "Loading") {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Label(message, color = Gray)
+    Box(modifier.fillMaxSize()) {
+        LoadingBar(Modifier.align(Alignment.TopStart), description = message)
     }
 }
 
