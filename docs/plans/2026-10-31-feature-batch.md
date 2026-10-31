@@ -37,7 +37,7 @@ track (or the first matching the profile's language), remembered per profile;
 the same toggle as a CC button on the web player. Captions must keep working
 under converted and HLS playback (`ConvertedSubtitles.kt`).
 **Done when:** on the TV, CC on and off mid-movie in two presses or fewer,
-direct play and converted both, verified on 10.0.20.147 when nobody is
+direct play and converted both, verified on the living room TV when nobody is
 watching.
 
 ## 3. Trailers before the movie (pre-rolls)
