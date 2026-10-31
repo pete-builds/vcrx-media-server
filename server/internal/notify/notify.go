@@ -104,6 +104,12 @@ func New(urls []string, events []string, server string, log *slog.Logger) *Webho
 	return w
 }
 
+// Wants reports whether any webhook takes this event: there is at least one
+// URL, and webhook_events, when set, names it.
+func (w *Webhooks) Wants(event string) bool {
+	return w != nil && len(w.URLs) > 0 && (w.Events == nil || w.Events[event])
+}
+
 // Send posts n to every webhook in the background. A failing webhook is logged
 // and never slows playback.
 func (w *Webhooks) Send(n Notice) {

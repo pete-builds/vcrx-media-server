@@ -291,6 +291,6 @@ a.link:hover { text-decoration: underline; }
 /* Settings > Newsletter */
 .newsletter-form { display: grid; gap: 14px; margin: 20px 0; }
 .newsletter-form .when { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.newsletter-form select { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; }
+.newsletter-form select { max-width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; }
 .newsletter .notice { border-left: 3px solid var(--orange); padding: 8px 12px; background: var(--surface); }
 .newsletter .preview { margin-top: 24px; display: grid; gap: 8px; justify-items: start; }

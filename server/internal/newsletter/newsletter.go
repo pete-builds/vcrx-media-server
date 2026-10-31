@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
+	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 	"github.com/pete-builds/vcrx-media-server/server/internal/tmdb"
 )
 
@@ -36,7 +37,15 @@ type Settings struct {
 	Enabled bool `json:"enabled"`
 	Weekday int  `json:"weekday"` // 0 is Sunday
 	Hour    int  `json:"hour"`    // 0 to 23
+	// AudienceUserID names the account whose view the digest is built from,
+	// so it lists only what that friend may see. Zero means everyone: only
+	// titles that every enabled non-admin account can see.
+	AudienceUserID int64 `json:"audience_user_id"`
 }
+
+// ErrBadAudience means the audience account is missing, disabled or an admin.
+// An admin sees every library, which is what the audience exists to prevent.
+var ErrBadAudience = errors.New("the newsletter audience must be an enabled account that is not an admin")
 
 // Default is Friday at 17:00, ahead of the weekend.
 var Default = Settings{Weekday: int(time.Friday), Hour: 17}
@@ -99,6 +108,9 @@ func (s *Service) Save(ctx context.Context, st Settings) error {
 	if err := st.Validate(); err != nil {
 		return err
 	}
+	if _, _, _, err := s.audience(ctx, st); err != nil {
+		return err
+	}
 	b, _ := json.Marshal(st)
 	if err := s.set(ctx, settingsKey, string(b)); err != nil {
 		return err
@@ -120,6 +132,8 @@ func (s *Service) LastSent(ctx context.Context) (int64, error) {
 type Status struct {
 	Settings
 	TimeZone string `json:"time_zone"`
+	// Audience says whose view the digest uses, in words for Settings.
+	Audience string `json:"audience"`
 	Webhooks int    `json:"webhooks"`
 	LastSent *int64 `json:"last_sent"`
 	NextSend *int64 `json:"next_send"`
@@ -131,8 +145,13 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 		return Status{}, err
 	}
 	out := Status{Settings: st, TimeZone: s.zoneName()}
-	if s.Hooks != nil {
+	if s.Hooks.Wants(notify.Newsletter) {
 		out.Webhooks = len(s.Hooks.URLs)
+	}
+	if _, _, who, err := s.audience(ctx, st); err != nil {
+		out.Audience = "Nobody: " + err.Error() + ", so nothing is sent"
+	} else {
+		out.Audience = who
 	}
 	last, err := s.LastSent(ctx)
 	if err != nil {
@@ -179,7 +198,13 @@ func LastSlot(now time.Time, st Settings, loc *time.Location) time.Time {
 // reports whether a digest was sent.
 func (s *Service) Tick(ctx context.Context) (bool, error) {
 	st, err := s.Settings(ctx)
-	if err != nil || !st.Enabled || s.Hooks == nil || len(s.Hooks.URLs) == 0 {
+	if err != nil || !st.Enabled || !s.Hooks.Wants(notify.Newsletter) {
+		return false, err
+	}
+	// Work out the audience before claiming the week: if its account has gone
+	// or become an admin, nothing is sent until the setting is fixed.
+	cond, args, _, err := s.audience(ctx, st)
+	if err != nil {
 		return false, err
 	}
 	last, err := s.LastSent(ctx)
@@ -196,7 +221,7 @@ func (s *Service) Tick(ctx context.Context) (bool, error) {
 	if err := s.set(ctx, lastSentKey, strconv.FormatInt(due.UnixMilli(), 10)); err != nil {
 		return false, err
 	}
-	d, err := Build(ctx, s.DB, due.Add(-Window), due)
+	d, err := Build(ctx, s.DB, due.Add(-Window), due, cond, args)
 	if err != nil {
 		return false, s.undo(ctx, last, err)
 	}
@@ -240,8 +265,16 @@ var ErrNothingAdded = errors.New("nothing was added in the last 7 days")
 // Preview sends the last seven days' digest now, marked as a preview. It works
 // while the newsletter is off and never counts as this week's send.
 func (s *Service) Preview(ctx context.Context) (notify.Digest, int, error) {
+	st, err := s.Settings(ctx)
+	if err != nil {
+		return notify.Digest{}, 0, err
+	}
+	cond, args, _, err := s.audience(ctx, st)
+	if err != nil {
+		return notify.Digest{}, 0, err
+	}
 	now := s.now()
-	d, err := Build(ctx, s.DB, now.Add(-Window), now)
+	d, err := Build(ctx, s.DB, now.Add(-Window), now, cond, args)
 	if err != nil {
 		return d, 0, err
 	}
@@ -253,9 +286,63 @@ func (s *Service) Preview(ctx context.Context) (notify.Digest, int, error) {
 	return d, n, err
 }
 
-// Build collects the movies and episodes added in [since, until). Shows are
-// ordered by their newest episode, and their episodes by season and number.
-func Build(ctx context.Context, db *sql.DB, since, until time.Time) (notify.Digest, error) {
+// audience returns the policy condition on items alias "i" the digest is built
+// under, and a description of it. With a chosen account it is that account's
+// policy: granted libraries, label rules, resolution ceiling. Otherwise it is
+// every enabled non-admin account's policy at once, so a title appears only
+// if each of them could open it; with no such accounts nothing qualifies.
+func (s *Service) audience(ctx context.Context, st Settings) (string, []any, string, error) {
+	var ids []int64
+	who := "Everyone: only titles every friend account can see"
+	if st.AudienceUserID != 0 {
+		var name string
+		var isAdmin, disabled bool
+		err := s.DB.QueryRowContext(ctx, `SELECT username, is_admin, disabled FROM users WHERE id = ?`, st.AudienceUserID).
+			Scan(&name, &isAdmin, &disabled)
+		if errors.Is(err, sql.ErrNoRows) || isAdmin || disabled {
+			return "", nil, "", ErrBadAudience
+		}
+		if err != nil {
+			return "", nil, "", err
+		}
+		ids, who = []int64{st.AudienceUserID}, "What "+name+" can see"
+	} else {
+		rows, err := s.DB.QueryContext(ctx, `SELECT id FROM users WHERE is_admin = 0 AND disabled = 0 ORDER BY id`)
+		if err != nil {
+			return "", nil, "", err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				return "", nil, "", err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			return "", nil, "", err
+		}
+	}
+	if len(ids) == 0 {
+		return "0", nil, "Nobody yet: there are no friend accounts, so nothing is sent", nil
+	}
+	var conds []string
+	var args []any
+	for _, id := range ids {
+		p, err := policy.Load(ctx, s.DB, id, false)
+		if err != nil {
+			return "", nil, "", err
+		}
+		c, a := p.ItemCond("i")
+		conds, args = append(conds, c), append(args, a...)
+	}
+	return strings.Join(conds, " AND "), args, who, nil
+}
+
+// Build collects the movies and episodes added in [since, until) that pass
+// cond, a policy condition on items alias "i". Shows are ordered by their
+// newest episode, and their episodes by season and number.
+func Build(ctx context.Context, db *sql.DB, since, until time.Time, cond string, condArgs []any) (notify.Digest, error) {
 	d := notify.Digest{Since: since.UnixMilli(), Until: until.UnixMilli(), Movies: []notify.DigestMovie{}, Shows: []notify.DigestShow{}}
 	rows, err := db.QueryContext(ctx, `SELECT i.id, i.kind, i.title, i.year, i.season_number, i.episode_number, i.episode_number_end,
 			i.added_at, sh.id, sh.title,
@@ -265,7 +352,8 @@ func Build(ctx context.Context, db *sql.DB, since, until time.Time) (notify.Dige
 		LEFT JOIN items sh ON sh.id = se.parent_id
 		WHERE i.kind IN ('movie', 'episode') AND i.missing_since IS NULL AND i.added_at >= ? AND i.added_at < ?
 			AND (i.kind = 'movie' OR (sh.id IS NOT NULL AND sh.missing_since IS NULL))
-		ORDER BY i.added_at DESC, i.id`, since.UnixMilli(), until.UnixMilli())
+			AND `+cond+`
+		ORDER BY i.added_at DESC, i.id`, append([]any{since.UnixMilli(), until.UnixMilli()}, condArgs...)...)
 	if err != nil {
 		return d, err
 	}

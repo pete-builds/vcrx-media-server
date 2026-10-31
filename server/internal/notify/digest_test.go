@@ -152,12 +152,16 @@ func TestSendDigestPlainJSON(t *testing.T) {
 		_ = json.Unmarshal(b, &got)
 	}))
 	defer srv.Close()
+	// webhook_events applies: left out, nothing goes; named, it goes.
 	w := New([]string{srv.URL + "/hook"}, []string{Play}, "VCRX", nil)
+	if n, err := w.SendDigest(context.Background(), Digest{Movies: movies(1, "Film")}); n != 0 || err == nil || got != nil {
+		t.Fatalf("sent %d (%v) although webhook_events leaves out newsletter", n, err)
+	}
+	w = New([]string{srv.URL + "/hook"}, []string{Play, Newsletter}, "VCRX", nil)
 	n, err := w.SendDigest(context.Background(), Digest{Movies: movies(1, "Film")})
 	if n != 1 || err != nil {
 		t.Fatalf("sent %d, %v", n, err)
 	}
-	// webhook_events limits playback events, not the newsletter, which is switched on by itself.
 	if got["event"] != Newsletter || got["content"] != "New on VCRX this week: 1 movie" || len(got["movies"].([]any)) != 1 ||
 		got["shows"] == nil || got["movies"].([]any)[0].(map[string]any)["poster_url"] != "https://image.example/p.jpg" {
 		t.Fatalf("payload: %v", got)

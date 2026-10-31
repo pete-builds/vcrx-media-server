@@ -255,10 +255,10 @@ func cut(s string, n int) string {
 
 // SendDigest posts the digest to every webhook and waits for the answers,
 // so the caller knows whether it went out. It returns how many accepted it.
-// The newsletter is switched on by itself, so webhook_events does not apply.
+// Like every other event it is held back when webhook_events leaves it out.
 func (w *Webhooks) SendDigest(ctx context.Context, d Digest) (int, error) {
-	if w == nil || len(w.URLs) == 0 {
-		return 0, errors.New("no webhook URLs are set")
+	if !w.Wants(Newsletter) {
+		return 0, errors.New("no webhook takes the newsletter event")
 	}
 	if d.Movies == nil {
 		d.Movies = []DigestMovie{}

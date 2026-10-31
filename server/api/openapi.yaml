@@ -774,8 +774,9 @@ paths:
     put:
       operationId: adminSetNewsletter
       summary: >-
-        Switch the newsletter on or off and set when it goes out. A change takes effect from the next scheduled time;
-        it never sends a past week's digest straight away.
+        Switch the newsletter on or off, set when it goes out and whose view it uses. A change takes effect from the
+        next scheduled time; it never sends a past week's digest straight away. 400 when the audience is an admin,
+        disabled or missing.
       requestBody:
         required: true
         content:
@@ -795,8 +796,9 @@ paths:
       operationId: adminPreviewNewsletter
       summary: >-
         Send the last 7 days' digest to every webhook now, marked as a preview. Works while the newsletter is off and
-        does not count as the week's send. 409 no_webhooks when none is set up, 409 nothing_added when the week added
-        nothing, 502 webhook_failed when no webhook accepted it.
+        does not count as the week's send. Built under the audience setting, like the weekly one. 409 no_webhooks when
+        no webhook takes the newsletter event, 409 bad_audience when the audience account is no longer valid,
+        409 nothing_added when the audience has nothing new, 502 webhook_failed when no webhook accepted it.
       responses:
         "200":
           description: Sent.
@@ -1267,14 +1269,24 @@ components:
         enabled: { type: boolean }
         weekday: { type: integer, minimum: 0, maximum: 6, description: 0 is Sunday. }
         hour: { type: integer, minimum: 0, maximum: 23, description: In the server's time zone. }
+        audience_user_id:
+          type: integer
+          default: 0
+          description: >-
+            Whose view the digest is built from: an enabled account that is not an admin. It lists only what that
+            account may see (granted libraries, label rules). 0, the default, means only titles every enabled
+            non-admin account can see.
     NewsletterStatus:
       allOf:
         - { $ref: "#/components/schemas/NewsletterSettings" }
         - type: object
-          required: [time_zone, webhooks, last_sent, next_send]
+          required: [time_zone, audience, webhooks, last_sent, next_send]
           properties:
             time_zone: { type: string }
-            webhooks: { type: integer, description: How many webhook URLs are set; the newsletter needs at least one. }
+            audience: { type: string, description: Whose view the digest uses, in words. }
+            webhooks:
+              type: integer
+              description: How many webhook URLs take the newsletter; 0 when none is set or webhook_events leaves newsletter out.
             last_sent: { type: [integer, "null"], description: When the last week was handled, or the settings last saved. }
             next_send: { type: [integer, "null"], description: Null while off. }
     ActivitySession:

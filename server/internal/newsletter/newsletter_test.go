@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -41,13 +42,36 @@ type library struct {
 	conn   *sql.DB
 	movies int64
 	tv     int64
+	friend int64
 }
 
+// newLibrary makes a Movies and a TV library and one friend account granted
+// both, so the default audience (every friend) sees everything in them.
 func newLibrary(t *testing.T, conn *sql.DB) *library {
 	l := &library{t: t, conn: conn}
 	l.movies = l.exec(`INSERT INTO libraries (name, kind, root_path, created_at, updated_at) VALUES ('Movies', 'movie', '/media/m', 0, 0)`)
 	l.tv = l.exec(`INSERT INTO libraries (name, kind, root_path, created_at, updated_at) VALUES ('TV', 'show', '/media/t', 0, 0)`)
+	l.friend = l.user("friend", false, l.movies, l.tv)
 	return l
+}
+
+func (l *library) user(name string, admin bool, libs ...int64) int64 {
+	id := l.exec(`INSERT INTO users (username, password_hash, is_admin, created_at, updated_at) VALUES (?, 'x', ?, 0, 0)`, name, admin)
+	for _, lib := range libs {
+		l.exec(`INSERT INTO library_grants (user_id, library_id) VALUES (?, ?)`, id, lib)
+	}
+	return id
+}
+
+// version gives an item a file on disk; policy shows only playable titles.
+func (l *library) version(item, lib int64) {
+	l.exec(`INSERT INTO media_versions (item_id, library_id, path, rel_path, size, mtime, resolution, added_at, updated_at)
+		VALUES (?, ?, ?, 'f.mkv', 1, 0, '1080p', 0, 0)`, item, lib, fmt.Sprintf("/media/%d.mkv", item))
+}
+
+func (l *library) label(item int64, name string) {
+	l.exec(`INSERT OR IGNORE INTO labels (name) VALUES (?)`, name)
+	l.exec(`INSERT INTO item_labels (item_id, label_id) VALUES (?, (SELECT id FROM labels WHERE name = ?))`, item, name)
 }
 
 func (l *library) exec(q string, args ...any) int64 {
@@ -61,8 +85,14 @@ func (l *library) exec(q string, args ...any) int64 {
 }
 
 func (l *library) movie(title string, year int, added time.Time) int64 {
-	return l.exec(`INSERT INTO items (library_id, kind, group_key, title, sort_title, year, added_at, updated_at)
-		VALUES (?, 'movie', ?, ?, ?, ?, ?, 0)`, l.movies, title, title, title, year, added.UnixMilli())
+	return l.movieIn(l.movies, title, year, added)
+}
+
+func (l *library) movieIn(lib int64, title string, year int, added time.Time) int64 {
+	id := l.exec(`INSERT INTO items (library_id, kind, group_key, title, sort_title, year, added_at, updated_at)
+		VALUES (?, 'movie', ?, ?, ?, ?, ?, 0)`, lib, title, title, title, year, added.UnixMilli())
+	l.version(id, lib)
+	return id
 }
 
 func (l *library) show(title string) (show, season int64) {
@@ -74,8 +104,10 @@ func (l *library) show(title string) (show, season int64) {
 }
 
 func (l *library) episode(season int64, n int, title string, added time.Time) int64 {
-	return l.exec(`INSERT INTO items (library_id, kind, parent_id, group_key, title, sort_title, season_number, episode_number, added_at, updated_at)
+	id := l.exec(`INSERT INTO items (library_id, kind, parent_id, group_key, title, sort_title, season_number, episode_number, added_at, updated_at)
 		VALUES (?, 'episode', ?, ?, ?, ?, 1, ?, ?, 0)`, l.tv, season, n, title, title, n, added.UnixMilli())
+	l.version(id, l.tv)
+	return id
 }
 
 func (l *library) poster(item int64, source, url string) {
@@ -108,7 +140,8 @@ func TestBuildGroupsEpisodesByShow(t *testing.T) {
 	_, s3 := l.show("Old Show")
 	l.episode(s3, 1, "Before", since.Add(-time.Hour))
 
-	d, err := Build(context.Background(), conn, since, until)
+	// "1": no audience rule, so this test is about contents and grouping only.
+	d, err := Build(context.Background(), conn, since, until, "1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +159,7 @@ func TestBuildGroupsEpisodesByShow(t *testing.T) {
 		t.Fatalf("episodes: %+v", eps)
 	}
 
-	empty, err := Build(context.Background(), conn, until.Add(time.Hour), until.Add(2*time.Hour))
+	empty, err := Build(context.Background(), conn, until.Add(time.Hour), until.Add(2*time.Hour), "1", nil)
 	if err != nil || !empty.Empty() {
 		t.Fatalf("empty window: %+v %v", empty, err)
 	}
@@ -299,5 +332,138 @@ func TestSettingsValidateAndStatus(t *testing.T) {
 	st, _ = s.Status(ctx)
 	if want := time.Date(2026, 3, 16, 8, 0, 0, 0, zone).UnixMilli(); st.NextSend == nil || *st.NextSend != want {
 		t.Fatalf("next send: %v, want %d", st.NextSend, want)
+	}
+}
+
+// titles lists a digest's movies and shows by name.
+func titles(d notify.Digest) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range d.Movies {
+		out[m.Title] = true
+	}
+	for _, s := range d.Shows {
+		out[s.Title] = true
+	}
+	return out
+}
+
+// The digest goes to friends, so it lists only what they may see: never a
+// title from a library they are not granted, never a title (or a show's
+// episode) carrying a label one of them is denied.
+func TestAudiencePolicy(t *testing.T) {
+	conn := openDB(t, filepath.Join(t.TempDir(), "vcrx.db"))
+	l := newLibrary(t, conn)
+	ctx := context.Background()
+	clock := time.Date(2026, 3, 11, 12, 0, 0, 0, zone)
+	recv := newReceiver(t)
+	s := &Service{DB: conn, Hooks: notify.New([]string{recv.srv.URL}, nil, "VCRX", quiet), Log: quiet, Location: zone,
+		Now: func() time.Time { return clock }}
+	private := l.exec(`INSERT INTO libraries (name, kind, root_path, created_at, updated_at) VALUES ('Private', 'movie', '/media/p', 0, 0)`)
+	// friend (from newLibrary) has Movies and TV and is denied "late night";
+	// cousin also has Private and no label rules.
+	l.exec(`INSERT INTO user_policies (user_id, deny_labels, updated_at) VALUES (?, '["late night"]', 0)`, l.friend)
+	cousin := l.user("cousin", false, l.movies, l.tv, private)
+	admin := l.user("boss", true)
+
+	added := clock.Add(-24 * time.Hour)
+	l.movie("Harbor Lights", 2001, added)
+	night := l.movie("Night Garden", 2020, added)
+	l.label(night, "late night")
+	l.movieIn(private, "Locked Room", 2010, added)
+	_, s1 := l.show("Quiet Street")
+	l.episode(s1, 1, "Pilot", added)
+	dark, s2 := l.show("Dark Hours")
+	l.label(dark, "late night") // on the show: its episodes inherit it
+	l.episode(s2, 1, "First", added)
+	everything := map[string]bool{"Harbor Lights": true, "Night Garden": true, "Locked Room": true, "Quiet Street": true, "Dark Hours": true}
+	safe := map[string]bool{"Harbor Lights": true, "Quiet Street": true}
+
+	check := func(st Settings, want map[string]bool) {
+		t.Helper()
+		if err := s.Save(ctx, st); err != nil {
+			t.Fatal(err)
+		}
+		d, _, err := s.Preview(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := titles(d)
+		if len(got) != len(want) {
+			t.Fatalf("audience %d: got %v, want %v", st.AudienceUserID, got, want)
+		}
+		for k := range want {
+			if !got[k] {
+				t.Fatalf("audience %d: got %v, want %v", st.AudienceUserID, got, want)
+			}
+		}
+	}
+	// Default: only what every friend can see. The friend's denied label and
+	// the cousin's extra library both drop out.
+	check(Settings{}, safe)
+	check(Settings{AudienceUserID: l.friend}, safe)
+	check(Settings{AudienceUserID: cousin}, everything)
+
+	// The scheduled send uses the same rule.
+	if err := s.Save(ctx, Settings{Enabled: true, Weekday: int(time.Friday), Hour: 17}); err != nil {
+		t.Fatal(err)
+	}
+	clock = time.Date(2026, 3, 13, 17, 0, 0, 0, zone)
+	if sent, err := s.Tick(ctx); !sent || err != nil {
+		t.Fatalf("tick: %v %v", sent, err)
+	}
+	last := recv.got[len(recv.got)-1]
+	var names []string
+	for _, m := range last["movies"].([]any) {
+		names = append(names, m.(map[string]any)["title"].(string))
+	}
+	for _, sh := range last["shows"].([]any) {
+		names = append(names, sh.(map[string]any)["title"].(string))
+	}
+	if fmt.Sprint(names) != "[Harbor Lights Quiet Street]" {
+		t.Fatalf("scheduled digest listed %v", names)
+	}
+
+	// An admin sees everything, so it cannot be the audience; nor can a
+	// disabled or missing account.
+	l.exec(`UPDATE users SET disabled = 1 WHERE id = ?`, cousin)
+	for _, id := range []int64{admin, cousin, 9999} {
+		if err := s.Save(ctx, Settings{AudienceUserID: id}); !errors.Is(err, ErrBadAudience) {
+			t.Fatalf("audience %d accepted: %v", id, err)
+		}
+	}
+
+	// With no friend accounts at all, nothing qualifies.
+	l.exec(`UPDATE users SET disabled = 1 WHERE id = ?`, l.friend)
+	if _, _, err := s.Preview(ctx); !errors.Is(err, ErrNothingAdded) {
+		t.Fatalf("no friends: %v", err)
+	}
+}
+
+// webhook_events applies to the newsletter like every other event.
+func TestNewsletterRespectsWebhookEvents(t *testing.T) {
+	conn := openDB(t, filepath.Join(t.TempDir(), "vcrx.db"))
+	l := newLibrary(t, conn)
+	recv := newReceiver(t)
+	clock := time.Date(2026, 3, 11, 12, 0, 0, 0, zone)
+	l.movie("Harbor Lights", 2001, clock.Add(-time.Hour))
+	ctx := context.Background()
+	s := &Service{DB: conn, Hooks: notify.New([]string{recv.srv.URL}, []string{notify.Play}, "VCRX", quiet), Log: quiet, Location: zone,
+		Now: func() time.Time { return clock }}
+	if err := s.Save(ctx, Settings{Enabled: true, Weekday: int(time.Friday), Hour: 17}); err != nil {
+		t.Fatal(err)
+	}
+	clock = time.Date(2026, 3, 13, 17, 0, 0, 0, zone)
+	if sent, _ := s.Tick(ctx); sent || recv.count() != 0 {
+		t.Fatal("sent although webhook_events leaves out newsletter")
+	}
+	if _, n, err := s.Preview(ctx); n != 0 || err == nil || recv.count() != 0 {
+		t.Fatalf("preview sent although webhook_events leaves out newsletter: %d %v", n, err)
+	}
+	if st, _ := s.Status(ctx); st.Webhooks != 0 {
+		t.Fatalf("status counts %d webhooks for the newsletter", st.Webhooks)
+	}
+	s.Hooks = notify.New([]string{recv.srv.URL}, []string{notify.Play, notify.Newsletter}, "VCRX", quiet)
+	if sent, err := s.Tick(ctx); !sent || err != nil || recv.count() != 1 {
+		t.Fatalf("with newsletter in webhook_events: %v %v %d", sent, err, recv.count())
 	}
 }
