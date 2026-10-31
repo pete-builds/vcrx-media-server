@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
 	"github.com/pete-builds/vcrx-media-server/server/internal/tmdb"
@@ -336,8 +337,11 @@ func TestMergeAndSplitRefuse(t *testing.T) {
 	if _, err := Split(ctx, e.db, e.id(`SELECT id FROM media_versions WHERE item_id = ?`, ep)); !errors.Is(err, ErrNotMovie) {
 		t.Errorf("split of an episode: %v", err)
 	}
-	// A scan in progress holds the library.
-	e.exec(`INSERT INTO scan_runs (library_id, trigger, status, started_at) VALUES (?, 'manual', 'running', ?)`, e.lib.ID, e.clock.now().UnixMilli())
+	// A scan in progress holds the library. Merge judges "in progress" by the
+	// real clock (a run older than staleRunAfter is a crashed one), so the run
+	// starts now, not at the fixed test clock: with that, the test began failing
+	// once the real date passed the fixed one by a day.
+	e.exec(`INSERT INTO scan_runs (library_id, trigger, status, started_at) VALUES (?, 'manual', 'running', ?)`, e.lib.ID, time.Now().UnixMilli())
 	if err := Merge(ctx, e.db, a, []int64{b}); !errors.Is(err, ErrScanRunning) {
 		t.Errorf("merge during a scan: %v", err)
 	}
