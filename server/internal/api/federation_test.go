@@ -771,6 +771,9 @@ func TestMaliciousPeerAnswersAreBoundedAndChecked(t *testing.T) {
 		{"id": 5, "kind": "movie", "title": "   ", "added_at": 2},
 		{"id": 6, "kind": "episode", "title": "Not a top-level title", "added_at": 2},
 	}}))
+	// Linking warmed the cache before this catalog existed; on a fast runner
+	// that 404 is cached as a bad answer.
+	b.srv.PeerCache.Forget(id)
 	_, r := homeOf(t, b)
 	body := string(r.body)
 	if strings.Contains(body, "<img") || !strings.Contains(body, `\u003cimg src=x onerror=alert(1)\u003e`) ||
@@ -942,6 +945,7 @@ func TestPeerAddressCannotReachInternalURLs(t *testing.T) {
 	fp.on("GET /api/v1/items/1", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, internal.URL+"/item", http.StatusTemporaryRedirect)
 	})
+	b.srv.PeerCache.Forget(id) // drop the catalog linking warmed before these routes
 	h, _ := homeOf(t, b)
 	if len(h.Items) != 0 || h.Peers[0].State == "online" {
 		t.Fatalf("a redirecting peer: %+v", h)
