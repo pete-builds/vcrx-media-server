@@ -118,7 +118,8 @@ async function historyTab(body, params) {
     h("td", { class: "num" }, hours(x.played_ms)),
     h("td", { class: "num" }, x.progress != null ? `${Math.round(x.progress * 100)}%` : ""),
     h("td", {}, x.ip || "")));
-  body.replaceChildren(
+  // replaceChildren writes a null argument as the text "null"; h() skips it.
+  body.replaceChildren(h("div", {},
     data.total ? h("table", { class: "list" },
       h("thead", {}, h("tr", {}, ["When", "User", "Title", "Device", "Playback", "Watched", "Reached", "Address"]
         .map((c, i) => h("th", { class: i === 5 || i === 6 ? "num" : "" }, c)))),
@@ -126,7 +127,7 @@ async function historyTab(body, params) {
     data.total > PAGE ? h("div", { class: "pager" },
       `${offset + 1} to ${Math.min(offset + PAGE, data.total)} of ${data.total}`,
       offset > 0 ? h("a", { class: "btn btn-small", href: link(Math.max(0, offset - PAGE)) }, "Newer") : null,
-      offset + PAGE < data.total ? h("a", { class: "btn btn-small", href: link(offset + PAGE) }, "Older") : null) : null);
+      offset + PAGE < data.total ? h("a", { class: "btn btn-small", href: link(offset + PAGE) }, "Older") : null) : null));
 }
 
 // Stats.
