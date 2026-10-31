@@ -16,7 +16,7 @@ server_name: VCRX
 
 # Which playback events go to the webhooks in VCRX_WEBHOOK_URLS (the URLs carry
 # tokens, so they live in .env, not here). Default: all of them.
-#webhook_events: [play, stop, refused, terminated]
+#webhook_events: [play, stop, refused, terminated, added]
 
 # IMDb ratings for overlays and details, from IMDb's public ratings file,
 # downloaded once a day. IMDb licenses it for personal, non-commercial use.

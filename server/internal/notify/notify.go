@@ -21,6 +21,7 @@ const (
 	Stop       = "stop"
 	Refused    = "refused"
 	Terminated = "terminated"
+	Added      = "added"
 )
 
 // Notice is one playback event.
@@ -39,8 +40,11 @@ type Notice struct {
 	DurationMs int64  `json:"duration_ms,omitempty"`
 	PlayedMs   int64  `json:"played_ms,omitempty"`
 	Message    string `json:"message,omitempty"`
-	Server     string `json:"server"`
-	Time       int64  `json:"time"`
+	// Library and Titles, for added.
+	Library string   `json:"library,omitempty"`
+	Titles  []string `json:"titles,omitempty"`
+	Server  string   `json:"server"`
+	Time    int64    `json:"time"`
 }
 
 // Text is the one-line summary used for Discord and for the JSON "content" field.
@@ -63,6 +67,8 @@ func (n Notice) Text() string {
 		return fmt.Sprintf("✕ %s could not play %s%s: %s", who, what, on, n.Reason)
 	case Terminated:
 		return fmt.Sprintf("■ Stopped %s's stream of %s%s: %s", who, what, on, n.Message)
+	case Added:
+		return fmt.Sprintf("＋ New in %s: %s", n.Library, n.Message)
 	}
 	return fmt.Sprintf("%s: %s %s", n.Event, who, what)
 }
@@ -162,4 +168,14 @@ func host(target string) string {
 
 func redact(msg, target string) string {
 	return strings.ReplaceAll(msg, target, host(target))
+}
+
+// AddedSummary is the one-line list for an added notice: up to five titles
+// and a count of the rest.
+func AddedSummary(titles []string) string {
+	const shown = 5
+	if len(titles) <= shown {
+		return strings.Join(titles, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(titles[:shown], ", "), len(titles)-shown)
 }

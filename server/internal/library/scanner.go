@@ -89,7 +89,11 @@ type Scanner struct {
 	Prober           probe.Prober
 	Log              *slog.Logger
 	ProbeConcurrency int
-	Now              func() time.Time
+	// OnAdded, when set, is called after a successful scan that added titles,
+	// with the highest item id from before the scan: every item above it is
+	// new. Used for "recently added" notifications.
+	OnAdded func(ctx context.Context, lib Library, run Run, idsAbove int64)
+	Now     func() time.Time
 }
 
 func (s *Scanner) now() time.Time {
@@ -174,6 +178,10 @@ func (s *Scanner) begin(ctx context.Context, lib Library, opt Options) (Run, err
 func (s *Scanner) execute(ctx context.Context, lib Library, opt Options, run Run) (Run, error) {
 	lib, opt, _ = normalize(lib, opt)
 	start := s.now()
+	var before int64
+	if s.OnAdded != nil {
+		_ = s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM items`).Scan(&before)
+	}
 	warning, err := s.scan(ctx, lib, opt, &run)
 	switch {
 	case err == nil:
@@ -200,6 +208,9 @@ func (s *Scanner) execute(ctx context.Context, lib Library, opt Options, run Run
 	s.log().Info("scan finished", "library", lib.Name, "run", run.ID, "status", run.Status, "seen", run.Seen, "added", run.Added,
 		"changed", run.Changed, "missing", run.Missing, "failed", run.Failed, "took", s.now().Sub(start).Round(time.Millisecond).String(),
 		"error", run.Error)
+	if s.OnAdded != nil && run.Status == StatusOK && run.Added > 0 {
+		s.OnAdded(context.WithoutCancel(ctx), lib, run, before)
+	}
 	return run, err
 }
 
