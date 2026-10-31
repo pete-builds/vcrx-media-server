@@ -5,6 +5,7 @@
 // or votes, a video that does not play, search as you type that
 // lists nothing, a C key or CC button that does not toggle captions, a
 // pre-roll that does not play before a movie or whose Skip does not start it, a
+// loading bar left showing once a page has loaded, a
 // Continue Watching Remove control that does not remove, a
 // keyboard shortcuts list that does not open, a Home feature whose Play does
 // not play, season tabs that do not switch, a phone menu that does not open,
@@ -238,10 +239,12 @@ async function main() {
       }
       const view = document.getElementById("view");
       const text = view ? view.innerText : "";
+      const bar = document.querySelector(".load-bar");
       return { found: !!document.querySelector(${JSON.stringify(selector)}), text,
-        error: !!document.querySelector("#view .error-box") };`);
+        error: !!document.querySelector("#view .error-box"), barStuck: !!bar && !bar.hidden };`);
     if (!res.found) fail(`#${path}`, `no ${selector}`);
     if (res.error) fail(`#${path}`, `shows an error box: ${res.text.slice(0, 160).replace(/\n/g, " ")}`);
+    if (res.barStuck) fail(`#${path}`, "the loading bar is still showing after the page loaded");
     const junk = res.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
     if (junk) {
       const at = res.text.slice(Math.max(0, junk.index - 60), junk.index + 20).replace(/\s+/g, " ");

@@ -160,6 +160,10 @@ class PlaybackController(
     var reloading by mutableStateOf(false)
         private set
 
+    /** The player is waiting for data: the loading bar shows (never a spinner). */
+    var buffering by mutableStateOf(false)
+        private set
+
     /** A subtitle track is showing. */
     var subtitlesOn by mutableStateOf(false)
         private set
@@ -543,6 +547,7 @@ class PlaybackController(
         }
 
         override fun onPlaybackStateChanged(state: Int) {
+            buffering = state == Player.STATE_BUFFERING
             when (state) {
                 Player.STATE_BUFFERING -> if (player.playWhenReady) reporter?.onBuffering(position(), duration())
                 Player.STATE_ENDED -> {

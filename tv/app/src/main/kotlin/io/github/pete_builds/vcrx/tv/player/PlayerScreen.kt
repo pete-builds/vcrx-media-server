@@ -42,6 +42,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.BrandDialog
 import io.github.pete_builds.vcrx.tv.ui.components.AppIcons
 import io.github.pete_builds.vcrx.tv.ui.components.BrandRow
 import io.github.pete_builds.vcrx.tv.ui.components.Label
+import io.github.pete_builds.vcrx.tv.ui.components.LoadingBar
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
 import io.github.pete_builds.vcrx.tv.ui.components.Mark
 import io.github.pete_builds.vcrx.tv.ui.components.MessageView
@@ -92,6 +93,12 @@ fun PlayerScreen(controller: PlaybackController, onExit: () -> Unit) {
             }
             Phase.Playing -> if (controller.overlay != Overlay.Hidden) Chrome(controller)
         }
+        if (controller.phase == Phase.Playing && (controller.buffering || controller.reloading)) {
+            // Keyed on the wait, so a short one shows nothing and each wait starts its own delay.
+            androidx.compose.runtime.key(controller.reloading) {
+                LoadingBar(Modifier.align(Alignment.TopStart), description = "Loading")
+            }
+        }
         if (controller.phase == Phase.Playing && controller.dialog == null) SkipButton(controller)
         // What a subtitle press did, or that subtitles are being prepared; above the controls.
         controller.notice?.let { Notice(it) }
@@ -114,7 +121,8 @@ private fun Video(controller: PlaybackController) {
             PlayerView(context).apply {
                 useController = false
                 isFocusable = false
-                setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                // No spinner: the loading bar shows instead (PlayerScreen).
+                setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                 setKeepContentOnPlayerReset(true)
                 setShutterBackgroundColor(Black.toArgb())
                 // Settings > Subtitles > Style, or the TV's own caption settings by default.

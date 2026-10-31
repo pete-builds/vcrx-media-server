@@ -1,5 +1,5 @@
 import { api, ApiError } from "../api.js";
-import { h, icon, errorBox, episodeCode, clock, toast } from "../dom.js";
+import { h, icon, errorBox, episodeCode, clock, toast, loadBar } from "../dom.js";
 import { capabilities } from "../caps.js";
 import { skipButtons } from "./skip.js";
 import { subtitleTiming, subtitleSearch } from "./subtitle-tools.js";
@@ -80,9 +80,20 @@ export async function playerView({ match, params }) {
     else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
   };
 
+  // "Loading" is the loading bar, not a word in the middle of the picture;
+  // other notes ("Preparing subtitles") still show as text.
+  let barOn = false;
+  const setLoading = (on) => {
+    if (on === barOn) return;
+    barOn = on;
+    if (on) loadBar.show();
+    else loadBar.hide();
+  };
   function showStatus(msg) {
-    status.textContent = msg;
-    status.hidden = !msg;
+    const loading = msg === "Loading";
+    setLoading(loading);
+    status.textContent = loading ? "" : msg;
+    status.hidden = loading || !msg;
   }
 
   // Subtitles: fetched only when chosen, so an embedded track is not read out
@@ -296,7 +307,7 @@ export async function playerView({ match, params }) {
     if (!started) { started = true; report("start"); }
     else if (paused) { paused = false; report("resume"); }
   });
-  video.addEventListener("waiting", () => { if (converted) showStatus("Loading"); });
+  video.addEventListener("waiting", () => showStatus("Loading"));
   video.addEventListener("pause", () => {
     pausedAt = Date.now();
     if (started && !video.ended && !ended) { paused = true; report("pause"); }
@@ -407,6 +418,7 @@ export async function playerView({ match, params }) {
     title,
     cleanup() {
       stop();
+      setLoading(false);
       loadSeq++;
       clearInterval(beat);
       clearInterval(upNextTimer);

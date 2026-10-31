@@ -3,7 +3,7 @@
 // function that runs when the user leaves it.
 
 import { api, autoSignIn, whenSignedOut, whenRewound, ApiError } from "./api.js";
-import { h, errorBox, skeleton } from "./dom.js";
+import { h, errorBox, skeleton, loadBar } from "./dom.js";
 import { homeView } from "./views/home.js";
 import { libraryView } from "./views/library.js";
 import { libraryCollectionsView, collectionView } from "./views/collections.js";
@@ -101,6 +101,7 @@ async function render() {
     view.replaceChildren(errorBox("Not found", "There is nothing at this address.", h("a", { class: "btn", href: "#/" }, "Home")));
     return;
   }
+  loadBar.show();
   try {
     const out = await viewFn({ match, params, path });
     if (seq !== renderSeq) {
@@ -120,6 +121,8 @@ async function render() {
     const title = err instanceof ApiError && err.status === 404 ? "Not found" : "Could not load this page";
     setHero(false);
     view.replaceChildren(errorBox(title, msg, h("a", { class: "btn", href: "#/" }, "Home")));
+  } finally {
+    loadBar.hide();
   }
 }
 
