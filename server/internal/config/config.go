@@ -97,6 +97,10 @@ type Config struct {
 	TMDbLanguage string `yaml:"tmdb_language"`
 	// TMDbCountry picks the content rating shown, e.g. US for PG-13.
 	TMDbCountry string `yaml:"tmdb_country"`
+	// TMDbHomeLists adds Home rows from TMDb's trending and popular lists,
+	// limited to titles in the library. Off by default; needs TMDbAPIKey. The
+	// lists refresh every six hours and the last good copy is kept offline.
+	TMDbHomeLists bool `yaml:"tmdb_home_lists"`
 
 	// OpenSubtitlesAPIKey turns on subtitle search (opensubtitles.com, REST API
 	// v1). Downloads also need OpenSubtitlesUsername and OpenSubtitlesPassword,
@@ -210,6 +214,7 @@ func Load() (Config, error) {
 	str("VCRX_LOG_FORMAT", &c.LogFormat)
 	boolean("VCRX_ADMIN_ALLOW_REMOTE", &c.AdminAllowRemote)
 	boolean("VCRX_IMDB_RATINGS", &c.IMDbRatings)
+	boolean("VCRX_TMDB_HOME_LISTS", &c.TMDbHomeLists)
 	list("VCRX_TRUSTED_PROXIES", &c.TrustedProxies)
 	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
 	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)

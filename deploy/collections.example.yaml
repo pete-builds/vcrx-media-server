@@ -28,8 +28,9 @@
 # allow or deny the label (PUT /api/v1/admin/users/{id}/policy, deny_labels).
 #
 # visible: where the collection is listed. library: in the library's collections
-# and on its titles. home and shared: kept for Home rows, which do not show
-# collections yet. All false means it only stamps its label.
+# and on its titles. home: a row of its own on Home (off unless set). shared:
+# that row also reaches users other than admins (on unless set false). All
+# false means it only stamps its label.
 collections:
   - name: 4K Resolution
     library: Movies

@@ -296,6 +296,8 @@ type Result struct {
 	VoteCount     int      `json:"vote_count"`
 	OriginCountry []string `json:"origin_country"`
 	Overview      string   `json:"overview"`
+	// MediaType is "movie" or "tv" in mixed lists such as trending.
+	MediaType string `json:"media_type"`
 }
 
 func (r Result) titles() []string {
@@ -408,4 +410,69 @@ func (c *Client) FindIMDb(ctx context.Context, kind, imdbID string) (int64, erro
 		return 0, ErrNotFound
 	}
 	return res[0].ID, nil
+}
+
+// ListEntry is one title in a TMDb list: kind "movie" or "show" and its id.
+type ListEntry struct {
+	Kind string
+	ID   int64
+}
+
+// Trending is TMDb's trending movies and shows this week, in its order.
+func (c *Client) Trending(ctx context.Context) ([]ListEntry, error) {
+	return c.list(ctx, "/trending/all/week", "")
+}
+
+// Popular is TMDb's popular movies then popular shows.
+func (c *Client) Popular(ctx context.Context) ([]ListEntry, error) {
+	movies, err := c.list(ctx, "/movie/popular", "movie")
+	if err != nil {
+		return nil, err
+	}
+	shows, err := c.list(ctx, "/tv/popular", "show")
+	if err != nil {
+		return nil, err
+	}
+	// Interleave, so neither kind crowds the other out of a short row.
+	out := make([]ListEntry, 0, len(movies)+len(shows))
+	for i := 0; i < max(len(movies), len(shows)); i++ {
+		if i < len(movies) {
+			out = append(out, movies[i])
+		}
+		if i < len(shows) {
+			out = append(out, shows[i])
+		}
+	}
+	return out, nil
+}
+
+// list reads the first three pages of a list. kind is the list's single kind,
+// or empty when each result says its own media_type.
+func (c *Client) list(ctx context.Context, path, kind string) ([]ListEntry, error) {
+	var out []ListEntry
+	for page := 1; page <= 3; page++ {
+		var resp struct {
+			Results    []Result `json:"results"`
+			TotalPages int      `json:"total_pages"`
+		}
+		if err := c.get(ctx, path, url.Values{"page": {strconv.Itoa(page)}}, &resp); err != nil {
+			return nil, err
+		}
+		for _, r := range resp.Results {
+			k := kind
+			switch r.MediaType {
+			case "movie":
+				k = "movie"
+			case "tv":
+				k = "show"
+			}
+			if k != "" && r.ID > 0 {
+				out = append(out, ListEntry{Kind: k, ID: r.ID})
+			}
+		}
+		if page >= resp.TotalPages {
+			break
+		}
+	}
+	return out, nil
 }
