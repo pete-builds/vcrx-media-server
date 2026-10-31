@@ -241,16 +241,6 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toUserJSON(info(r).Session.User))
 }
 
-func (s *Server) home(w http.ResponseWriter, r *http.Request) {
-	ri := info(r)
-	rows, err := s.Catalog.Home(r.Context(), ri.Policy, ri.Session.User.ID)
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"rows": rows})
-}
-
 func (s *Server) libraries(w http.ResponseWriter, r *http.Request) {
 	libs, err := s.Catalog.Libraries(r.Context(), info(r).Policy)
 	if err != nil {

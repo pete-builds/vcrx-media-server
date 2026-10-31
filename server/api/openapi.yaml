@@ -140,6 +140,39 @@ paths:
                 required: [rows]
                 properties:
                   rows: { type: array, items: { $ref: "#/components/schemas/HomeRow" } }
+  /api/v1/rows/{row_id}:
+    get:
+      operationId: getHomeRow
+      summary: >-
+        A Home row's See all view: the row with up to 100 titles, under the caller's access. row_id is a HomeRow id
+        from /api/v1/home, such as top_rated_movies, genre:Comedy or seasonal:halloween. Continue Watching has none.
+      parameters:
+        - { name: row_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/HomeRow" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/layout/home:
+    get:
+      operationId: getHomeLayout
+      summary: >-
+        The caller's Home layout: every row slot in order with whether it shows. The caller's own choice, else the
+        server default, else the built-in order. The web and TV Customize Home editors both read and write this.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+    put:
+      operationId: setHomeLayout
+      summary: Save the caller's own Home layout. Slots left out keep their default and go last.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayoutInput" } } }
+      responses:
+        "200": { description: The layout as saved, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: resetHomeLayout
+      summary: Forget the caller's own layout, so the server default applies again.
+      responses:
+        "200": { description: The layout now in effect, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
 
   /api/v1/libraries:
     get:
@@ -666,6 +699,26 @@ paths:
       responses:
         "204": { description: Saved }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/layout/home:
+    get:
+      operationId: adminGetHomeLayout
+      summary: The server default Home layout, for everyone without their own.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+    put:
+      operationId: adminSetHomeLayout
+      summary: Set the server default Home layout.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayoutInput" } } }
+      responses:
+        "200": { description: The default as saved, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: adminResetHomeLayout
+      summary: Forget the server default, so the built-in order applies.
+      responses:
+        "200": { description: The default now in effect, content: { application/json: { schema: { $ref: "#/components/schemas/HomeLayout" } } } }
   /api/v1/admin/activity/sessions:
     get:
       operationId: adminListPlaybackSessions
@@ -1188,6 +1241,7 @@ components:
         has_thumb: { type: boolean }
         added_at: { type: integer }
         watch: { $ref: "#/components/schemas/WatchState" }
+        note: { type: string, description: 'A short line some Home rows add to a card, such as "3 new episodes" or "Season 2 added". Absent elsewhere.' }
     Track:
       type: object
       required: [id, kind, is_default, is_forced, is_external, is_image_based]
@@ -1279,10 +1333,45 @@ components:
       type: object
       required: [id, title, items]
       properties:
-        id: { type: string, description: "continue_watching, recently_added_movies, recently_added_episodes, or library:<id>" }
+        id:
+          type: string
+          description: >-
+            Stable for the row, and the key for its See all view: continue_watching, recently_added_movies:<library id>,
+            recently_added_tv:<library id>, seasonal:<season id> (seasonal:<season id>:family for the kids' row),
+            new_seasons, because_you_watched:<item id>, trending, recently_released, top_rated_movies, top_rated_shows,
+            unwatched_gems, genre:<genre>, collection:<collection id>, most_watched, most_watched_by_you, rediscover,
+            best_of_decade:<1990>, tmdb_trending or tmdb_popular. Clients render whatever rows come, in order.
+        kind: { type: string, description: "The row's slot in the Home layout (a HomeLayoutRow key), or genre, collection or best_of_decade." }
         title: { type: string }
-        library_id: { type: [integer, "null"] }
+        library_id: { type: [integer, "null"], description: "Set on a library's Recently Added row." }
+        see_all: { type: boolean, description: "Whether GET /api/v1/rows/{row_id} offers more." }
         items: { type: array, items: { $ref: "#/components/schemas/ItemSummary" } }
+    HomeLayoutRow:
+      type: object
+      required: [key, title, description, enabled]
+      properties:
+        key: { type: string, description: "A row slot: continue_watching, recently_added_movies, seasonal, genres, collections and so on." }
+        title: { type: string }
+        description: { type: string }
+        enabled: { type: boolean }
+    HomeLayout:
+      type: object
+      required: [rows, source]
+      properties:
+        rows: { type: array, items: { $ref: "#/components/schemas/HomeLayoutRow" }, description: "Every slot once, in Home's order." }
+        source: { type: string, enum: [user, server, default], description: "Whose layout this is." }
+    HomeLayoutInput:
+      type: object
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+            required: [key, enabled]
+            properties:
+              key: { type: string }
+              enabled: { type: boolean }
     VideoCodecCapability:
       type: object
       required: [codec]

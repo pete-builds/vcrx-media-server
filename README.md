@@ -102,13 +102,40 @@ This product uses the TMDB API but is not endorsed or certified by TMDB.
 
 Open `http://<server>:3750/` in a browser. It is part of the server: no separate install, no build step, nothing loaded from the internet.
 
-- **Browse** Home (Continue Watching, recently added), each library with sort and filters, search, and details pages for movies, shows, seasons and episodes. Mark things watched or unwatched.
+- **Browse** Home (see below), each library with sort and filters, search, and details pages for movies, shows, seasons and episodes. Mark things watched or unwatched.
 - **Continue Watching** cards have a Remove button (on hover, always on touch screens, and reachable with Tab), and a details page with a resume position has Remove from Continue Watching. Either forgets your resume position without marking the title watched, and only for you (`DELETE /api/v1/items/{id}/progress`).
 - **Search as you type:** after two characters the search box lists up to eight matching titles with poster, year or episode, and kind. Arrow keys and Enter open one; Enter with none highlighted shows every result; Escape closes the list.
 - **Keyboard:** press `?` anywhere outside a text field for the list of shortcuts, `/` to jump to search. In the player: Space or K to play or pause, the arrow keys to skip back or forward, F for full screen, M to mute, Escape to leave.
 - **Play** in the browser, resuming where any device left off. The browser tells the server what it can decode. A file it cannot play directly because of its container or its audio (most often E-AC-3, AC-3 or DTS, which browsers do not decode) plays as a converted stream: the video is copied untouched and only the audio is converted to AAC, a fraction of one CPU core, with VCRX's own seek bar. Video the browser cannot decode at all (HEVC in Firefox, AV1 on older machines, VC-1 or MPEG-4 Part 2 anywhere) is transcoded to H.264 with libx264 in the same kind of stream: scaled down to the browser's reported size, never up, with a keyframe every 2 seconds, and HDR tone mapped to SDR for a screen without HDR when the server's ffmpeg has the zscale filter (the Docker image's does; without it HDR looks washed out). A seek starts the new stream exactly where you asked. Each transcode takes one or more CPU cores, so only `VCRX_MAX_TRANSCODES` (default 2, 0 turns it off) run at once and the next viewer is told the server is busy; the server logs at startup whether its ffmpeg can transcode. The usual policy applies: a non-admin needs "May use converted streams", and "Including 4K" for a 4K file. Safari (on a Mac, iPhone or iPad, and every browser on an iPhone or iPad) plays video only from a server that answers byte ranges, which a stream made on the fly cannot, so it gets the same conversions as HLS, which it plays natively: segments of about 4 seconds written under `/cache/hls` while the session plays, with the same limits and policy. The server keeps each Safari stream's files to about 1.5 GB by pausing ffmpeg when it is two minutes ahead of the player and deleting segments a minute behind it, and deletes them all when playback stops, after two idle minutes, and at startup. Subtitles: pick any text track, sidecar or inside the file.
 - **Activity** for admins: now playing with a Stop button, history, stats and users. A movie, show or episode page also shows admins its own History: the latest 20 plays with who, when, device, how much was watched and how far it got, and the totals.
 - **Sign-in:** with `auto_sign_in_user` set, a browser on a trusted network is signed straight in; otherwise it shows a sign-in form. The session is an HttpOnly cookie, and every change the page makes carries a header a cross-site page cannot send.
+
+### Home
+
+Home is built per user on the server, under their access policy, so the web app and the TV app show the same rows. In order: Continue Watching, Recently Added Movies and Recently Added TV (one row per library; several new episodes of a show are one card, "3 new episodes"), holiday and seasonal picks, New Seasons of shows you watch, Because You Watched (titles sharing a director, franchise, lead actors or genres with what you finished last, never ones you have finished), Trending on This Server (plays by everyone in the last week, recent plays weighing more), Recently Released, Top Rated Movies and Shows (IMDb, or TMDb when IMDb has too few votes), Unwatched Gems, three genres of the day, collections marked for Home, Most Watched, Most Watched by You, Rediscover (highly rated titles you watched over a year ago) and a Best of a decade. A row with fewer than four titles is left out (Continue Watching excepted), and each row's See all opens it as a grid of up to 100.
+
+**Customize Home** (Settings > Home, or the button at the bottom of Home) shows or hides each row and moves it up or down, by keyboard or by dragging, and saves at once. The layout is stored on the server (`GET`, `PUT` and `DELETE /api/v1/layout/home`), so it follows you to the TV. An admin can make their layout the default for everyone without their own (`/api/v1/admin/layout/home`).
+
+**Seasons** are matched offline from genres, titles, taglines, plots and NFO tags, by the server's local date: Halloween (October; horror, thriller and the supernatural, plus a family Halloween row, which is the only one a profile with a PG or lower rating ceiling gets), Thanksgiving week, Christmas and the holidays (Nov 25 to Dec 31), Valentine's week and summer blockbusters. `seasons.yaml` in the config directory changes them:
+
+```yaml
+seasons:
+  - id: halloween          # an id from the table turns it off...
+    enabled: false
+  - id: christmas          # ...or replaces it
+    title: Holiday Classics
+    start: "12-01"         # MM-DD, or thanksgiving+N / thanksgiving-N
+    end: "12-25"
+    keywords: [christmas, santa]
+  - id: hockey             # a new id adds a season
+    title: Playoff Hockey
+    start: "04-15"
+    end: "06-15"
+    genres: [Sport]
+    keywords: [hockey]
+```
+
+**TMDb rows** (optional, off by default): `tmdb_home_lists: true` with a TMDb key adds Trending on TMDb and Popular on TMDb, limited to what is in your libraries. The lists refresh every six hours; offline, the last good copy stays.
 
 ### Poster overlays (Kometa style)
 
@@ -148,7 +175,7 @@ Rules use local metadata only: genre, studio, director, writer, actor, country, 
 
 Rebuilds also follow TMDb: after each enrichment pass that matched anything and after a Fix Match, a rebuild runs within seconds, so a deny label lands as soon as the genre or rating that triggers it arrives.
 
-`label:` is how friends' access follows your rules: deny `horror` in a user's policy and a title disappears for them as soon as a rebuild finds it matches, and comes back when it stops matching. VCRX only ever takes off labels it stamped. A label you set by hand or that an NFO file carries is never removed, and an NFO naming a stamped label takes it over. Collections with `visible.library: false` are left out of library collection lists, title pages and Home; `home` and `shared` are stored for Home rows, which do not show collections yet.
+`label:` is how friends' access follows your rules: deny `horror` in a user's policy and a title disappears for them as soon as a rebuild finds it matches, and comes back when it stops matching. VCRX only ever takes off labels it stamped. A label you set by hand or that an NFO file carries is never removed, and an NFO naming a stamped label takes it over. Collections with `visible.library: false` are left out of library collection lists, title pages and Home; `visible.home: true` gives a collection its own row on Home, and `shared` (on unless set false) decides whether that row also reaches users other than admins.
 
 ### Radarr and Sonarr
 
@@ -229,7 +256,9 @@ golangci-lint run
 govulncheck ./...
 ```
 
-To work on the web app or the API against a few generated test clips: `./scripts/dev-server.sh`, then open http://127.0.0.1:3751/. It builds the clips with ffmpeg on first run, serves the web files from `server/web/static` so an edit shows on reload, and signs the local browser in. `server/web/check-js.sh` is the web app's compile check, and `node scripts/web-smoke.mjs` drives every page (at desktop and phone width), all three playback paths (direct, audio converted, video transcoded, and HLS for Safari), Continue Watching removal, search as you type and the shortcuts list in headless Chrome against the dev server; CI runs both.
+To work on the web app or the API against a few generated test clips: `./scripts/dev-server.sh`, then open http://127.0.0.1:3751/. It builds the clips with ffmpeg on first run, serves the web files from `server/web/static` so an edit shows on reload, and signs the local browser in. `server/web/check-js.sh` is the web app's compile check, and `node scripts/web-smoke.mjs` drives every page (at desktop and phone width), all three playback paths (direct, audio converted, video transcoded, and HLS for Safari), Continue Watching removal, search as you type, the shortcuts list, Home's rows and Customize Home in headless Chrome against the dev server; CI runs both. The dev server is a development build (`-tags vcrxdev`): it pins Home's date to `VCRX_DEV_HOME_DATE` (default 2026-10-31, so the Halloween row shows whatever the day) and seeds a play history with `vcrx dev-seed`. Neither exists in a normal build or the image.
+
+`VCRX_HOME_PERF=1 go test ./internal/catalog -run HomePerformance -v` times Home on a generated library of 5,000 films, 500 shows and 20,000 plays.
 
 On NixOS, run `nix-shell` at the repo root first: [shell.nix](shell.nix) provides these tools, plus the Docker client and adb for the TV app. The API contract is [server/api/openapi.yaml](server/api/openapi.yaml), served at `/api/v1/openapi.yaml`; a test fails when it and the registered routes disagree. Migrations are forward-only SQL files in `server/internal/db/migrations`.
 

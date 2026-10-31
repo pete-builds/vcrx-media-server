@@ -38,6 +38,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/config"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
+	"github.com/pete-builds/vcrx-media-server/server/internal/homelists"
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
@@ -111,8 +112,11 @@ func main() {
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		var ok bool
+		if ok, err = devCommand(cmd, args); !ok {
+			fmt.Fprint(os.Stderr, usage)
+			os.Exit(2)
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "vcrx:", err)
@@ -256,7 +260,11 @@ func serve() error {
 	}
 	scanner := &library.Scanner{DB: a.db, Prober: prober, Log: log.With("component", "scanner"), ProbeConcurrency: cfg.ProbeConcurrency}
 	scans := library.NewManager(scanner, log.With("component", "scans"))
-	cat := &catalog.Catalog{DB: a.db}
+	seasons, err := catalog.LoadSeasons(cfg.ConfigDir)
+	if err != nil {
+		return err
+	}
+	cat := &catalog.Catalog{DB: a.db, Seasons: seasons, Today: devHomeDate(log)}
 	authStore := &auth.Store{DB: a.db, TTL: cfg.SessionTTL}
 	// Converted streams that copy the video convert at most the audio, a small
 	// fraction of a core each; four at once is well within nix1's budget.
@@ -360,6 +368,13 @@ func serve() error {
 		go enr.Run(ctx, 2*time.Minute, 15*time.Minute)
 	} else {
 		log.Info("TMDb enrichment is off: set VCRX_TMDB_API_KEY for posters and plots")
+	}
+	switch {
+	case cfg.TMDbHomeLists && cfg.TMDbAPIKey == "":
+		log.Warn("tmdb_home_lists is on but there is no TMDb key, so Home has no TMDb rows")
+	case cfg.TMDbHomeLists:
+		lists := &homelists.Refresher{DB: a.db, TMDb: tmdb.New(cfg.TMDbAPIKey, cfg.TMDbLanguage), Log: log.With("component", "homelists")}
+		go lists.Run(ctx, 6*time.Hour)
 	}
 
 	if cfg.ArrWebhookToken != "" {
