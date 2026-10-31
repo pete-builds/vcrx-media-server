@@ -92,17 +92,23 @@ type Version struct {
 
 type ItemDetail struct {
 	ItemSummary
-	Overview      *string            `json:"overview"`
-	Tagline       *string            `json:"tagline"`
-	ContentRating *string            `json:"content_rating"`
-	Genres        []string           `json:"genres"`
-	Directors     []string           `json:"directors"`
-	Studios       []string           `json:"studios"`
-	Cast          []CastMember       `json:"cast"`
-	Ratings       map[string]float64 `json:"ratings"`
-	Versions      []Version          `json:"versions"`
-	NextEpisode   *ItemSummary       `json:"next_episode"`
-	Collections   []CollectionRef    `json:"collections"`
+	Overview      *string  `json:"overview"`
+	Tagline       *string  `json:"tagline"`
+	ContentRating *string  `json:"content_rating"`
+	Genres        []string `json:"genres"`
+	Directors     []string `json:"directors"`
+	Writers       []string `json:"writers"`
+	Studios       []string `json:"studios"`
+	Countries     []string `json:"countries"`
+	// PremiereDate is the release (or first air) date, YYYY-MM-DD.
+	PremiereDate *string            `json:"premiere_date"`
+	Cast         []CastMember       `json:"cast"`
+	Ratings      map[string]float64 `json:"ratings"`
+	// RatingVotes is how many votes stand behind each of Ratings, when known.
+	RatingVotes map[string]int64 `json:"rating_votes"`
+	Versions    []Version        `json:"versions"`
+	NextEpisode *ItemSummary     `json:"next_episode"`
+	Collections []CollectionRef  `json:"collections"`
 	// Extras are a movie's or show's local trailers, featurettes and the like;
 	// Trailer is the one to play first; ThemeMusic is a show's theme.mp3.
 	Extras     []Extra     `json:"extras"`

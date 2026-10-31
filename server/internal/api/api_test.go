@@ -1385,3 +1385,69 @@ func TestItemDetailCast(t *testing.T) {
 		t.Fatal("cast should be an empty list, never null")
 	}
 }
+
+// The details panel's facts: writers, countries, the release date and the
+// votes behind each rating. An episode shows its show's writers and countries
+// after its own, like its genres; a rating with no count has no votes entry.
+func TestItemDetailFacts(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := f.db.Exec(q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	tag := func(item int64, kind, value string, pos int) {
+		exec(`INSERT INTO item_tags (item_id, kind, value, position) VALUES (?, ?, ?, ?)`, item, kind, value, pos)
+	}
+	tag(f.movieID, "writer", "Second Writer", 1)
+	tag(f.movieID, "writer", "First Writer", 0)
+	tag(f.movieID, "country", "United States of America", 0)
+	tag(f.showID, "writer", "Show Creator", 0)
+	tag(f.showID, "country", "United Kingdom", 0)
+	tag(f.episodeID, "writer", "Episode Writer", 0)
+	exec(`UPDATE items SET premiere_date = '1957-04-10' WHERE id = ?`, f.movieID)
+	exec(`INSERT INTO item_ratings (item_id, source, value, votes) VALUES (?, 'imdb', 9.0, 1010165), (?, 'tmdb', 8.6, NULL)`, f.movieID, f.movieID)
+
+	type facts struct {
+		Writers      []string
+		Countries    []string
+		PremiereDate *string `json:"premiere_date"`
+		Ratings      map[string]float64
+		RatingVotes  map[string]int64 `json:"rating_votes"`
+	}
+	get := func(id int64) facts {
+		t.Helper()
+		var d facts
+		f.do("GET", fmt.Sprintf("/api/v1/items/%d", id), f.adminTok, nil).json(t, &d)
+		return d
+	}
+	m := get(f.movieID)
+	if got := strings.Join(m.Writers, ", "); got != "First Writer, Second Writer" {
+		t.Errorf("movie writers: %s", got)
+	}
+	if got := strings.Join(m.Countries, ", "); got != "United States of America" {
+		t.Errorf("movie countries: %s", got)
+	}
+	if m.PremiereDate == nil || *m.PremiereDate != "1957-04-10" {
+		t.Errorf("premiere date: %v", m.PremiereDate)
+	}
+	if m.Ratings["imdb"] != 9.0 || m.RatingVotes["imdb"] != 1010165 {
+		t.Errorf("imdb: %v, votes %v", m.Ratings, m.RatingVotes)
+	}
+	if _, ok := m.RatingVotes["tmdb"]; ok || m.Ratings["tmdb"] != 8.6 {
+		t.Errorf("tmdb with no count: ratings %v, votes %v", m.Ratings, m.RatingVotes)
+	}
+	e := get(f.episodeID)
+	if got := strings.Join(e.Writers, ", "); got != "Episode Writer, Show Creator" {
+		t.Errorf("episode writers: %s", got)
+	}
+	if got := strings.Join(e.Countries, ", "); got != "United Kingdom" {
+		t.Errorf("episode countries: %s", got)
+	}
+	s := get(f.seasonID)
+	if s.Writers == nil || s.Countries == nil || s.RatingVotes == nil || s.PremiereDate != nil {
+		t.Errorf("season: lists must be empty, never null, and no date: %+v", s)
+	}
+}

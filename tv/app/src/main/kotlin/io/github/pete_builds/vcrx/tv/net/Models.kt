@@ -147,8 +147,16 @@ data class Item(
     @SerialName("content_rating") val contentRating: String? = null,
     val genres: List<String> = emptyList(),
     val directors: List<String> = emptyList(),
+    val writers: List<String> = emptyList(),
     val studios: List<String> = emptyList(),
+    val countries: List<String> = emptyList(),
+    /** Release or first air date, YYYY-MM-DD. */
+    @SerialName("premiere_date") val premiereDate: String? = null,
+    /** Actors in billing order; an episode's guests first. */
+    val cast: List<CastMember> = emptyList(),
     val ratings: Map<String, Double> = emptyMap(),
+    /** How many votes stand behind each of ratings, when known. */
+    @SerialName("rating_votes") val ratingVotes: Map<String, Long> = emptyMap(),
     val versions: List<Version> = emptyList(),
     @SerialName("next_episode") val nextEpisode: Item? = null,
     /** Collections this item is in, such as a film series. */
@@ -162,6 +170,9 @@ data class Item(
     /** A show's theme.mp3. */
     @SerialName("theme_music") val themeMusic: ThemeMusic? = null,
 )
+
+@Serializable
+data class CastMember(val name: String, val role: String? = null)
 
 @Serializable
 data class Extra(
