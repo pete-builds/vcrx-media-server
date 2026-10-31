@@ -7,8 +7,24 @@ import (
 	"net/http"
 	"path/filepath"
 
+	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/fsafe"
+	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
+	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 )
+
+// canPlaySession is CanPlay for whatever a session plays: its version, or for a
+// trailer or other extra (no version), the extra under the same policy.
+func (s *Server) canPlaySession(ctx context.Context, pol policy.Policy, ss playback.StreamSession) (bool, error) {
+	if ss.ExtraID == 0 {
+		return s.Catalog.CanPlay(ctx, pol, ss.VersionID)
+	}
+	_, err := s.Catalog.ExtraForPlayback(ctx, pol, ss.ExtraID)
+	if errors.Is(err, catalog.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
 
 // streamExtra serves an extra's file: a trailer for direct play, with the
 // session from POST /playback/sessions, or a show's theme music, without one.

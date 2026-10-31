@@ -161,8 +161,18 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 	if req.ExtraID != nil {
 		return s.startExtra(ctx, pol, c, req)
 	}
+	// The item itself first: its library, labels and rating. Checking only the
+	// versions would let a friend start a title they cannot see and read its
+	// file name and tracks from the answer.
+	visible, err := s.Catalog.Visible(ctx, pol, req.ItemID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !visible {
+		return nil, nil, catalog.ErrNotFound
+	}
 	var kind, title string
-	err := s.DB.QueryRowContext(ctx, `SELECT kind, title FROM items WHERE id = ?`, req.ItemID).Scan(&kind, &title)
+	err = s.DB.QueryRowContext(ctx, `SELECT kind, title FROM items WHERE id = ?`, req.ItemID).Scan(&kind, &title)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, catalog.ErrNotFound
 	}

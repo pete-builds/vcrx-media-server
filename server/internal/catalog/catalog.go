@@ -174,8 +174,9 @@ func (c *Catalog) queryIDs(ctx context.Context, q string, args ...any) ([]int64,
 	return ids, err
 }
 
-// visible reports whether the caller may see one item.
-func (c *Catalog) visible(ctx context.Context, pol policy.Policy, id int64) (bool, error) {
+// Visible reports whether the caller may see one item. Every route that takes
+// an item id checks this (or a query built on policy.ItemCond) first.
+func (c *Catalog) Visible(ctx context.Context, pol policy.Policy, id int64) (bool, error) {
 	cond, args := pol.ItemCond("i")
 	var n int
 	err := c.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM items i WHERE i.id = ? AND `+cond, append([]any{id}, args...)...).Scan(&n)
@@ -358,7 +359,11 @@ func (c *Catalog) enrich(ctx context.Context, pol policy.Policy, userID int64, b
 			continue
 		}
 		var children, episodes, unplayed int
-		if err := c.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM items ch WHERE ch.parent_id = ? AND ch.missing_since IS NULL`, id).Scan(&children); err != nil {
+		// Only children the caller may see count, so a hidden season is not
+		// betrayed by "3 seasons" over two.
+		chCond, chArgs := pol.ItemCond("ch")
+		if err := c.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM items ch WHERE ch.parent_id = ? AND `+chCond,
+			append([]any{id}, chArgs...)...).Scan(&children); err != nil {
 			return err
 		}
 		epScope := "e.parent_id = ?"
@@ -449,7 +454,7 @@ func (c *Catalog) Home(ctx context.Context, pol policy.Policy, userID int64) ([]
 
 // SetWatched marks a movie or episode, or every episode of a show or season.
 func (c *Catalog) SetWatched(ctx context.Context, pol policy.Policy, userID, itemID int64, played bool, now int64) error {
-	ok, err := c.visible(ctx, pol, itemID)
+	ok, err := c.Visible(ctx, pol, itemID)
 	if err != nil {
 		return err
 	}
@@ -460,12 +465,16 @@ func (c *Catalog) SetWatched(ctx context.Context, pol policy.Policy, userID, ite
 	if err := c.DB.QueryRowContext(ctx, `SELECT kind FROM items WHERE id = ?`, itemID).Scan(&kind); err != nil {
 		return err
 	}
+	// A show or season marks only the episodes the caller may see.
 	targets := []int64{itemID}
+	cond, cargs := pol.ItemCond("e")
 	switch kind {
 	case "season":
-		targets, err = c.queryIDs(ctx, `SELECT id FROM items WHERE parent_id = ? AND kind = 'episode'`, itemID)
+		targets, err = c.queryIDs(ctx, `SELECT e.id FROM items e WHERE e.parent_id = ? AND e.kind = 'episode' AND `+cond,
+			append([]any{itemID}, cargs...)...)
 	case "show":
-		targets, err = c.queryIDs(ctx, `SELECT e.id FROM items s JOIN items e ON e.parent_id = s.id WHERE s.parent_id = ? AND e.kind = 'episode'`, itemID)
+		targets, err = c.queryIDs(ctx, `SELECT e.id FROM items s JOIN items e ON e.parent_id = s.id WHERE s.parent_id = ? AND e.kind = 'episode' AND `+cond,
+			append([]any{itemID}, cargs...)...)
 	}
 	if err != nil {
 		return err
@@ -500,7 +509,7 @@ func (c *Catalog) SetWatched(ctx context.Context, pol policy.Policy, userID, ite
 // another episode. Only the caller's own watch state changes; an item the
 // caller cannot see is ErrNotFound.
 func (c *Catalog) ClearProgress(ctx context.Context, pol policy.Policy, userID, itemID int64, now int64) error {
-	ok, err := c.visible(ctx, pol, itemID)
+	ok, err := c.Visible(ctx, pol, itemID)
 	if err != nil {
 		return err
 	}
