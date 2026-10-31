@@ -115,6 +115,7 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"HEAD", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"GET", "/api/v1/subtitles/{stream_id}", signedIn, s.subtitle},
+		{"GET", "/api/v1/speedtest", signedIn, s.speedTest},
 		{"GET", "/api/v1/admin/libraries", adminOnly, s.adminLibraries},
 		{"POST", "/api/v1/admin/libraries", adminOnly, s.adminCreateLibrary},
 		{"POST", "/api/v1/admin/libraries/{library_id}/scan", adminOnly, s.adminScan},

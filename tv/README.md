@@ -115,6 +115,24 @@ Plain HTTP is allowed because LAN addresses cannot be listed ahead of time (`res
 
 The bearer token is encrypted with an AES-GCM key held in the Android Keystore; only ciphertext reaches the app's private storage, and backup and device transfer are off. The same OkHttp client, and so the same token, carries API calls, artwork, the video stream and subtitles. Requests to any other host never get the token.
 
+## Settings
+
+Settings is the last entry in the left rail. Each page lists its rows with the current value at the right; the focused row adds a one-line description. Everything is stored per server and user, so two people sharing a TV keep their own.
+
+| Page | What it changes |
+|---|---|
+| Subtitles | On or Off for every video (Off means none, forced lines included); when On: always, forced only, or only when the audio is not in your language; first and second language (default: the TV's); style (the TV's caption settings, or custom size, colour, background, edge and position with a live preview) |
+| Playback | Play the next episode and the countdown; Resume (ask, always resume, always start over); skip back and forward sizes; maximum streaming quality, sent as `max_width`, `max_height` and `max_bitrate` |
+| Audio | Prefer the original language, or a preferred language; passthrough to a receiver (off removes the passthrough formats from what the TV reports and decodes everything itself) |
+| Video | HDR10, HDR10+ and HLG; Dolby Vision. Off removes them from what the TV reports |
+| Home screen | Show, hide and reorder the Home rows |
+| Account and server | Who is signed in; switch user or sign out (shows the sign-in form even on a trusted network); change server |
+| About and diagnostics | App and server versions, what this TV plays in plain words, a speed test to the server (`GET /api/v1/speedtest`), clear the image cache, licences and the raw capability list |
+
+Subtitles during playback: the captions or menu key, or the Subtitles button in the controls, turns them on or off in one press; Subtitle track picks one. A choice made while watching sticks to that title, and to the rest of a show's episodes (a title's own choice outranks its show's). Changing the switch, mode or languages in Settings forgets those choices, so the setting always means what it says; Subtitles, Forget choices made while watching does it by hand.
+
+The settings for trailers and skip intro are stored already (`Preferences.trailers`, `Preferences.skipIntro`); their rows appear once `FeatureHooks.TRAILERS` and `FeatureHooks.SKIP_INTRO` are on.
+
 ## Remote control
 
 | Where | Key | Does |
@@ -123,8 +141,9 @@ The bearer token is encrypted with an AES-GCM key held in the Android Keystore; 
 | Browse | Back | Content to the left rail, rail to Home, Home's rail out of the app |
 | Login | Back | Back to Connect |
 | Player, controls hidden | Center, Play/Pause | Play or pause |
-| | Left, Right | Seek 10 s; hold to go faster (30 s, then 60 s steps), applied on release |
-| | Up, Down | Show the controls: play or pause, back and forward 10 s, audio, subtitles |
+| | Left, Right | Seek by the skip size (10 s unless changed in Settings); hold to go faster (30 s, then 60 s steps), applied on release |
+| | Captions or Menu | Subtitles on or off |
+| | Up, Down | Show the controls: play or pause, back and forward, subtitles on or off, subtitle track, audio |
 | | Back | Stop and return to Details |
 | Player, controls shown | Back | Hide the controls |
 
@@ -134,11 +153,11 @@ Pressing Home during playback ends the session and saves the position. The final
 
 Every play request says the app takes a converted stream (`fmp4_stream`). When the server's decision is anything but direct play, it answers with protocol `fmp4`: a fragmented MP4 piped from ffmpeg, with the video copied (or re-encoded once the server can) and the audio copied or converted to AAC. The app plays it as a progressive stream. It cannot be seeked by byte range, so every seek (left, right, the 10 s buttons) asks `GET /api/v1/playback/sessions/{id}/seek` where a stream from that point starts, a keyframe at or before it, and opens a new stream there. The position on screen and in every playback event is that start plus the player's own time, so resume points and Activity read the same as direct play.
 
-The bar shows which kind it is: Audio converted, Repackaged, or Video converted. Subtitles are not offered on a converted stream yet: the stream carries none, and side-loaded files would drift after the first seek. A converted stream that ends well before the file does is treated as cut off, not finished, so the item is not marked played.
+The bar shows which kind it is: Audio converted, Repackaged, or Video converted. A converted stream carries no subtitles, and side-loaded files would drift after the first seek, since each stream restarts at zero. So the app fetches the session's WebVTT copy of a text track (`webvtt_subtitles`; an embedded track answers 202 while the server reads it out, and the app waits), parses it once with Media3's WebVTT parser, and draws the cues active at the file position (start plus player time) itself, in the same caption style. They stay in sync through any number of seeks. Picture subtitles (PGS, VobSub) cannot be drawn that way: they show in direct play only, and the subtitle picker says so on a converted stream. A converted stream that ends well before the file does is treated as cut off, not finished, so the item is not marked played.
 
 ## Brand
 
-Follows `brand/README.md` and `brand/reference/VCRX-brand-spec-board.png`. Black `#000000` is the ground everywhere; VCRX Orange `#FF5F00` marks the logo, focus, accents, primary actions and headings; body text is white and secondary text light gray. Display text, screen titles, row titles and labels are Rajdhani SemiBold and Bold, uppercase with wide tracking (0.15 em); interface and body text is Inter Regular and Medium. A focused card gets a 3dp orange border and a slight scale, a focused button fills orange, and nothing glows or casts a shadow. Corners are 6 to 8dp, matching the rounded icon. The Connect screen shows the wordmark and the tagline. In the player the chrome is black and the progress bar and scrubber are orange; subtitles follow the TV's own caption settings.
+Follows `brand/README.md` and `brand/reference/VCRX-brand-spec-board.png`. Black `#000000` is the ground everywhere; VCRX Orange `#FF5F00` marks the logo, focus, accents, primary actions and headings; body text is white and secondary text light gray. Display text, screen titles, row titles and labels are Rajdhani SemiBold and Bold, uppercase with wide tracking (0.15 em); interface and body text is Inter Regular and Medium. A focused card gets a 3dp orange border and a slight scale, a focused button fills orange, and nothing glows or casts a shadow. Corners are 6 to 8dp, matching the rounded icon. The Connect screen shows the wordmark and the tagline. In the player the chrome is black and the progress bar and scrubber are orange; subtitles follow the TV's own caption settings unless Settings, Subtitles, Style is Custom.
 
 Brand assets, copied unmodified from `brand/android/res/` (generated there by `brand/tools/make-assets.py`): the adaptive launcher icon with a monochrome layer (`mipmap-anydpi-v26/ic_launcher.xml`, `ic_launcher_round.xml`, and `ic_launcher_foreground.png` and `ic_launcher_monochrome.png` per density), legacy `ic_launcher.png` and `ic_launcher_round.png` for mdpi to xxxhdpi, `drawable-xhdpi/banner.png` and `drawable-xxxhdpi/banner.png` (the TV banner), `drawable-nodpi/brand_wordmark.png` and `brand_mark.png`, and `values/brand_colors.xml`. The wordmark is raster artwork shown at its own aspect ratio; the name is never re-typed in a font as the logo.
 
@@ -172,7 +191,8 @@ It needs `/dev/kvm` on the Docker host, publishes no ports and uses no network. 
 | Sent back to Sign in | The server answered 401: the token expired or was revoked. Sign in again. |
 | "Cannot play this here" | The server refused (403 policy) or cannot adapt that file for this device yet (422). The message is the server's. |
 | "Server busy" | The server is converting as many streams as it allows (503 `busy`). Retry in a minute, or stop a converted stream on another screen. |
-| No sound on some files | Settings, About shows whether the FFmpeg extension loaded and lists every decoder and passthrough format the TV reported. |
+| No sound on some files | Settings, About and diagnostics shows whether the FFmpeg extension loaded and lists every decoder and passthrough format the TV reported. If a soundbar or receiver is silent, try Settings, Audio, Passthrough off. |
+| Playback stutters | Settings, About and diagnostics runs a speed test to the server. Settings, Playback, Maximum streaming quality caps what the server sends (once it can convert video). |
 | `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | The installed copy was signed with a different key. Restore `tv/signing/` from backup, or `adb uninstall io.github.pete_builds.vcrx.tv` and reinstall (this clears the sign in). |
 | `INSTALL_FAILED_NO_MATCHING_ABIS` | The device is 32-bit x86. Add `x86` to `abiFilters` in `app/build.gradle.kts` and to the ABI list in the Dockerfile's ffmpeg stage. |
 | Logs | `adb logcat --pid=$(adb shell pidof io.github.pete_builds.vcrx.tv)` |
