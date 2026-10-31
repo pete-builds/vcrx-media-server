@@ -52,6 +52,9 @@ type Server struct {
 	// TrustedNetworks (POST /api/v1/auth/auto).
 	AutoSignInUser  string
 	TrustedNetworks []netip.Prefix
+	// AllowedHosts are names, besides IP addresses and localhost, that a
+	// request's Host may carry. Anything else is refused (DNS rebinding).
+	AllowedHosts []string
 
 	// WebDir, when set, serves the web app from disk instead of the copy built
 	// into the binary. For development only.
@@ -128,7 +131,7 @@ func (s *Server) Handler() http.Handler {
 		writeError(w, http.StatusNotFound, "not_found", "No such API route.")
 	})
 	mux.Handle("/", s.webApp())
-	return s.recoverer(s.logRequests(mux))
+	return s.recoverer(s.logRequests(s.checkHost(mux)))
 }
 
 // HTTPServer wraps Handler with timeouts that suit long range requests: no write

@@ -57,8 +57,15 @@ type Config struct {
 	// AutoSignInUser is signed in without a password for clients on
 	// TrustedNetworks. Empty (the default) turns that off.
 	AutoSignInUser string `yaml:"auto_sign_in_user"`
-	// TrustedNetworks defaults to loopback, private LAN ranges and Tailscale.
+	// TrustedNetworks are the networks auto sign-in trusts. There is no default:
+	// "every private range" also covers the Docker and Incus bridges on a server
+	// host, so a compromised container could sign in. List your own networks.
 	TrustedNetworks []string `yaml:"trusted_networks"`
+	// AllowedHosts are host names the server answers to besides IP addresses
+	// and localhost (for example a Tailscale MagicDNS name). A request for any
+	// other name is refused, which stops DNS rebinding: a web page that points
+	// its own domain at this server cannot talk to it.
+	AllowedHosts []string `yaml:"allowed_hosts"`
 
 	// WebhookURLs receive playback events (play, stop, refused, terminated). A
 	// Discord webhook URL gets Discord's message shape. The URLs carry tokens, so
@@ -169,9 +176,7 @@ func Load() (Config, error) {
 	list("VCRX_TRUSTED_PROXIES", &c.TrustedProxies)
 	str("VCRX_AUTO_SIGN_IN_USER", &c.AutoSignInUser)
 	list("VCRX_TRUSTED_NETWORKS", &c.TrustedNetworks)
-	if len(c.TrustedNetworks) == 0 {
-		c.TrustedNetworks = DefaultTrustedNetworks
-	}
+	list("VCRX_ALLOWED_HOSTS", &c.AllowedHosts)
 	str("VCRX_TMDB_LANGUAGE", &c.TMDbLanguage)
 	str("VCRX_TMDB_COUNTRY", &c.TMDbCountry)
 	str("VCRX_TMDB_API_KEY", &c.TMDbAPIKey)
@@ -203,11 +208,6 @@ func Load() (Config, error) {
 	}
 	return c, errors.Join(errs...)
 }
-
-// DefaultTrustedNetworks are loopback, RFC 1918, link-local, IPv6 unique local,
-// and Tailscale's IPv4 and IPv6 ranges.
-var DefaultTrustedNetworks = []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
-	"169.254.0.0/16", "fe80::/10", "fc00::/7", "100.64.0.0/10", "fd7a:115c:a1e0::/48"}
 
 func splitList(v string) []string {
 	var out []string

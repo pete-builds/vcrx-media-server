@@ -151,7 +151,10 @@ Any other media server on the same host keeps running untouched; VCRX only reads
 
 ## Security
 
-- Optional password-free sign-in on your own networks: set `auto_sign_in_user` in `vcrx.yaml` and clients on `trusted_networks` (loopback, private LAN ranges and Tailscale by default) are signed in as that user, each device with its own session. Off by default.
+- Optional password-free sign-in on your own networks: set `auto_sign_in_user` and `trusted_networks` in `vcrx.yaml` and clients on those networks are signed in as that user, each device with its own session. Off by default. There is no default network list on purpose: "every private range" on a server host also covers its Docker and Incus bridges, so a compromised container could sign in. List your LAN subnets and your Tailscale devices, and leave out loopback unless nothing on the host proxies to VCRX. Whoever is on those networks gets that user's access, admin included if the user is an admin.
+- The server answers only to IP addresses, `localhost` and the names in `allowed_hosts`. That stops DNS rebinding, where a web page points its own domain at your server and calls it from your browser. Add a MagicDNS or local name there if you use one.
+- Stopping a stream in Activity ends that session; it does not lock the user out. Disable the account to do that.
+- Browsers scope cookies by host, not port: every other web app on the same host and address receives the web app's session cookie. Give VCRX its own host name if other apps there are not trusted.
 - LAN-first. Never forward VCRX's port on your router. Admin routes answer only from loopback and private addresses unless `VCRX_ADMIN_ALLOW_REMOTE=true`.
 - Passwords are hashed with argon2id. Tokens are random, stored only as SHA-256 hashes, and expire after 90 idle days. Failed logins are rate limited per address and per username.
 - Every file is reached through a version id; paths are resolved with symlinks evaluated and must stay inside their library root, which must sit under `VCRX_MEDIA_ROOTS`.

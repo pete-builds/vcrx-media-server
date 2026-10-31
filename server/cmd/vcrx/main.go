@@ -241,7 +241,10 @@ func serve() error {
 	if err != nil {
 		return fmt.Errorf("trusted networks: %w", err)
 	}
-	if cfg.AutoSignInUser != "" {
+	switch {
+	case cfg.AutoSignInUser != "" && len(trustedNets) == 0:
+		log.Warn("auto_sign_in_user is set but trusted_networks is empty, so nobody is signed in without a password; list your LAN and Tailscale networks")
+	case cfg.AutoSignInUser != "":
 		log.Info("sign-in without a password is on for trusted networks", "user", cfg.AutoSignInUser, "networks", cfg.TrustedNetworks)
 	}
 
@@ -264,7 +267,7 @@ func serve() error {
 		Subtitles:        subtitles.New(cfg.SubtitleCacheDir(), cfg.FFmpegPath, log.With("component", "subtitles")),
 		LibraryRoots:     func(ctx context.Context) (map[string]string, error) { return rootStates(ctx, adm) },
 		AdminAllowRemote: cfg.AdminAllowRemote, TrustedProxies: proxies,
-		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets,
+		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets, AllowedHosts: cfg.AllowedHosts,
 	}
 	if users, err := authStore.CountUsers(ctx); err == nil && users == 0 {
 		log.Warn("no users yet: create the admin with `docker compose exec vcrx vcrx user add -username <name> -admin`")
