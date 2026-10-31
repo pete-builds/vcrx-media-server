@@ -27,7 +27,7 @@ func TestArrWebhook(t *testing.T) {
 		f.h.ServeHTTP(w, req)
 		return w
 	}
-	const lan, token = "192.168.86.40:1", "a-long-shared-token-123"
+	const lan, token = "192.168.1.40:1", "a-long-shared-token-123"
 	if w := call("/api/v1/hooks/arr?token="+token, lan); w.Code != 404 {
 		t.Fatalf("off: %d", w.Code)
 	}

@@ -187,7 +187,7 @@ func (f *fixture) do(method, path, token string, body any, hdr ...string) resp {
 		rd = bytes.NewReader(b)
 	}
 	req := httptest.NewRequest(method, path, rd)
-	req.RemoteAddr = "192.168.86.50:40000"
+	req.RemoteAddr = "192.168.1.50:40000"
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -531,7 +531,7 @@ func TestPlaybackResumeLoop(t *testing.T) {
 	}
 	f.do("GET", "/api/v1/admin/activity/sessions", f.adminTok, nil).json(t, &hist)
 	if len(hist.Sessions) != 2 || hist.Sessions[1].Decision != "direct_play" || hist.Sessions[1].DeviceName == nil ||
-		*hist.Sessions[1].DeviceName != "Test TV" || hist.Sessions[1].IP == nil || *hist.Sessions[1].IP != "192.168.86.50" {
+		*hist.Sessions[1].DeviceName != "Test TV" || hist.Sessions[1].IP == nil || *hist.Sessions[1].IP != "192.168.1.50" {
 		t.Fatalf("history: %+v", hist.Sessions)
 	}
 	var events int
@@ -603,7 +603,7 @@ func TestTrustedNetworkSignIn(t *testing.T) {
 	f.srv.AutoSignInUser = "pete"
 	f.h = f.srv.Handler()
 
-	for _, ip := range []string{"192.168.86.50:1", "100.101.102.103:1"} {
+	for _, ip := range []string{"192.168.1.50:1", "100.101.102.103:1"} {
 		r := f.do("POST", "/api/v1/auth/auto", "", dev, "RemoteAddr", ip)
 		if r.code != 200 {
 			t.Fatalf("%s: %d %s", ip, r.code, r.body)
@@ -950,14 +950,14 @@ func TestEpisodeNextIsTheFollowingEpisode(t *testing.T) {
 
 func TestHostCheckStopsDNSRebinding(t *testing.T) {
 	f := newFixture(t)
-	p, _ := netip.ParsePrefix("192.168.86.0/24")
+	p, _ := netip.ParsePrefix("192.168.1.0/24")
 	f.srv.AutoSignInUser, f.srv.TrustedNetworks = "pete", []netip.Prefix{p}
 	f.h = f.srv.Handler()
 	call := func(host, path string) int {
 		t.Helper()
 		req := httptest.NewRequest("POST", path, strings.NewReader(`{"device":{"id":"x","name":"x"}}`))
 		req.Host = host
-		req.RemoteAddr = "192.168.86.50:1"
+		req.RemoteAddr = "192.168.1.50:1"
 		w := httptest.NewRecorder()
 		f.h.ServeHTTP(w, req)
 		return w.Code
@@ -970,7 +970,7 @@ func TestHostCheckStopsDNSRebinding(t *testing.T) {
 		}
 	}
 	// IP addresses, localhost and configured names pass.
-	for _, host := range []string{"192.168.86.20:3750", "192.168.86.20", "[fd7a:115c:a1e0::1]:3750", "localhost:3750", "example.com", "EXAMPLE.COM."} {
+	for _, host := range []string{"192.168.1.20:3750", "192.168.1.20", "[fd7a:115c:a1e0::1]:3750", "localhost:3750", "example.com", "EXAMPLE.COM."} {
 		if code := call(host, "/api/v1/auth/auto"); code != 200 {
 			t.Errorf("Host %s: %d, want 200", host, code)
 		}

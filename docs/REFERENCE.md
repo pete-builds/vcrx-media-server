@@ -4,7 +4,7 @@ The project was called Flex Media Server when this reference was written and was
 
 Written 2026-10-30 from a verified research run. This public copy omits details of the author's network exposure that the private original records. Every fact about Pete's environment here was read live that day; every external fact is cited in the research report, which this file summarizes for building:
 
-`/home/pete/code/ai-cli-workspace/research-reports/open-source-plex-alternatives-and-flex-feature-list.md`
+the research report on open-source Plex alternatives (kept in Pete's private workspace, not this repo)
 
 If this file and the report disagree, the report wins. If either disagrees with a live system, the live system wins: re-check before relying on anything marked "2026-10-30".
 
@@ -26,7 +26,7 @@ Pete's thesis: a modern, privacy-first media platform with no subscriptions, adv
 
 ## 3. Target environment (verified 2026-10-30)
 
-**Server host: nix1**, `http://192.168.86.20:<port>` (always write it that way, never the bare hostname).
+**Server host: nix1**, on the home LAN (its address lives in the private workspace, not this public repo).
 
 | Fact | Value |
 |---|---|
@@ -34,9 +34,9 @@ Pete's thesis: a modern, privacy-first media platform with no subscriptions, adv
 | Docker Compose | 5.0.1 |
 | CPU and GPU | Intel i7-8700, "CoffeeLake-S GT2 [UHD Graphics 630]" |
 | Render node | `/dev/dri/renderD128`, group `render`, GID **993** (`card0` is group `video`, GID 44) |
-| Media mount on host | `/mnt/media`, an autofs CIFS mount of `//192.168.86.40/PlexMediaServer`, SMB 3.1.1, mounted **read-write** on the host |
+| Media mount on host | `/mnt/media`, an autofs CIFS mount of the Synology's media share, SMB 3.1.1, mounted **read-write** on the host |
 | Top folders under `/mnt/media` | `Movies`, `TV`, `Concerts`, `Music`, plus `AppData`, `Downloads`, `Pre-Roll`, `_backups` and Minecraft folders. Configure libraries per folder; never hardcode these. |
-| Plex | container `plex` (`lscr.io/linuxserver/plex`), host network, port 32400. Config at `/home/pete/docker/plex/config`. Do not touch. |
+| Plex | container `plex` (`lscr.io/linuxserver/plex`), host network, port 32400. Do not touch. |
 | Kometa | container `kometa`, runs 00:00, 06:00, 12:00, 18:00 ET against Plex. Do not touch. |
 | nix1 cron to stay clear of | 04:30 plex-split-keeper, 04:45 plex-update (skips when anyone streams) |
 | Ports already listening | 22 53 443 3000 3001 3100 3680 3690 3691 3694 to 3742 (most of that range), 4000 4566 5201 5433 to 5436 5678 8080 8082 to 8084 8443 8686 8765 8888 9090 9093 9100 10000 11437 18201 18202 20241 to 20245 32400 32401 32600 and some high ports |
@@ -46,7 +46,7 @@ Pete's thesis: a modern, privacy-first media platform with no subscriptions, adv
 
 In the VCRX compose file, mount media as `/mnt/media/<folder>:/media/<folder>:ro`, keep `/config` and `/cache` as separate writable volumes, and pass the GPU with `devices: [/dev/dri/renderD128]` and `group_add: ["993"]`. Run as a non-root user and drop capabilities.
 
-**The *arr apps** run as native packages on the Synology (192.168.86.40): Radarr on 8310, Sonarr on 8989, SABnzbd on 8080 (Mine/Self-Hosted/reference/tank-common-tasks.md). They write files on the NAS, so nix1 never sees those writes as local filesystem events.
+**The *arr apps** run as native packages on the Synology: Radarr, Sonarr and SABnzbd. They write files on the NAS, so nix1 never sees those writes as local filesystem events.
 
 **Library scale:** Movies 375, TV Shows 206, Music 22, Concerts 5 (Plex counts, 2026-10-30). Design for 10x that, not 1000x.
 
@@ -157,7 +157,7 @@ Pete's Kometa config, read 2026-10-30, is the spec. Kometa keeps definitions out
 - Two custom smart-filter collections that stamp hidden labels, which control what friends see:
 
 ```yaml
-# VCRX equivalent of /home/pete/docker/kometa/config/4k-labels.yml and horror-labels.yml
+# VCRX equivalent of Kometa's 4k-labels.yml and horror-labels.yml
 collections:
   - name: 4K Resolution
     library: Movies
