@@ -69,7 +69,7 @@ The reference says to group files into one item only when they share a folder an
 
 ### Merge order for the 2026-10-30 overnight stack
 
-Server: #3, #4, #5, #6, #7, #8, #10, #11, #12, #13, each based on the one before; do not deploy #3 without #12. TV: #9, based on #3 only. After the stack is merged and deployed, add to nix1's `deploy/data/config/vcrx.yaml`: `auto_sign_in_user: pete`, `trusted_networks: [192.168.86.0/24, 10.0.20.0/24]` plus the Tailscale IPs of Pete's own devices, `imdb_ratings: true`, and the overlays from #7's description. The APK has to be signed on the NixOS box, which holds `tv/signing/`.
+Server: #3, #4, #5, #6, #7, #8, #10, #11, #12, #13, each based on the one before; do not deploy #3 without #12. TV: #9, based on #3 only. After the stack is merged and deployed, add to nix1's `deploy/data/config/vcrx.yaml`: `auto_sign_in_user: pete`, `trusted_networks` naming the home LAN and TV subnets plus the Tailscale IPs of Pete's own devices (the exact list lives in the workspace, not this public repo), `imdb_ratings: true`, and the overlays from #7's description. The APK has to be signed on the NixOS box, which holds `tv/signing/`.
 
 ## Acceptance test
 
