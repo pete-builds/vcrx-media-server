@@ -1,8 +1,16 @@
 import { signOut } from "../api.js";
 import { h, toast } from "../dom.js";
 import { state, go } from "../app.js";
+import { librariesTab, usersTab } from "./manage.js";
 
-export async function settingsView() {
+export async function settingsView({ match }) {
+  const tab = (match && match[1]) || "account";
+  const admin = !!(state.me && state.me.is_admin);
+  if (admin && tab !== "account") {
+    const body = h("div", {});
+    const cleanup = await (tab === "libraries" ? librariesTab : usersTab)(body);
+    return { el: h("div", { class: "settings wide-settings" }, h("h1", {}, "Settings"), tabs(tab, admin), body), title: "Settings", cleanup };
+  }
   const me = state.me || {};
   const server = state.server || {};
   const out = h("button", { class: "btn", type: "button" }, "Sign out of this browser");
@@ -21,6 +29,7 @@ export async function settingsView() {
   return {
     el: h("div", { class: "settings" },
       h("h1", {}, "Settings"),
+      tabs("account", admin),
       h("section", { class: "section" },
         h("dl", {},
           h("dt", {}, "Signed in as"), h("dd", {}, `${me.username || ""}${me.is_admin ? " (admin)" : ""}`),
@@ -33,4 +42,11 @@ export async function settingsView() {
           h("a", { href: "fonts/licenses/FONTS.txt" }, "details"), ")."))),
     title: "Settings",
   };
+}
+
+function tabs(active, admin) {
+  if (!admin) return null;
+  return h("nav", { class: "tabs", "aria-label": "Settings" },
+    [["account", "Account"], ["libraries", "Libraries"], ["users", "Users"]]
+      .map(([k, label]) => h("a", { href: `#/settings/${k}`, class: k === active ? "active" : "" }, label)));
 }
