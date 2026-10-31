@@ -153,6 +153,7 @@ private fun Notice(text: String) {
 private fun Chrome(controller: PlaybackController) {
     val controls = controller.overlay == Overlay.Controls
     val playFocus = remember { FocusRequester() }
+    val subtitlesFocus = remember { FocusRequester() }
     Column(Modifier.fillMaxSize()) {
         if (controls) {
             Row(
@@ -195,21 +196,27 @@ private fun Chrome(controller: PlaybackController) {
                         primary = true,
                         modifier = Modifier.focusRequester(playFocus),
                     )
-                    BrandButton("Back ${seconds(controller.skipBackMs)}", onClick = { controller.skip(-controller.skipBackMs) }, icon = AppIcons.Rewind)
-                    BrandButton("Forward ${seconds(controller.skipForwardMs)}", onClick = { controller.skip(controller.skipForwardMs) }, icon = AppIcons.Forward)
-                    // One press turns subtitles on or off; the next button picks the track.
+                    // Beside Play, where Down lands: one press turns subtitles on or
+                    // off; the next button picks the track.
                     BrandButton(
                         if (controller.subtitlesOn) "Subtitles on" else "Subtitles off",
                         onClick = controller::toggleSubtitles,
                         icon = AppIcons.Subtitles,
+                        modifier = Modifier.focusRequester(subtitlesFocus),
                     )
                     BrandButton("Subtitle track", onClick = { controller.dialog = TrackKind.Subtitles })
+                    BrandButton("Back ${seconds(controller.skipBackMs)}", onClick = { controller.skip(-controller.skipBackMs) }, icon = AppIcons.Rewind)
+                    BrandButton("Forward ${seconds(controller.skipForwardMs)}", onClick = { controller.skip(controller.skipForwardMs) }, icon = AppIcons.Forward)
                     BrandButton("Audio", onClick = { controller.dialog = TrackKind.Audio }, icon = AppIcons.Audio)
                 }
             }
         }
     }
-    if (controls) LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
+    if (controls) {
+        LaunchedEffect(Unit) {
+            runCatching { (if (controller.controlsFocus == ControlsFocus.Subtitles) subtitlesFocus else playFocus).requestFocus() }
+        }
+    }
 }
 
 private fun seconds(ms: Long): String = if (ms % 60_000 == 0L) "${ms / 60_000}m" else "${ms / 1000}s"

@@ -71,6 +71,22 @@ enum class Overlay { Hidden, Info, Controls }
 
 enum class TrackKind { Audio, Subtitles }
 
+/** Which button has focus when the controls open. */
+enum class ControlsFocus {
+    Play,
+    Subtitles,
+    ;
+
+    companion object {
+        /**
+         * Down opens the controls on the Subtitles button, so captions are two
+         * presses (Down, OK) on a remote with no captions key; Up opens on Play.
+         */
+        fun forKey(keyCode: Int): ControlsFocus =
+            if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN) Subtitles else Play
+    }
+}
+
 data class TrackOption(val label: String, val selected: Boolean, val supported: Boolean, val apply: () -> Unit)
 
 /**
@@ -107,6 +123,8 @@ class PlaybackController(
     var phase by mutableStateOf<Phase>(Phase.Starting)
         private set
     var overlay by mutableStateOf(Overlay.Hidden)
+        private set
+    var controlsFocus by mutableStateOf(ControlsFocus.Play)
         private set
     var dialog by mutableStateOf<TrackKind?>(null)
     var positionMs by mutableStateOf(0L)
@@ -645,7 +663,8 @@ class PlaybackController(
         showInfo()
     }
 
-    fun showControls() {
+    fun showControls(focus: ControlsFocus = ControlsFocus.Play) {
+        controlsFocus = focus
         overlay = Overlay.Controls
         scheduleHide(CONTROLS_MS)
     }
@@ -676,7 +695,8 @@ class PlaybackController(
 
     /**
      * Remote keys before Compose sees them. With the controls hidden: center plays or
-     * pauses, left and right seek (hold to go faster), up and down show the controls,
+     * pauses, left and right seek (hold to go faster), up shows the controls on Play and
+     * down on Subtitles (so captions are Down, OK), the captions or menu key toggles subtitles,
      * Back leaves. With the controls up, Compose moves focus and Back hides them.
      */
     fun handleKey(event: KeyEvent, exit: () -> Unit): Boolean {
@@ -729,7 +749,7 @@ class PlaybackController(
                 true
             }
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
-                if (down) showControls()
+                if (down) showControls(ControlsFocus.forKey(event.keyCode))
                 true
             }
             KeyEvent.KEYCODE_BACK -> {

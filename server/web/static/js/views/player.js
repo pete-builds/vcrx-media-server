@@ -3,6 +3,7 @@ import { h, icon, errorBox, episodeCode, clock, toast } from "../dom.js";
 import { capabilities } from "../caps.js";
 import { skipButtons } from "./skip.js";
 import { subtitleTiming, subtitleSearch } from "./subtitle-tools.js";
+import { state } from "../app.js";
 
 // The player: asks the server for a session with this browser's capabilities,
 // plays it, and reports start, pause, seek, progress and stop so resume points
@@ -113,9 +114,36 @@ export async function playerView({ match, params }) {
       textTrack.addCue(new VTTCue(Math.max(0, c.start - shift), c.end - shift, c.text));
     }
   }
+  // CC: one press (the button or C) turns subtitles off, or on with the
+  // language this profile last chose in this browser, else the browser's, a
+  // full track before a forced one, else the first full track.
+  const ccKey = `vcrx.cc.${(state.me && state.me.id) || 0}`;
+  const ccBtn = subs.length ? h("button", { class: "btn btn-small cc-btn", type: "button", "aria-pressed": "false",
+    title: "Subtitles on or off (C)" }, "CC") : null;
+  function toggleCC() {
+    if (!subSel || !subs.length) return;
+    if (subChoice !== "") { subSel.value = ""; subSel.dispatchEvent(new Event("change")); return; }
+    const want = [localStorage.getItem(ccKey), navigator.language].filter(Boolean).map(englishLanguage);
+    const pick = (lang, forced) => subs.findIndex((t) => !!t.is_forced === forced && englishLanguage(t.language || "") === lang);
+    let i = -1;
+    for (const lang of want) {
+      i = pick(lang, false);
+      if (i < 0) i = pick(lang, true);
+      if (i >= 0) break;
+    }
+    if (i < 0) i = subs.findIndex((t) => !t.is_forced);
+    if (i < 0) i = 0;
+    subSel.value = String(i);
+    subSel.dispatchEvent(new Event("change"));
+  }
+  if (ccBtn) ccBtn.addEventListener("click", toggleCC);
+
   if (subSel) subSel.addEventListener("change", async () => {
     if (subSel.value === "search") { subSel.value = subChoice; finder.open(); return; }
     subChoice = subSel.value;
+    if (ccBtn) ccBtn.setAttribute("aria-pressed", String(subChoice !== ""));
+    const chosen = subChoice === "" ? null : subs[Number(subChoice)];
+    if (chosen && chosen.language) localStorage.setItem(ccKey, chosen.language);
     timing.el.hidden = subChoice === "";
     const token = ++subToken;
     if (subSel.value === "") { shownCues = null; applyCues(); return; }
@@ -234,7 +262,7 @@ export async function playerView({ match, params }) {
   // direct play has no VCRX controls.
   shell.append(...[video, h("div", { class: "top" }, backBtn, h("div", { class: "ptitle" }, title), audioSel,
     converted ? h("span", { class: "pill", title: session.reason }, convertedLabel(session.decision)) : null,
-    subSel, timing && timing.el), controls, status, overlay, finder && finder.el].filter(Boolean));
+    ccBtn, subSel, timing && timing.el), controls, status, overlay, finder && finder.el].filter(Boolean));
   skipButtons({ shell, video, session, pos, seekTo, durationMs: dur, hasNext: !!item.next_episode });
 
   video.addEventListener("loadedmetadata", () => {
@@ -351,6 +379,7 @@ export async function playerView({ match, params }) {
     else if (e.key === "ArrowLeft") seekTo(Math.max(0, pos() - (converted ? 30000 : 10000)));
     else if (e.key === "f") fullscreen();
     else if (e.key === "m") video.muted = !video.muted;
+    else if (e.key === "c") toggleCC();
     else if (e.key === "Escape" && !document.fullscreenElement) back();
   };
   document.addEventListener("keydown", onKey);
@@ -387,6 +416,16 @@ function subLabel(t) {
 function audioLabel(t) {
   const ch = t.channels ? (t.channels >= 6 ? `${t.channels - 1}.1` : t.channels === 2 ? "stereo" : `${t.channels} ch`) : "";
   return [t.title || (t.language ? languageName(t.language) : "Unknown"), (t.codec || "").toUpperCase(), ch].filter(Boolean).join(" · ");
+}
+
+// englishLanguage names a language code in English, so "eng", "en" and
+// "en-US" all read "English" and compare equal.
+function englishLanguage(code) {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "language" }).of(code.split("-")[0]) || code;
+  } catch {
+    return code;
+  }
 }
 
 function languageName(code) {
