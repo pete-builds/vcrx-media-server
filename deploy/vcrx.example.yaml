@@ -9,6 +9,10 @@ server_name: VCRX
 # them gets that user's access, so leave it off on a network you share.
 #auto_sign_in_user: admin
 #trusted_networks: [192.168.1.0/24, 100.101.102.103]
+# For a shared TV: show "Who's watching?" on those networks instead, and start
+# it on auto_sign_in_user. Profiles with a PIN still ask for it, and an admin's
+# profile asks for its PIN or password.
+#auto_sign_in_picker: true
 
 # Names the server answers to besides IP addresses and localhost (DNS rebinding
 # protection). Add a Tailscale MagicDNS or local name if you open VCRX by name.

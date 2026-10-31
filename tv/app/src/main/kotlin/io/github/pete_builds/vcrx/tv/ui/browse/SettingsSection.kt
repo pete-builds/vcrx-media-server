@@ -29,6 +29,7 @@ import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
 import io.github.pete_builds.vcrx.tv.ui.components.BrandRow
 import io.github.pete_builds.vcrx.tv.ui.components.Label
+import io.github.pete_builds.vcrx.tv.ui.profiles.SwitchProfileRow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -47,6 +48,7 @@ fun SettingsSection(focus: BrowseFocus) {
         Info("Server", graph.settings.serverName ?: stringResource(R.string.server_product), graph.settings.serverUrl.orEmpty())
         Info("Signed in as", graph.settings.username ?: "Unknown user", null)
         Info("App", "${stringResource(R.string.app_title)} ${BuildConfig.VERSION_NAME}", null)
+        SwitchProfileRow()
         BrandRow(onClick = { actions.openConnect() }, icon = Icons.Filled.Refresh, modifier = Modifier.focusRequester(first)) {
             Label("Change server")
         }

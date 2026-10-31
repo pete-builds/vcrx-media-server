@@ -82,6 +82,58 @@ paths:
         "200": { description: Logged in, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } } }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/profiles:
+    get:
+      operationId: listProfiles
+      summary: >-
+        The household's profiles for the "Who's watching?" picker. Answers a household member's session, or
+        no session at all from a trusted network when the server sets auto_sign_in_picker (GET /api/v1/server
+        says profile_picker). Anyone else gets 401, and a signed-in user outside the household 403.
+      security: [{ bearer: [] }, { cookie: [] }, {}]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [profiles, current_id, focus_id]
+                properties:
+                  profiles: { type: array, items: { $ref: "#/components/schemas/Profile" } }
+                  current_id: { type: [integer, "null"], description: The caller's own profile; null from the picker. }
+                  focus_id: { type: [integer, "null"], description: "The profile to focus first: the caller's, or auto_sign_in_user's in the picker." }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /api/v1/profiles/{user_id}/avatar:
+    get:
+      operationId: profileAvatar
+      summary: A household profile's uploaded picture, a 256 px square JPEG. 404 when it has none (draw the initials).
+      security: [{ bearer: [] }, { cookie: [] }, {}]
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: The picture, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/auth/switch:
+    post:
+      operationId: switchProfile
+      summary: >-
+        Switch this device to another household profile and get a fresh session for it. The caller's own
+        session, if any, ends. A profile with a PIN needs it (or its password); an admin profile reached from a
+        restricted profile or the picker always needs its PIN or password, on any network. Wrong PINs are
+        limited per address and per profile: 5 per 15 minutes, counted separately on and off the LAN. Requests
+        without a bearer token must send X-VCRX-Client.
+      security: [{ bearer: [] }, { cookie: [] }, {}]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SwitchRequest" } } }
+      responses:
+        "200": { description: Switched, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } } }
+        "401": { description: "pin_required, credential_required, wrong_pin, or no session", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /api/v1/hooks/arr:
     post:
       operationId: arrWebhook
@@ -502,6 +554,101 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
 
+  /api/v1/admin/profiles:
+    get:
+      operationId: adminListProfiles
+      summary: Every user with their household settings, members or not.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [profiles]
+                properties:
+                  profiles: { type: array, items: { $ref: "#/components/schemas/AdminProfile" } }
+    post:
+      operationId: adminCreateProfile
+      summary: >-
+        Add a managed household profile: no password, never an admin, reached only by switching to it. A kid's
+        profile gets a PG ceiling unless another is given. library_ids omitted grants every library.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ProfileInput" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/AdminProfile" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/profiles/{user_id}:
+    put:
+      operationId: adminUpdateProfile
+      summary: Change household membership, the kid flag or the rating ceiling. Omitted fields stay as they are.
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                household: { type: boolean }
+                kid: { type: boolean, description: Admins cannot be kids. Turning it on with no ceiling set sets PG. }
+                max_content_rating: { type: string, enum: ["", G, PG, PG-13, R, NC-17], description: '"" removes the ceiling.' }
+      responses:
+        "204": { description: Saved }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/profiles/{user_id}/pin:
+    put:
+      operationId: adminSetPIN
+      summary: Set a profile's PIN, 4 to 8 digits, stored as an argon2id hash. Clears its wrong-PIN count.
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin]
+              properties:
+                pin: { type: string, pattern: "^[0-9]{4,8}$" }
+      responses:
+        "204": { description: Saved }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: adminClearPIN
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Cleared }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/profiles/{user_id}/avatar:
+    put:
+      operationId: adminSetAvatar
+      summary: >-
+        Upload a profile picture (JPEG, PNG or GIF, up to 10 MB). The server keeps a 256 px centred square
+        re-encoded as JPEG in its config directory, which drops the photo's metadata.
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { image/*: { schema: { type: string, format: binary } } }
+      responses:
+        "204": { description: Saved }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: adminDeleteAvatar
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/admin/libraries:
     get:
       operationId: adminListLibraries
@@ -1105,6 +1252,7 @@ components:
         version: { type: string }
         api_version: { type: integer, const: 1 }
         auto_sign_in: { type: boolean, description: "True when this client may sign in without a password (POST /api/v1/auth/auto)." }
+        profile_picker: { type: boolean, description: "True when this client should show the profile picker (GET /api/v1/profiles, POST /api/v1/auth/switch) instead of signing in automatically; POST /api/v1/auth/auto then answers 409 choose_profile." }
     AutoLoginRequest:
       type: object
       required: [device]
@@ -1129,6 +1277,49 @@ components:
         password: { type: string, format: password }
         device: { $ref: "#/components/schemas/Device" }
         cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers. Cookie-authenticated requests that change something must send the X-VCRX-Client header." }
+    Profile:
+      type: object
+      required: [id, name, is_admin, kid, has_pin, color, avatar_url, needs]
+      properties:
+        id: { type: integer }
+        name: { type: string, description: Display name, or the username. }
+        is_admin: { type: boolean }
+        kid: { type: boolean }
+        has_pin: { type: boolean }
+        color: { type: string, description: Avatar background for the initials, e.g. "#1d4ed8". }
+        avatar_url: { type: [string, "null"], description: The uploaded picture; null shows the initials. }
+        needs:
+          type: string
+          enum: [none, pin, password]
+          description: What switching to this profile asks of this caller. password means an admin with no PIN, reached from a restricted profile or the picker.
+    AdminProfile:
+      allOf:
+        - $ref: "#/components/schemas/Profile"
+        - type: object
+          properties:
+            username: { type: string }
+            household: { type: boolean }
+            managed: { type: boolean, description: No password; reached only by switching. }
+            disabled: { type: boolean }
+            max_content_rating: { type: string, description: '"" for no ceiling.' }
+    ProfileInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 32 }
+        kid: { type: boolean, default: false }
+        max_content_rating: { type: string, enum: ["", G, PG, PG-13, R, NC-17] }
+        pin: { type: string, pattern: "^[0-9]{4,8}$" }
+        library_ids: { type: array, items: { type: integer }, description: Omit for every library. }
+    SwitchRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: { type: integer }
+        pin: { type: string, description: The target profile's PIN, when it has one. }
+        password: { type: string, format: password, description: The target's password instead of its PIN (not for managed profiles). }
+        device: { $ref: "#/components/schemas/Device" }
+        cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers." }
     LoginResponse:
       type: object
       required: [token, user, expires_at]

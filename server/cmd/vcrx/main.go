@@ -38,6 +38,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/config"
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
+	"github.com/pete-builds/vcrx-media-server/server/internal/household"
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
@@ -298,6 +299,8 @@ func serve() error {
 	switch {
 	case cfg.AutoSignInUser != "" && len(trustedNets) == 0:
 		log.Warn("auto_sign_in_user is set but trusted_networks is empty, so nobody is signed in without a password; list your LAN and Tailscale networks")
+	case cfg.AutoSignInUser != "" && cfg.AutoSignInPicker:
+		log.Info("trusted networks get the profile picker", "starts_on", cfg.AutoSignInUser, "networks", cfg.TrustedNetworks)
 	case cfg.AutoSignInUser != "":
 		log.Info("sign-in without a password is on for trusted networks", "user", cfg.AutoSignInUser, "networks", cfg.TrustedNetworks)
 	}
@@ -332,6 +335,10 @@ func serve() error {
 	// does nothing until switched on in Settings.
 	srv.Newsletter = &newsletter.Service{DB: a.db, Hooks: hooks, Log: log.With("component", "newsletter")}
 	go srv.Newsletter.Run(ctx)
+	// Profiles: five wrong PINs per window, half the sign-in limit, because a
+	// PIN is four to eight digits rather than a password.
+	srv.Household = &household.Store{DB: a.db, AvatarDir: cfg.AvatarDir()}
+	srv.PINLimiter, srv.ProfilePicker = auth.NewLimiter(5, 15*time.Minute), cfg.AutoSignInPicker
 	if users, err := authStore.CountUsers(ctx); err == nil && users == 0 {
 		log.Warn("no users yet: create the admin with `docker compose exec vcrx vcrx user add -username <name> -admin`")
 	}

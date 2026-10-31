@@ -40,6 +40,20 @@ class ServerApi(
     suspend fun autoLogin(request: AutoLoginRequest): LoginResponse =
         send(post("/api/v1/auth/auto", request, AutoLoginRequest.serializer()), LoginResponse.serializer(), authRoute = false)
 
+    /** The household for "Who's watching?". Needs no token from a trusted network when the server shows the picker. */
+    suspend fun profiles(): ProfilesResponse = get("/api/v1/profiles", ProfilesResponse.serializer())
+
+    /**
+     * Switches this device to a household profile and returns its new session; the
+     * server ends the current one. A 401 here is a missing or wrong PIN or password
+     * (its code says which), not a lost session. The client header is required of
+     * requests without a token, as the CSRF rule for the picker.
+     */
+    suspend fun switchProfile(request: SwitchRequest): LoginResponse {
+        val call = post("/api/v1/auth/switch", request, SwitchRequest.serializer()).newBuilder().header("X-VCRX-Client", "tv").build()
+        return send(call, LoginResponse.serializer(), authRoute = false)
+    }
+
     suspend fun logout() {
         send<Unit>(Request.Builder().url(url("/api/v1/auth/logout")).post(EMPTY_BODY).build(), null, authRoute = true)
     }

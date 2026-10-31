@@ -24,6 +24,10 @@ data class CollectionRoute(val collectionId: Long, val name: String)
 @Serializable
 object AboutRoute
 
+/** "Who's watching?", the household profile picker. */
+@Serializable
+object ProfilesRoute
+
 /** Navigation any screen may need, without threading callbacks through every layer. */
 class AppActions(private val nav: NavController, private val activity: Activity) {
     /** Connect on top of the current screen; Back returns to it. */
@@ -44,6 +48,20 @@ class AppActions(private val nav: NavController, private val activity: Activity)
     /** Starts playback. [fromStart] ignores the saved position; otherwise the server resumes it. */
     fun play(itemId: Long, title: String, versionId: Long? = null, fromStart: Boolean = false) {
         activity.startActivity(PlayerActivity.intent(activity, itemId, versionId, fromStart, title))
+    }
+
+    /** The profile picker on top of the current screen; Back returns to it. */
+    fun openProfiles() = nav.navigate(ProfilesRoute) { launchSingleTop = true }
+
+    /** The profile picker as the only screen: after connecting, before anyone is signed in. */
+    fun toProfiles() = nav.navigate(ProfilesRoute) {
+        popUpTo(nav.graph.id) { inclusive = true }
+        launchSingleTop = true
+    }
+
+    /** Back out of the picker: to the screen under it, or out of the app when it is the only one. */
+    fun leaveProfiles() {
+        if (!nav.popBackStack()) activity.finish()
     }
 
     fun toLogin() = nav.navigate(LoginRoute) {

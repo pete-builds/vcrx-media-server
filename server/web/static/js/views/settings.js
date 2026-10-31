@@ -3,6 +3,7 @@ import { h, toast } from "../dom.js";
 import { state, go } from "../app.js";
 import { librariesTab, usersTab } from "./manage.js";
 import { newsletterTab } from "./newsletter.js";
+import { householdPanel } from "./household.js";
 
 export async function settingsView({ match }) {
   const tab = (match && match[1]) || "account";
@@ -10,7 +11,8 @@ export async function settingsView({ match }) {
   if (admin && tab !== "account") {
     const body = h("div", {});
     const cleanup = await ({ libraries: librariesTab, newsletter: newsletterTab }[tab] || usersTab)(body);
-    return { el: h("div", { class: "settings wide-settings" }, h("h1", {}, "Settings"), tabs(tab, admin), body), title: "Settings", cleanup };
+    const household = tab === "users" ? householdPanel(() => usersTab(body)) : null;
+    return { el: h("div", { class: "settings wide-settings" }, h("h1", {}, "Settings"), tabs(tab, admin), body, household), title: "Settings", cleanup };
   }
   const me = state.me || {};
   const server = state.server || {};
@@ -22,7 +24,7 @@ export async function settingsView({ match }) {
       toast(e.message);
     }
     state.me = null;
-    go("/login");
+    go("/"); // the sign-in form, or "Who's watching?" where the server shows it
   });
   const note = server.auto_sign_in
     ? "This network signs in without a password, so the next visit signs straight back in."

@@ -78,6 +78,10 @@ func CheckPassword(hash, password string) bool {
 // dummyHash makes a login for an unknown user cost the same as a wrong password.
 var dummyHash, _ = HashPassword("vcrx-timing-equalizer")
 
+// NoPassword is the password_hash of a managed household profile, which has
+// no password and is reached only by switching to it. No password matches it.
+const NoPassword = "!no-password"
+
 type User struct {
 	ID          int64
 	Username    string
@@ -141,8 +145,10 @@ func (s *Store) CreateUser(ctx context.Context, username, password, displayName 
 	if displayName != "" {
 		dn = displayName
 	}
-	res, err := s.DB.ExecContext(ctx, `INSERT INTO users (username, display_name, password_hash, is_admin, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`, username, dn, hash, isAdmin, now, now)
+	// Admins are part of the household from the start, so the profile
+	// picker always has someone in it.
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO users (username, display_name, password_hash, is_admin, household, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, username, dn, hash, isAdmin, isAdmin, now, now)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return User{}, ErrUsernameTaken
@@ -201,6 +207,12 @@ func (s *Store) Login(ctx context.Context, username, password string, dev Device
 	}
 	if err != nil {
 		return "", Session{}, err
+	}
+	if hash == NoPassword {
+		// A managed profile cannot sign in with a password; answer as slowly
+		// as a wrong one, so its name cannot be told apart.
+		CheckPassword(dummyHash, password)
+		return "", Session{}, ErrInvalidCredentials
 	}
 	if !CheckPassword(hash, password) || u.Disabled {
 		return "", Session{}, ErrInvalidCredentials
