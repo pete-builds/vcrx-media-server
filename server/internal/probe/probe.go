@@ -100,6 +100,15 @@ type FFprobe struct {
 
 // Probe runs ffprobe on path, which must be absolute.
 func (f *FFprobe) Probe(ctx context.Context, path string) (*Result, error) {
+	out, err := f.run(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(out, path)
+}
+
+// run returns ffprobe's JSON for one file: format and streams, tags included.
+func (f *FFprobe) run(ctx context.Context, path string) ([]byte, error) {
 	if !filepath.IsAbs(path) {
 		return nil, fmt.Errorf("probe %q: path must be absolute", path)
 	}
@@ -130,7 +139,7 @@ func (f *FFprobe) Probe(ctx context.Context, path string) (*Result, error) {
 	if stdout.truncated {
 		return nil, fmt.Errorf("ffprobe output exceeds %d bytes", maxOutput)
 	}
-	return Parse(stdout.Bytes(), path)
+	return stdout.Bytes(), nil
 }
 
 // Version returns ffprobe's first version line, so the server can fail loudly

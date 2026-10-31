@@ -75,6 +75,10 @@ func TestYAMLFile(t *testing.T) {
 		t.Fatalf("unknown key: %v", err)
 	}
 	write("libraries:\n  - name: Music\n    kind: music\n    path: /media/Music\n")
+	if _, err := Load(); err != nil {
+		t.Fatalf("a music library refused: %v", err)
+	}
+	write("libraries:\n  - name: Books\n    kind: book\n    path: /media/Books\n")
 	if _, err := Load(); err == nil {
 		t.Fatal("unsupported library kind accepted")
 	}

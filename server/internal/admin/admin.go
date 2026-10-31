@@ -91,8 +91,8 @@ func (in *LibraryInput) normalize() error {
 	if in.Name == "" || len(in.Name) > 100 {
 		return errors.New("library name must be 1 to 100 characters")
 	}
-	if in.Kind != "movie" && in.Kind != "show" {
-		return errors.New("kind must be movie or show")
+	if in.Kind != "movie" && in.Kind != "show" && in.Kind != "music" {
+		return errors.New("kind must be movie, show or music")
 	}
 	if in.Grouping == "" {
 		in.Grouping = "folder"
@@ -187,6 +187,7 @@ func (a *Admin) Libraries(ctx context.Context) ([]Library, error) {
 func (a *Admin) libraries(ctx context.Context, where string, args ...any) ([]Library, error) {
 	rows, err := a.DB.QueryContext(ctx, `SELECT id, name, kind, root_path, grouping, scan_interval_minutes,
 			(SELECT COUNT(*) FROM items i WHERE i.library_id = libraries.id AND i.parent_id IS NULL AND i.missing_since IS NULL)
+			+ (SELECT COUNT(*) FROM music_albums a WHERE a.library_id = libraries.id AND a.missing_since IS NULL)
 		FROM libraries `+where+` ORDER BY name COLLATE NOCASE`, args...)
 	if err != nil {
 		return nil, err

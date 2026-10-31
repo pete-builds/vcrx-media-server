@@ -19,6 +19,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -40,6 +41,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
+	"github.com/pete-builds/vcrx-media-server/server/internal/music"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
@@ -328,6 +330,14 @@ func serve() error {
 		AutoSignInUser: cfg.AutoSignInUser, TrustedNetworks: trustedNets, AllowedHosts: cfg.AllowedHosts,
 	}
 	srv.SmartCollections = smart
+	// Music libraries: listings, covers, and tracks played directly or
+	// converted to AAC or Opus through the same ffmpeg as video.
+	if err := rmx.DetectAudio(ctx); err != nil {
+		log.Warn("could not ask ffmpeg about libopus; music converts to AAC only", "err", err)
+	}
+	mcat := &music.Catalog{DB: a.db}
+	srv.Music = &api.Music{Catalog: mcat, Player: &music.Player{DB: a.db, Catalog: mcat, Remux: rmx},
+		Covers: &music.Covers{Catalog: mcat, FFmpeg: cfg.FFmpegPath, CacheDir: filepath.Join(cfg.ArtworkCacheDir(), "music")}}
 	// The weekly newsletter checks once a minute whether its time has come; it
 	// does nothing until switched on in Settings.
 	srv.Newsletter = &newsletter.Service{DB: a.db, Hooks: hooks, Log: log.With("component", "newsletter")}
@@ -618,7 +628,7 @@ func libraryCmd(args []string) error {
 	sub, args := args[0], args[1:]
 	fs := flag.NewFlagSet("library "+sub, flag.ContinueOnError)
 	name := fs.String("name", "", "library name")
-	kind := fs.String("kind", "", "movie or show")
+	kind := fs.String("kind", "", "movie, show or music")
 	path := fs.String("path", "", "root path inside the container (add), or folder under the root (scan)")
 	grouping := fs.String("grouping", "folder", "folder or title_year")
 	force := fs.Bool("force", false, "scan even if most files appear to be missing")

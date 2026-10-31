@@ -5,6 +5,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"embed"
 	"errors"
 	"fmt"
@@ -165,26 +166,68 @@ func migrateTo(ctx context.Context, conn *sql.DB, backupDir string, log *slog.Lo
 	}
 	for _, m := range ms[current:] {
 		start := time.Now()
-		tx, err := conn.BeginTx(ctx, nil)
-		if err != nil {
+		if err := apply(ctx, conn, m); err != nil {
 			return applied, err
-		}
-		if _, err := tx.ExecContext(ctx, m.sql); err != nil {
-			_ = tx.Rollback()
-			return applied, fmt.Errorf("migration %s: %w", m.name, err)
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
-			m.version, m.name, time.Now().UnixMilli()); err != nil {
-			_ = tx.Rollback()
-			return applied, err
-		}
-		if err := tx.Commit(); err != nil {
-			return applied, fmt.Errorf("migration %s: commit: %w", m.name, err)
 		}
 		applied++
 		log.Info("migration applied", "version", m.version, "name", m.name, "took", time.Since(start).String())
 	}
 	return applied, nil
+}
+
+// apply runs one migration in its own transaction. A migration with a Go step
+// (see steps.go) runs on one connection with foreign keys off, which SQLite's
+// procedure for rebuilding a table requires, and must leave every foreign key
+// intact before it commits.
+func apply(ctx context.Context, conn *sql.DB, m migration) error {
+	step, err := m.step()
+	if err != nil {
+		return err
+	}
+	c, err := conn.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Close() }()
+	if step != nil {
+		// PRAGMA foreign_keys is a no-op inside a transaction, so it is set
+		// before BEGIN, and put back before the connection returns to the pool.
+		if _, err := c.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return err
+		}
+		defer func() {
+			if _, err := c.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys = ON`); err != nil {
+				// Never hand a connection without foreign keys back to the pool.
+				_ = c.Raw(func(any) error { return driver.ErrBadConn })
+			}
+		}()
+	}
+	tx, err := c.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if step != nil {
+		if err := step(ctx, tx); err != nil {
+			return fmt.Errorf("migration %s: %w", m.name, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, m.sql); err != nil {
+		return fmt.Errorf("migration %s: %w", m.name, err)
+	}
+	if step != nil {
+		if err := foreignKeyCheck(ctx, tx); err != nil {
+			return fmt.Errorf("migration %s: %w", m.name, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
+		m.version, m.name, time.Now().UnixMilli()); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("migration %s: commit: %w", m.name, err)
+	}
+	return nil
 }
 
 // Backup writes a consistent copy of the live database into dir with VACUUM INTO

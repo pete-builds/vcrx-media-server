@@ -39,7 +39,7 @@ export async function librariesTab(body) {
           });
           return h("tr", {},
             h("td", {}, h("a", { href: `#/library/${l.id}` }, l.name)),
-            h("td", {}, l.kind === "movie" ? "Movies" : "TV"),
+            h("td", {}, { movie: "Movies", show: "TV", music: "Music" }[l.kind] || l.kind),
             h("td", { class: "num" }, l.item_count),
             h("td", { class: "faint" }, l.root_path),
             h("td", {}, scanSummary(l.last_scan)),

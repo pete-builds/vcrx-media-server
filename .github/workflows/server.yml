@@ -94,8 +94,9 @@ jobs:
       - name: Start the dev server and wait for its first scans
         run: |
           VCRX_DEV_DIR="$RUNNER_TEMP/vcrx-dev" ./scripts/dev-server.sh > "$RUNNER_TEMP/dev.log" 2>&1 &
+          # One scan line per library: Movies, TV and Music.
           for _ in $(seq 1 180); do
-            [ "$(grep -c '^scan ' "$RUNNER_TEMP/dev.log" || true)" -ge 2 ] && exit 0
+            [ "$(grep -c '^scan ' "$RUNNER_TEMP/dev.log" || true)" -ge 3 ] && exit 0
             sleep 1
           done
           echo "dev server did not finish its scans"; tail -50 "$RUNNER_TEMP/dev.log"; exit 1

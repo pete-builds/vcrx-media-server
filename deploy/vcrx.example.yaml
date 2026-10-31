@@ -45,3 +45,10 @@ libraries:
     scan_interval_minutes: 60
     #overlays:
     #  - { type: ribbon }   # TOP RATED: IMDb 8.0+ with 25,000+ votes; min_rating, min_votes, text
+  # Music: mount the folder read-only in compose.yaml first, for example
+  # /mnt/media/Music:/media/Music:ro. Live show folders (a date in the name plus
+  # an info .txt, an .ffp or .md5, or a source such as sbd) become live albums.
+  #- name: Music
+  #  kind: music
+  #  path: /media/Music
+  #  scan_interval_minutes: 60

@@ -87,6 +87,68 @@ if [ ! -f "$kettle" ]; then
     -c:v mpeg4 -q:v 4 -g 240 -c:a libmp3lame -ac 2 "$kettle"
 fi
 
+# Music: invented artists and albums of sine and chirp tones, tagged by ffmpeg.
+# A studio album with a cover.jpg and ReplayGain, a compilation without an
+# album artist whose MP3s carry their own cover, an ALAC track browsers cannot
+# decode (it plays converted), and a live show as tapers ship it: etree names,
+# an info file, an .ffp of the FLAC fingerprints and an .md5, with tracks that
+# run into each other for the gapless player.
+music="$media/Music"
+song() { # out seconds source codec [ffmpeg metadata and options]
+  local out="$1" secs="$2" src="$3" codec="$4"
+  shift 4
+  [ -f "$out" ] && return
+  mkdir -p "$(dirname "$out")"
+  ffmpeg -loglevel error -y -f lavfi -i "$src:duration=$secs" "$@" -c:a "$codec" "$out"
+}
+md5of() { if command -v md5sum > /dev/null; then md5sum "$1" | cut -d' ' -f1; else md5 -q "$1"; fi; }
+if [ ! -d "$music" ]; then
+  echo "dev-server: building sample music in $music"
+  album="$music/Glass Harbor/Signal Fires (2019)"
+  n=0
+  for t in "Low Tide:330" "Breakwater:392" "Undertow:440"; do
+    n=$((n + 1))
+    song "$album/0$n - ${t%%:*}.flac" 12 "sine=frequency=${t##*:}" flac -metadata title="${t%%:*}" -metadata artist="Glass Harbor" \
+      -metadata album_artist="Glass Harbor" -metadata album="Signal Fires" -metadata track="$n/3" -metadata date=2019-04-02 \
+      -metadata genre=Rock -metadata REPLAYGAIN_TRACK_GAIN="-3.10 dB" -metadata REPLAYGAIN_ALBUM_GAIN="-3.40 dB"
+  done
+  ffmpeg -loglevel error -y -f lavfi -i "color=c=0x14506b:s=600x600" -frames:v 1 "$album/cover.jpg"
+  sampler="$music/Compilations/Night Market Sampler"
+  ffmpeg -loglevel error -y -f lavfi -i "color=c=0x6b1b4f:s=500x500" -frames:v 1 "$dir/sampler.png"
+  n=0
+  for t in "Neon Rain:Lumen Drive:523" "Static Bloom:Cedar Static:587"; do
+    n=$((n + 1))
+    title="${t%%:*}" rest="${t#*:}"
+    mkdir -p "$sampler"
+    ffmpeg -loglevel error -y -f lavfi -i "sine=frequency=${rest##*:}:duration=10" -i "$dir/sampler.png" -map 0:a -map 1:v \
+      -c:v mjpeg -disposition:v attached_pic -metadata title="$title" -metadata artist="${rest%%:*}" \
+      -metadata album="Night Market Sampler" -metadata track="$n" -metadata date=2021 -c:a libmp3lame -b:a 192k "$sampler/0$n $title.mp3"
+  done
+  rm -f "$dir/sampler.png"
+  song "$music/Cedar Static/Low Orbit/01 Apogee.m4a" 10 "sine=frequency=659" alac -metadata title=Apogee \
+    -metadata artist="Cedar Static" -metadata album_artist="Cedar Static" -metadata album="Low Orbit" -metadata track=1 -metadata date=2022
+  show="$music/Glass Harbor/gh2024-06-14.sbd.miller.flac16"
+  n=0
+  for t in "Low Tide:200" "Breakwater:300" "Undertow:400"; do
+    n=$((n + 1))
+    # A rising chirp, so a gap between tracks would be audible.
+    song "$show/gh2024-06-14d1t0$n.flac" 5 "aevalsrc=sin(2*PI*(${t##*:}+40*t)*t):s=44100" flac -metadata title="${t%%:*}" \
+      -metadata artist="Glass Harbor"
+  done
+  {
+    printf 'Glass Harbor\r\n2024-06-14\r\nThe Lantern Room\r\nPortland, OR\r\n\r\n'
+    printf 'Source: SBD > Zoom F8 > SD\r\nLineage: SD > WAV > Audacity > FLAC (level 8)\r\nTaper: Mo Ellery\r\n\r\n'
+    printf 'Set 1:\r\nd1t01 Low Tide ->\r\nd1t02 Breakwater ->\r\nd1t03 Undertow\r\n'
+  } > "$show/gh2024-06-14.sbd.miller.flac16.txt"
+  : > "$show/gh2024-06-14.sbd.miller.flac16.ffp"
+  : > "$show/gh2024-06-14.sbd.miller.flac16.md5"
+  for f in "$show"/*.flac; do
+    # The fingerprint is the MD5 of the decoded audio, kept in STREAMINFO.
+    printf '%s:%s\r\n' "$(basename "$f")" "$(od -An -tx1 -j26 -N16 "$f" | tr -d ' \n')" >> "$show/gh2024-06-14.sbd.miller.flac16.ffp"
+    printf '%s *%s\n' "$(md5of "$f")" "$(basename "$f")" >> "$show/gh2024-06-14.sbd.miller.flac16.md5"
+  done
+fi
+
 # NFO ratings let the poster overlays show without network access; the optional
 # fifth argument is more NFO XML, such as an invented cast.
 nfo() { # dir file rating votes [extra-xml]
@@ -120,6 +182,10 @@ libraries:
     scan_interval_minutes: 60
     overlays:
       - { type: ribbon }
+  - name: Music
+    kind: music
+    path: $media/Music
+    scan_interval_minutes: 60
 YAML
 
 export VCRX_CONFIG_DIR="$dir/config" VCRX_CACHE_DIR="$dir/cache" VCRX_MEDIA_ROOTS="$media"
@@ -144,5 +210,5 @@ for _ in $(seq 1 50); do
   curl -fsS "http://127.0.0.1:$port/healthz" > /dev/null 2>&1 && break
   sleep 0.2
 done
-for lib in Movies TV; do "$dir/vcrx" library scan -name "$lib" || true; done
+for lib in Movies TV Music; do "$dir/vcrx" library scan -name "$lib" || true; done
 wait "$server"

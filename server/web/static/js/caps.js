@@ -62,3 +62,28 @@ export function isSafari() {
   const ua = navigator.userAgent;
   return /iPhone|iPad|iPod/.test(ua) || (/Safari\//.test(ua) && !/Chrome\/|Chromium\/|Edg\/|Firefox\//.test(ua));
 }
+
+// What this browser's <audio> plays, for music: containers by the names the
+// server uses (flac, mp3, m4a, ogg, wav ...) and codecs by ffprobe's names,
+// with "pcm" for WAV. Chrome, for one, has no ALAC, so ALAC plays converted.
+export function audioCapabilities() {
+  const a = document.createElement("audio");
+  const can = (type) => { const r = a.canPlayType(type); return r === "probably" || r === "maybe"; };
+  const containers = new Set(), codecs = new Set();
+  const add = (type, codec, ...names) => {
+    if (!can(type)) return;
+    codecs.add(codec);
+    for (const n of names) containers.add(n);
+  };
+  add("audio/flac", "flac", "flac");
+  add("audio/mpeg", "mp3", "mp3");
+  add('audio/mp4; codecs="mp4a.40.2"', "aac", "m4a", "mp4");
+  add("audio/aac", "aac", "aac");
+  add('audio/mp4; codecs="alac"', "alac", "m4a", "mp4");
+  add('audio/mp4; codecs="flac"', "flac", "m4a", "mp4");
+  add('audio/ogg; codecs="opus"', "opus", "ogg", "opus");
+  add('audio/webm; codecs="opus"', "opus", "webm");
+  add('audio/ogg; codecs="vorbis"', "vorbis", "ogg");
+  add('audio/wav; codecs="1"', "pcm", "wav");
+  return { containers: [...containers], audio_codecs: [...codecs].map((codec) => ({ codec, max_channels: 8, decoder: "browser" })) };
+}
