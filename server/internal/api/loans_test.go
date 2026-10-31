@@ -139,6 +139,7 @@ func sessionID(t *testing.T, r resp) (string, string) {
 // the owner chose), its subtitles, and nothing else in the library, including
 // a guessed id of another title.
 func TestLoanTokenSeesOneTitle(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	other, otherV := f.addMovie("Other Film")
 	b := f.borrow(f.movieID, nil)
@@ -202,6 +203,7 @@ func TestLoanTokenSeesOneTitle(t *testing.T) {
 
 // Streaming only: the borrower never gets a whole file, by any route.
 func TestLoanIsStreamOnly(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	b := f.borrow(f.movieID, map[string]any{"allow_transcode": true})
 	if got := wholeFileRoutes(t, f, f.srv.Routes(), b.token); len(got) > 0 {
@@ -212,6 +214,7 @@ func TestLoanIsStreamOnly(t *testing.T) {
 
 // A loan lasts 24 hours to 7 days, 72 by default, and ends on its own.
 func TestLoanExpiry(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	for _, h := range []int{23, 169} {
 		if r := f.lend(f.movieID, map[string]any{"hours": h}); r.code != 400 {
@@ -255,6 +258,7 @@ func TestLoanExpiry(t *testing.T) {
 // One loan per copy: a second loan of a title that is out is refused, by the
 // handler and by the database's unique index, until it comes back.
 func TestOneLoanPerCopy(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	b := f.borrow(f.movieID, nil)
 	wantError(t, "a second loan", f.lend(f.movieID, map[string]any{"name": "Ana"}), 409, "on_loan")
@@ -296,6 +300,7 @@ func TestOneLoanPerCopy(t *testing.T) {
 // friend, another invited device, and the admin who owns it. It stays on the
 // shelf, saying when it is due back. Streams of it open at lending time stop.
 func TestLentTitleRefusesEveryoneElse(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	other := f.invite(map[string]any{"library_ids": []int64{f.libraryID("Movies")}, "name": "Another phone"})
 	who := map[string]string{"the owner (admin)": f.adminTok, "a friend": f.friendTok, "another invited device": other.token}
@@ -359,6 +364,7 @@ func TestLentTitleRefusesEveryoneElse(t *testing.T) {
 // "Be kind, rewind." Revoking the borrower's device from Devices, or the
 // borrower signing out, returns it the same way.
 func TestReturnEarly(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	b := f.borrow(f.movieID, nil)
 	var path string
@@ -438,6 +444,7 @@ func TestReturnEarly(t *testing.T) {
 // When a loan runs out, a stream the borrower has open stops within the
 // minute, ending with "Be kind, rewind."
 func TestLoanExpiryCutsOpenStreams(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	b := f.borrow(f.movieID, nil)
 	sid, _ := sessionID(t, f.tryPlay(b.token, f.movieID, nil))
@@ -462,6 +469,7 @@ func TestLoanExpiryCutsOpenStreams(t *testing.T) {
 // with the title, on any signed-in route, even after the expired session is
 // purged; another refused device is not.
 func TestBeKindRewind(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	b := f.borrow(f.movieID, nil)
 	if r := f.do("GET", "/api/v1/me", b.token, nil); r.code != 200 || !strings.Contains(string(r.body), `"loan":{`) {
@@ -491,6 +499,7 @@ func TestBeKindRewind(t *testing.T) {
 
 // Activity lists every loan: who, when, and how it ended.
 func TestLoansInActivity(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	other, _ := f.addMovie("Other Film")
 	b := f.borrow(f.movieID, nil)
@@ -531,6 +540,7 @@ func TestLoansInActivity(t *testing.T) {
 // everyone else (the owner included) neither lists nor plays it until it comes
 // back, and a trailer playing when the tape went out stops.
 func TestLoanCoversExtras(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	trailer := filepath.Join(f.root, "Film 2001 1080p", "Trailers", "Teaser.mkv")
 	if err := os.MkdirAll(filepath.Dir(trailer), 0o755); err != nil {
