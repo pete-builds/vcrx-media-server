@@ -33,6 +33,10 @@ object StreamKinds {
         }
     }
 
+    /** A stream URL asking for the audio track at stream [index]; unchanged when null (the server chooses). */
+    fun withAudio(url: String, index: Int?): String =
+        if (index == null) url else url + (if ('?' in url) "&" else "?") + "audio=$index"
+
     /** The seek endpoint: the session's seek_url, or the documented route for servers that omit it. */
     fun seekPath(session: PlaybackSession): String =
         session.stream.seekUrl?.takeIf { it.isNotBlank() } ?: "/api/v1/playback/sessions/${session.sessionId}/seek"

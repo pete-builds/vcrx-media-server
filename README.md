@@ -17,7 +17,7 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 | Works now | Comes later |
 |---|---|
 | Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, smart collections and hidden labels from YAML rules, genre and decade filters | Online lists (IMDb Top 250 and the like), playlists, automatic director and studio collections |
-| Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
+| Local accounts and per-user access: library grants, a resolution ceiling, a content-rating ceiling, label allow and deny lists, converting allowed or not, all edited in Settings > Users and enforced on every route (a test walks them all) | Access settings in the TV app |
 | Direct play over HTTP with Range; converted streams for clients that ask for them (fragmented MP4, or HLS for Safari: video copied, or transcoded to H.264 when the client cannot decode it; audio copied or converted to AAC); sidecar and embedded text subtitles (also as WebVTT for browsers), subtitle search and download from OpenSubtitles (optional), a per-user subtitle delay | Video transcoding for the TV app (HLS), picture subtitle burn-in, VA-API hardware acceleration |
 | Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, per-title history, stats, per-user totals, stop a stream, webhooks, a watch state export for cleanup tools | Activity screens in a client |
 | Web app at `/`: browse, details, search, play in the browser with subtitles (including files whose video the browser cannot decode, transcoded on the server), Activity screens. REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Other TV platforms |
@@ -57,12 +57,12 @@ docker compose exec vcrx vcrx user add -username friend
 docker compose exec vcrx vcrx user grant -username friend -libraries Movies,TV
 ```
 
-A new user sees nothing until granted a library. Admins see everything. To keep a user off 4K versions, set their policy through the API:
+A new user sees nothing until granted a library. Admins see everything. Set what each user sees in the web app under Settings > Users (from the local network): libraries, a highest resolution (a friend capped at 1080p never sees, streams or gets artwork from the 4K version), a highest content rating (PG-13 also allows TV-14; while one is set, titles with no rating are hidden), labels to hide or to require, and whether the server may convert streams for them. Each user gets a one-line summary such as "Sees Movies and TV, up to 1080p and PG-13, never titles labelled horror." The same settings are in the API:
 
 ```bash
 curl -X PUT http://<server-ip>:3750/api/v1/admin/users/<id>/policy \
   -H "Authorization: Bearer <admin token>" -H "Content-Type: application/json" \
-  -d '{"max_resolution": "1080p", "allow_transcode": true}'
+  -d '{"max_resolution": "1080p", "max_content_rating": "PG-13", "deny_labels": ["horror"], "allow_transcode": true}'
 ```
 
 ### CLI
@@ -220,7 +220,7 @@ Any other media server on the same host keeps running untouched; VCRX only reads
 - Stopping a stream in Activity ends that session; it does not lock the user out. Disable the account to do that.
 - Browsers scope cookies by host, not port: every other web app on the same host and address receives the web app's session cookie. Give VCRX its own host name if other apps there are not trusted.
 - LAN-first. Never forward VCRX's port on your router. Admin routes answer only from loopback and private addresses unless `VCRX_ADMIN_ALLOW_REMOTE=true`.
-- Passwords are hashed with argon2id. Tokens are random, stored only as SHA-256 hashes, and expire after 90 idle days. Failed logins are rate limited per address and per username.
+- Passwords are hashed with argon2id. Tokens are random, stored only as SHA-256 hashes, and expire after 90 idle days. Failed sign-ins are limited per address (IPv6 per /64, Tailscale per peer): 10 in 15 minutes. They are also limited per username, in two separate counts: 10 for clients off the LAN (Tailscale included) and 50 for the LAN. Nobody on the internet can lock you out at home, and a guest or IoT device rotating addresses on the LAN still stops at 50.
 - Every file is reached through a version id; paths are resolved with symlinks evaluated and must stay inside their library root, which must sit under `VCRX_MEDIA_ROOTS`.
 - Remote access later: put VCRX behind a reverse proxy that terminates HTTPS (Caddy, nginx), add the proxy's address to `VCRX_TRUSTED_PROXIES` so client IPs are logged correctly, and keep admin routes LAN-only. Use a VPN rather than a port forward where you can.
 

@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import io.github.pete_builds.vcrx.tv.ui.components.BrandButton
@@ -74,13 +77,23 @@ fun PlayerScreen(controller: PlaybackController, onExit: () -> Unit) {
                 val name = listOfNotNull(episodeCode(next), next.title).joinToString("  ")
                 MessageView(
                     "Up next",
-                    "$name starts in ${phase.secondsLeft} s.",
-                    primary = "Play now" to controller::playNext,
+                    phase.secondsLeft?.let { "$name starts in $it s." } ?: name,
+                    primary = (if (phase.secondsLeft != null) "Play now" else "Play") to controller::playNext,
                     secondary = "Back" to onExit,
+                )
+            }
+            is Phase.AskResume -> BlackField {
+                MessageView(
+                    "Resume?",
+                    "You stopped at ${formatTime(phase.positionMs)}.",
+                    primary = "Resume ${formatTime(phase.positionMs)}" to { controller.answerResume(true) },
+                    secondary = "Start over" to { controller.answerResume(false) },
                 )
             }
             Phase.Playing -> if (controller.overlay != Overlay.Hidden) Chrome(controller)
         }
+        // What a subtitle press did, or that subtitles are being prepared; above the controls.
+        controller.notice?.let { Notice(it) }
         controller.dialog?.let { TrackDialog(controller, it) }
     }
 }
@@ -103,16 +116,32 @@ private fun Video(controller: PlaybackController) {
                 setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                 setKeepContentOnPlayerReset(true)
                 setShutterBackgroundColor(Black.toArgb())
-                // Subtitles follow the TV's own caption settings (size, colour, background),
-                // which is where viewers with low vision have already set them up.
-                subtitleView?.apply {
-                    setUserDefaultStyle()
-                    setUserDefaultTextSize()
-                }
+                // Settings > Subtitles > Style, or the TV's own caption settings by default.
+                subtitleView?.let { CaptionStyles.apply(it, controller.captionStyle) }
                 player = controller.player
             }
         },
     )
+    // A converted stream carries no subtitles; the controller times the cues to the file
+    // and they are drawn here, in the same style.
+    if (controller.streamLabel != null) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { context -> SubtitleView(context).apply { CaptionStyles.apply(this, controller.captionStyle) } },
+            update = { it.setCues(controller.subtitleCues) },
+        )
+    }
+}
+
+@Composable
+private fun Notice(text: String) {
+    Box(Modifier.fillMaxSize().padding(top = 72.dp, end = 48.dp), contentAlignment = Alignment.TopEnd) {
+        Label(
+            text,
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.background(Black, RoundedCornerShape(6.dp)).padding(horizontal = 18.dp, vertical = 10.dp),
+        )
+    }
 }
 
 /**
@@ -156,7 +185,8 @@ private fun Chrome(controller: PlaybackController) {
                 Label(if (controller.durationMs > 0) formatTime(controller.durationMs) else "", style = MaterialTheme.typography.labelLarge)
             }
             if (controls) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                // Scrolls sideways if the buttons outgrow the screen; focus brings each into view.
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     BrandButton(
                         if (controller.isPlaying) "Pause" else "Play",
                         onClick = controller::togglePlayPause,
@@ -164,16 +194,24 @@ private fun Chrome(controller: PlaybackController) {
                         primary = true,
                         modifier = Modifier.focusRequester(playFocus),
                     )
-                    BrandButton("Back 10s", onClick = { controller.skip(-10_000) }, icon = AppIcons.Rewind)
-                    BrandButton("Forward 10s", onClick = { controller.skip(10_000) }, icon = AppIcons.Forward)
+                    BrandButton("Back ${seconds(controller.skipBackMs)}", onClick = { controller.skip(-controller.skipBackMs) }, icon = AppIcons.Rewind)
+                    BrandButton("Forward ${seconds(controller.skipForwardMs)}", onClick = { controller.skip(controller.skipForwardMs) }, icon = AppIcons.Forward)
+                    // One press turns subtitles on or off; the next button picks the track.
+                    BrandButton(
+                        if (controller.subtitlesOn) "Subtitles on" else "Subtitles off",
+                        onClick = controller::toggleSubtitles,
+                        icon = AppIcons.Subtitles,
+                    )
+                    BrandButton("Subtitle track", onClick = { controller.dialog = TrackKind.Subtitles })
                     BrandButton("Audio", onClick = { controller.dialog = TrackKind.Audio }, icon = AppIcons.Audio)
-                    BrandButton("Subtitles", onClick = { controller.dialog = TrackKind.Subtitles }, icon = AppIcons.Subtitles)
                 }
             }
         }
     }
     if (controls) LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
 }
+
+private fun seconds(ms: Long): String = if (ms % 60_000 == 0L) "${ms / 60_000}m" else "${ms / 1000}s"
 
 private fun status(controller: PlaybackController, target: Long?): String = when {
     target != null -> {
@@ -223,11 +261,12 @@ private fun TrackDialog(controller: PlaybackController, kind: TrackKind) {
             controller.touch()
         },
     ) {
-        if (options.isEmpty()) {
+        if (options.isEmpty() || (kind == TrackKind.Subtitles && options.size == 1)) {
             Label("No tracks in this file", style = MaterialTheme.typography.labelMedium)
         }
-        if (kind == TrackKind.Subtitles && controller.streamLabel != null) {
-            Label("Subtitles are not available on converted streams yet", style = MaterialTheme.typography.labelMedium)
+        if (kind == TrackKind.Subtitles && controller.pictureSubtitlesUnavailable) {
+            // Converted streams show text subtitles only; picture ones would need burning into the video.
+            Label("Picture subtitles (PGS, VobSub) need direct play", style = MaterialTheme.typography.labelMedium)
         }
         options.forEachIndexed { index, option ->
             BrandRow(

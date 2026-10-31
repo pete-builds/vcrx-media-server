@@ -588,6 +588,19 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /api/v1/speedtest:
+    get:
+      operationId: speedTest
+      summary: >-
+        Filler bytes for a client to time its connection to the server (the TV app's Settings > About speed test).
+        Random, so a compressing proxy cannot flatter the result. Reads nothing from the library.
+      parameters:
+        - { name: bytes, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 64000000, default: 8000000 } }
+      responses:
+        "200": { description: The bytes asked for, application/octet-stream }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
   /api/v1/admin/libraries:
     get:
       operationId: adminListLibraries
@@ -752,6 +765,28 @@ paths:
       responses:
         "204": { description: Saved }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/labels:
+    get:
+      operationId: adminListLabels
+      summary: Labels on titles with how many carry each, most used first, for policy allow and deny lists.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [labels]
+                properties:
+                  labels:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, hidden, item_count]
+                      properties:
+                        name: { type: string }
+                        hidden: { type: boolean }
+                        item_count: { type: integer }
   /api/v1/admin/activity/sessions:
     get:
       operationId: adminListPlaybackSessions
@@ -1554,6 +1589,7 @@ components:
             library_ids: { type: array, items: { type: integer } }
             policy: { $ref: "#/components/schemas/UserPolicy" }
             created_at: { type: integer }
+            summary: { type: string, description: 'The policy in one plain-English line, e.g. "Sees Movies and TV, up to 1080p and PG-13, never titles labelled horror."' }
     UserInput:
       type: object
       required: [username, password]
@@ -1567,9 +1603,21 @@ components:
       type: object
       properties:
         max_resolution: { oneOf: [{ $ref: "#/components/schemas/Resolution" }, { type: "null" }], description: Versions above this are invisible to the user. }
-        max_content_rating: { type: [string, "null"] }
-        allow_labels: { type: array, items: { type: string } }
-        deny_labels: { type: array, items: { type: string } }
+        max_content_rating:
+          type: [string, "null"]
+          enum: [G, PG, PG-13, R, NC-17, null]
+          description: >-
+            Titles rated above this are invisible to the user. Each tier admits the TV ratings for the same audience
+            (PG-13 allows TV-14, R allows TV-MA). Seasons and episodes go by their show's rating, or their own when stricter.
+            While a ceiling is set, titles with no known rating are hidden.
+        allow_labels:
+          type: array
+          items: { type: string }
+          description: When not empty, only titles carrying one of these labels (on the title or its show) are visible.
+        deny_labels:
+          type: array
+          items: { type: string }
+          description: Titles carrying any of these labels (on the title or its show) are invisible.
         allow_transcode: { type: boolean }
         allow_4k_transcode: { type: boolean }
         allow_subtitle_download: { type: boolean, description: May download subtitles from OpenSubtitles (spends the server's daily quota). Default false; admins always may. }

@@ -298,6 +298,8 @@ type User struct {
 	LibraryIDs  []int64    `json:"library_ids"`
 	Policy      UserPolicy `json:"policy"`
 	CreatedAt   int64      `json:"created_at"`
+	// Summary is the policy in one plain-English line.
+	Summary string `json:"summary"`
 }
 
 func (a *Admin) Users(ctx context.Context) ([]User, error) {
@@ -321,6 +323,14 @@ func (a *Admin) Users(ctx context.Context) ([]User, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	libs, err := a.Libraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := map[int64]string{}
+	for _, l := range libs {
+		names[l.ID] = l.Name
+	}
 	for i := range users {
 		p, err := policy.Load(ctx, a.DB, users[i].ID, users[i].IsAdmin)
 		if err != nil {
@@ -328,6 +338,7 @@ func (a *Admin) Users(ctx context.Context) ([]User, error) {
 		}
 		users[i].LibraryIDs = append([]int64{}, p.LibraryIDs...)
 		users[i].Policy = toUserPolicy(p)
+		users[i].Summary = Summary(users[i], names)
 	}
 	return users, nil
 }
@@ -403,8 +414,8 @@ func (a *Admin) SetPolicy(ctx context.Context, userID int64, p UserPolicy) error
 	if err := a.userExists(ctx, userID); err != nil {
 		return err
 	}
-	if p.MaxResolution != nil && policy.ResolutionRank(*p.MaxResolution) < 0 {
-		return fmt.Errorf("max_resolution must be one of %s", strings.Join(policy.Resolutions, ", "))
+	if err := normalizePolicy(&p); err != nil {
+		return err
 	}
 	allow, _ := json.Marshal(nonNil(p.AllowLabels))
 	deny, _ := json.Marshal(nonNil(p.DenyLabels))

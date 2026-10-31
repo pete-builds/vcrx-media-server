@@ -450,6 +450,9 @@ table.list td.num, table.list th.num { text-align: right; font-variant-numeric: 
 .checks { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
 .check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 .checks select { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 8px; }
+.user-summary { margin: -4px 0 12px; }
+.user .k-gap { margin-top: 12px; }
+.user .hint { font-size: 13px; margin-top: 6px; }
 .add-user { display: grid; gap: 12px; max-width: 900px; }
 a.link { color: var(--orange); }
 a.link:hover { text-decoration: underline; }

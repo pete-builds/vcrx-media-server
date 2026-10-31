@@ -120,6 +120,18 @@ func (c *Catalog) attachTracks(ctx context.Context, vs []Version) error {
 	})
 }
 
+// CanPlay reports whether the caller may still play a version: the version is
+// within their ceiling and its item is visible to them. Session routes check it
+// on every call, so a policy tightened mid-play applies at once.
+func (c *Catalog) CanPlay(ctx context.Context, pol policy.Policy, versionID int64) (bool, error) {
+	vc, vargs := pol.VersionCond("v")
+	cond, cargs := pol.ItemCond("i")
+	var n int
+	err := c.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM media_versions v JOIN items i ON i.id = v.item_id
+		WHERE v.id = ? AND `+vc+` AND `+cond, append(append([]any{versionID}, vargs...), cargs...)...).Scan(&n)
+	return n > 0, err
+}
+
 // VersionForPlayback returns one version and its library root if the caller may
 // play it.
 func (c *Catalog) VersionForPlayback(ctx context.Context, pol policy.Policy, versionID int64) (Version, string, error) {
