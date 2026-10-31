@@ -59,11 +59,21 @@ func primaryLanguage(tag string) string {
 }
 
 // BestTrailer picks the trailer a Trailer button should open from a /videos
-// list: YouTube only, a Trailer before a Teaser (clips, featurettes and the
-// rest are not trailers), then official before unofficial, then the
-// configured language (e.g. en-US) before others, then the newest. ok is
-// false when nothing qualifies.
+// list: the first of Trailers. ok is false when nothing qualifies.
 func BestTrailer(videos []Video, language string) (Video, bool) {
+	t := Trailers(videos, language)
+	if len(t) == 0 {
+		return Video{}, false
+	}
+	return t[0], true
+}
+
+// Trailers lists a /videos list's trailers best first: YouTube only, a
+// Trailer before a Teaser (clips, featurettes and the rest are not trailers),
+// then official before unofficial, then the configured language (e.g. en-US)
+// before others, then the newest. The rest are what to try when YouTube no
+// longer plays the best one.
+func Trailers(videos []Video, language string) []Video {
 	lang := primaryLanguage(language)
 	var cands []Video
 	for _, v := range videos {
@@ -74,9 +84,6 @@ func BestTrailer(videos []Video, language string) (Video, bool) {
 			continue
 		}
 		cands = append(cands, v)
-	}
-	if len(cands) == 0 {
-		return Video{}, false
 	}
 	first := func(a, b bool) (bool, bool) { return a && !b, a != b }
 	sort.SliceStable(cands, func(i, j int) bool {
@@ -93,5 +100,5 @@ func BestTrailer(videos []Video, language string) (Video, bool) {
 		// TMDb's RFC 3339 times are all UTC, so they compare as strings.
 		return a.PublishedAt > b.PublishedAt
 	})
-	return cands[0], true
+	return cands
 }

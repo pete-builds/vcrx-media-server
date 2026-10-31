@@ -58,6 +58,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/subsearch"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 	"github.com/pete-builds/vcrx-media-server/server/internal/tmdb"
+	"github.com/pete-builds/vcrx-media-server/server/internal/youtube"
 	"github.com/pete-builds/vcrx-media-server/server/web"
 )
 
@@ -878,8 +879,12 @@ func watchExport(ctx context.Context, conn *sql.DB, out io.Writer, library strin
 }
 
 func newEnricher(a *app) *enrich.Enricher {
-	return &enrich.Enricher{DB: a.db, TMDb: tmdb.New(a.cfg.TMDbAPIKey, a.cfg.TMDbLanguage), Dir: a.cfg.MetadataDir(),
+	e := &enrich.Enricher{DB: a.db, TMDb: tmdb.New(a.cfg.TMDbAPIKey, a.cfg.TMDbLanguage), Dir: a.cfg.MetadataDir(),
 		Country: a.cfg.TMDbCountry, Log: a.log.With("component", "tmdb"), Trailers: a.cfg.YouTubeTrailers()}
+	if e.Trailers {
+		e.Embeddable = youtube.New().Embeddable
+	}
+	return e
 }
 
 func metadataCmd(args []string) error {
@@ -929,7 +934,7 @@ func metadataCmd(args []string) error {
 		if err == nil && enr.Trailers {
 			var ts enrich.TrailerStats
 			ts, err = enr.RefreshTrailers(ctx)
-			fmt.Printf("trailers: %d found on YouTube, %d without one, %d lookups failed\n", ts.Found, ts.None, ts.Errors)
+			fmt.Printf("trailers: %d found on YouTube, %d without one, %d lookups failed, %d passed over (no longer plays embedded)\n", ts.Found, ts.None, ts.Errors, ts.Skipped)
 		}
 		if st.Unmatched > 0 {
 			fmt.Println("run `vcrx metadata status` to see what was skipped and why")
