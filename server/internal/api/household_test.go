@@ -503,3 +503,30 @@ func TestAdminProfilesAndAvatar(t *testing.T) {
 		t.Fatalf("stranger reads an avatar: %d", r.code)
 	}
 }
+
+// The skip-markers choice (#42) is per user, so it follows the active profile
+// across switches.
+func TestPlaybackSettingsFollowTheProfile(t *testing.T) {
+	f := newHouseholdFixture(t)
+	mode := func(tok string) string {
+		var s struct {
+			SkipMarkers string `json:"skip_markers"`
+		}
+		f.do("GET", "/api/v1/me/playback-settings", tok, nil).json(t, &s)
+		return s.SkipMarkers
+	}
+	if r := f.do("PUT", "/api/v1/me/playback-settings", f.adminTok, map[string]any{"skip_markers": "auto"}); r.code != 200 {
+		t.Fatalf("pete sets auto: %d %s", r.code, r.body)
+	}
+	robin := tokenOf(t, f.switchTo(f.adminTok, f.robin, nil))
+	if got := mode(robin); got == "auto" {
+		t.Fatal("Robin inherited pete's skip setting")
+	}
+	if r := f.do("PUT", "/api/v1/me/playback-settings", robin, map[string]any{"skip_markers": "off"}); r.code != 200 {
+		t.Fatalf("Robin sets off: %d", r.code)
+	}
+	pete := tokenOf(t, f.switchTo(robin, mustUserID(t, f.fixture, "pete"), map[string]any{"password": "adminpass1"}))
+	if got := mode(pete); got != "auto" {
+		t.Fatalf("pete's setting after switching back: %q, want auto", got)
+	}
+}
