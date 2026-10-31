@@ -493,7 +493,9 @@ func TestAccessWalkEveryRouteAppliesThePolicy(t *testing.T) {
 			}
 		})
 	}
-	// Every admin route refuses the friend outright.
+	// Every admin route (item history, watch export, merge and split, smart
+	// collections, the newsletter...) refuses the friend outright, and an
+	// admin from off the LAN too.
 	for _, rt := range w.srv.Routes() {
 		if rt.access != adminOnly {
 			continue
@@ -501,6 +503,9 @@ func TestAccessWalkEveryRouteAppliesThePolicy(t *testing.T) {
 		path := routeParam.ReplaceAllString(rt.Path, "1")
 		if r := w.do(rt.Method, path, w.friendTok, nil); r.code != http.StatusForbidden {
 			t.Errorf("%s %s: the friend got %d, want 403", rt.Method, rt.Path, r.code)
+		}
+		if r := w.do(rt.Method, path, w.adminTok, nil, "RemoteAddr", "203.0.113.7:5000"); r.code != http.StatusForbidden || !strings.Contains(string(r.body), "lan_only") {
+			t.Errorf("%s %s: the admin from the internet got %d, want 403 lan_only", rt.Method, rt.Path, r.code)
 		}
 	}
 }

@@ -2,13 +2,14 @@ import { signOut } from "../api.js";
 import { h, toast } from "../dom.js";
 import { state, go } from "../app.js";
 import { librariesTab, usersTab } from "./manage.js";
+import { newsletterTab } from "./newsletter.js";
 
 export async function settingsView({ match }) {
   const tab = (match && match[1]) || "account";
   const admin = !!(state.me && state.me.is_admin);
   if (admin && tab !== "account") {
     const body = h("div", {});
-    const cleanup = await (tab === "libraries" ? librariesTab : usersTab)(body);
+    const cleanup = await ({ libraries: librariesTab, newsletter: newsletterTab }[tab] || usersTab)(body);
     return { el: h("div", { class: "settings wide-settings" }, h("h1", {}, "Settings"), tabs(tab, admin), body), title: "Settings", cleanup };
   }
   const me = state.me || {};
@@ -47,6 +48,6 @@ export async function settingsView({ match }) {
 function tabs(active, admin) {
   if (!admin) return null;
   return h("nav", { class: "tabs", "aria-label": "Settings" },
-    [["account", "Account"], ["libraries", "Libraries"], ["users", "Users"]]
+    [["account", "Account"], ["libraries", "Libraries"], ["users", "Users"], ["newsletter", "Newsletter"]]
       .map(([k, label]) => h("a", { href: `#/settings/${k}`, class: k === active ? "active" : "" }, label)));
 }

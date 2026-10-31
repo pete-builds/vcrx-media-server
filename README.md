@@ -170,15 +170,19 @@ Like Tautulli, without a second program. Every play request is logged with the d
 | `GET /api/v1/admin/activity/history` | Finished plays, newest first, by user or by title (a show includes its episodes) |
 | `GET /api/v1/admin/items/{id}/history` | One title's plays, newest first, with its totals: plays, people, watch time. What the details page shows |
 | `GET /api/v1/admin/watch/export` | Every movie and show with its file paths, size, when it was added and last played, play count and who finished it, for a cleanup tool (see below) |
-| `GET /api/v1/admin/activity/stats?days=30` | Plays and watch time, top movies, shows, users, clients and devices, plays by day, hour and weekday |
+| `GET /api/v1/admin/activity/stats?days=30` | Plays and watch time, top movies, shows, users, clients, devices and platforms, plays by day, hour and weekday, direct play against converted, and the most streams at once |
 | `GET /api/v1/admin/activity/users` | Every account with its totals and when and where it was last seen |
 | `POST /api/v1/admin/activity/sessions/{id}/terminate` | Stop a stream now, with a message the viewer sees |
 
-A play counts in stats once 30 seconds have actually played, and is watched at 90%. Days and hours follow the container's `TZ`.
+A play counts in stats once 30 seconds have actually played, and is watched at 90%. Days and hours follow the container's `TZ`. Each chart on the Stats page has a "Show as a table" view with the same numbers.
+
+Addresses are labelled by the kind of network they are on: This server, Local network, Tailscale (100.64.0.0/10 and its IPv6 prefix) or Internet. That works offline; public addresses are not placed on a map.
 
 **Watch state for cleanup tools:** a script that deletes watched or never-played media needs to know, per title, whether anyone watched it and when. `GET /api/v1/admin/watch/export` answers that for every movie and show still on disk, a show rolled up from its episodes: `item_id`, `kind`, `title`, `year`, `library`, `paths` (absolute, as the server sees them), `size_bytes`, `added_at`, `last_played_at` (any user, a stream in progress included; `null` if never), `play_count` (times finished, all users), `finished_by` (usernames), and for shows `episodes_total` and `episodes_watched`. `?library_id=` narrows it to one library, and `?unplayed_days=30` keeps only titles nobody has played in 30 days, never-played ones included. On the host, `vcrx watch export -library Movies -unplayed-days 30` prints the same rows as JSON lines. The paths are the container's; map them to the host's before deleting anything.
 
 **Webhooks:** set `VCRX_WEBHOOK_URLS` in `.env` to one or more URLs, comma separated. Each gets a JSON post for `play`, `stop`, `refused`, `terminated` and `added` (new titles after a scan, such as `＋ New in Movies: The Film (2024), Show (3 new episodes)`; narrow the events with `webhook_events` in `vcrx.yaml`). A Discord webhook URL gets a plain Discord message instead, such as `▶ pete started The Film on Living Room TV (direct play)`.
+
+**Newsletter:** Settings > Newsletter sends a weekly digest of what was added in the last seven days (new movies, and new episodes grouped by show) to the same webhooks, on a weekday and hour you pick in the server's time zone. It lists only what its audience may see: by default, titles every friend (non-admin) account can see, so a library only some are granted and a title with a label any of them is denied stay out; or pick one friend account whose view it uses. Add `newsletter` to `webhook_events` if you narrow the events. Discord gets a card per title with its TMDb poster (posters that exist only on disk have no public link), cut to fit Discord's limits with "and N more"; other URLs get the full list as JSON (`event: newsletter`). It is off by default, sends nothing in a week when nothing was added, and remembers the last week it sent, so a restart never sends it twice. "Send a preview now" posts the last seven days straight away.
 
 ## Run the TV app
 

@@ -18,6 +18,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
 	"github.com/pete-builds/vcrx-media-server/server/internal/enrich"
+	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
@@ -59,6 +60,9 @@ type Server struct {
 
 	// SmartCollections reports the YAML collection definitions and their builds.
 	SmartCollections *collections.SmartBuilder
+
+	// Newsletter is the weekly recently-added digest, set up in Settings.
+	Newsletter *newsletter.Service
 
 	AdminAllowRemote bool
 	TrustedProxies   []netip.Prefix
@@ -142,11 +146,17 @@ func (s *Server) Routes() []route {
 		{"PUT", "/api/v1/admin/items/{item_id}/match", adminOnly, s.matchSet},
 		{"GET", "/api/v1/admin/items/{item_id}/history", adminOnly, s.itemHistory},
 		{"GET", "/api/v1/admin/watch/export", adminOnly, s.watchExport},
+		{"POST", "/api/v1/admin/items/{item_id}/merge", adminOnly, s.adminMergeItems},
+		{"POST", "/api/v1/admin/versions/{version_id}/split", adminOnly, s.adminSplitVersion},
 		{"GET", "/api/v1/admin/activity/now", adminOnly, s.activityNow},
 		{"GET", "/api/v1/admin/activity/history", adminOnly, s.activityHistory},
 		{"GET", "/api/v1/admin/activity/stats", adminOnly, s.activityStats},
 		{"GET", "/api/v1/admin/activity/users", adminOnly, s.activityUsers},
 		{"POST", "/api/v1/admin/activity/sessions/{session_id}/terminate", adminOnly, s.terminateSession},
+		// The weekly newsletter.
+		{"GET", "/api/v1/admin/newsletter", adminOnly, s.newsletterStatus},
+		{"PUT", "/api/v1/admin/newsletter", adminOnly, s.newsletterSave},
+		{"POST", "/api/v1/admin/newsletter/preview", adminOnly, s.newsletterPreview},
 	}
 }
 

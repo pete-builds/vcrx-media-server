@@ -394,7 +394,15 @@ table.list td.num, table.list th.num { text-align: right; font-variant-numeric: 
 .chart { width: 100%; height: auto; display: block; }
 .chart .bar { fill: var(--orange); }
 .chart .bar:hover { fill: var(--orange-soft); }
-.chart .axis { fill: var(--faint); font-size: 11px; font-family: Inter, sans-serif; }
+/* Muted, not faint: faint is 3.7:1 on a panel, under the 4.5:1 small text needs. */
+.chart .axis { fill: var(--muted); font-size: 11px; font-family: Inter, sans-serif; }
+.chart-table { margin-top: 8px; font-size: 13px; }
+.chart-table summary { color: var(--muted); cursor: pointer; width: max-content; }
+.chart-table table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.chart-table th, .chart-table td { text-align: left; font-weight: 400; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.chart-table thead th { color: var(--muted); }
+.chart-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.share-head { margin: -4px 0 8px; font-size: 14px; }
 .chart .grid-line { stroke: var(--line); stroke-width: 1; }
 .rank { list-style: none; margin: 0; padding: 0; }
 .rank li { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 7px 0; border-bottom: 1px solid #1d1d22; font-size: 14px; }
@@ -457,6 +465,13 @@ a.link:hover { text-decoration: underline; }
 .fix-form input.fix-year { flex: 0 0 90px; min-width: 0; }
 .fix-choice { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
 .fix-choice p { margin: 4px 0 0; font-size: 14px; }
+
+/* Settings > Newsletter */
+.newsletter-form { display: grid; gap: 14px; margin: 20px 0; }
+.newsletter-form .when { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.newsletter-form select { max-width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; }
+.newsletter .notice { border-left: 3px solid var(--orange); padding: 8px 12px; background: var(--surface); }
+.newsletter .preview { margin-top: 24px; display: grid; gap: 8px; justify-items: start; }
 
 /* Keyboard shortcuts list (press ?) */
 .shortcuts-backdrop { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,.7); }
@@ -541,3 +556,10 @@ kbd {
 .cast-member { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); min-width: 0; }
 .cast-name { font-weight: 600; overflow-wrap: anywhere; }
 .cast-role { color: var(--muted); font-size: 0.875rem; overflow-wrap: anywhere; }
+
+/* Version tools on a movie's page, for admins (views/versions.js). */
+.version-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.version-name { min-width: 0; overflow-wrap: anywhere; }
+.version-name .faint { font-size: 13px; }
+.version-row .btn { flex-shrink: 0; white-space: nowrap; }
+.merge { margin-top: 16px; }

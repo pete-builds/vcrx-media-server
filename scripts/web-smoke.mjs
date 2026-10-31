@@ -164,7 +164,7 @@ async function main() {
     ["/", ".row .card"],
     ...ids.libs.map((id) => [`/library/${id}`, ".grid .card"]),
     ...ids.libs.map((id) => [`/library/${id}/collections`, ".toolbar h1"]),
-    [`/item/${ids.movie}`, ".hero h1"],
+    [`/item/${ids.movie}`, ".versions-admin"], // the admin version tools render too
     // Its NFO names an invented cast.
     [`/item/${ids.cast}`, ".cast-list .cast-member .cast-role"],
     [`/item/${ids.show}`, ".hero h1"],
@@ -176,6 +176,7 @@ async function main() {
     ["/settings", ".settings h1"],
     ["/settings/libraries", "table.list"],
     ["/settings/users", ".user-summary"],
+    ["/settings/newsletter", ".newsletter-form"],
   ];
   for (const [path, selector] of pages) {
     console.log(`page #${path}`);
