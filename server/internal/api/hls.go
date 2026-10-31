@@ -20,8 +20,28 @@ func hlsBase(session, run string) string {
 // hlsPlaylist serves the playlist of a session's current HLS stream, which the
 // seek endpoint started. Only the session's owner gets it, and only while the
 // session is open, with the same checks as the fragmented MP4 stream.
+// hlsAllowed is convertedSession plus the caller's policy, checked on every
+// playlist and segment: a run already going keeps writing segments, so a
+// policy tightened mid-play must stop it being served here, as it does for
+// the fragmented MP4 stream.
+func (s *Server) hlsAllowed(w http.ResponseWriter, r *http.Request) bool {
+	ss, ok := s.convertedSession(w, r)
+	if !ok {
+		return false
+	}
+	allowed, err := s.canPlaySession(r.Context(), info(r).Policy, ss)
+	if err != nil {
+		s.internal(w, r, err)
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusNotFound, "not_found", "Not found.")
+	}
+	return allowed
+}
+
 func (s *Server) hlsPlaylist(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.convertedSession(w, r); !ok {
+	if !s.hlsAllowed(w, r) {
 		return
 	}
 	if s.HLS == nil {
@@ -54,7 +74,7 @@ func (s *Server) hlsPlaylist(w http.ResponseWriter, r *http.Request) {
 // hlsSegment serves the init segment or a media segment of a session's
 // current HLS stream, by a name its playlist uses and no other.
 func (s *Server) hlsSegment(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.convertedSession(w, r); !ok {
+	if !s.hlsAllowed(w, r) {
 		return
 	}
 	if s.HLS == nil {

@@ -97,6 +97,9 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 	if d.Collections, err = c.ItemCollections(ctx, id); err != nil {
 		return d, err
 	}
+	if err := c.extras(ctx, pol, &d); err != nil {
+		return d, err
+	}
 	if d.Kind == "movie" || d.Kind == "episode" {
 		if d.Versions, err = c.Versions(ctx, pol, id); err != nil {
 			return d, err
@@ -151,7 +154,7 @@ func (c *Catalog) FollowingEpisode(ctx context.Context, pol policy.Policy, userI
 
 // Children lists a show's seasons or a season's episodes in order.
 func (c *Catalog) Children(ctx context.Context, pol policy.Policy, userID, id int64) ([]ItemSummary, error) {
-	ok, err := c.visible(ctx, pol, id)
+	ok, err := c.Visible(ctx, pol, id)
 	if err != nil {
 		return nil, err
 	}

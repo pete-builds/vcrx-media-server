@@ -74,6 +74,8 @@ class PlaybackController(
     private val versionId: Long?,
     private val fromStart: Boolean,
     val title: String,
+    /** Set when playing one of the item's extras (a trailer) rather than the item. */
+    private val extraId: Long? = null,
 ) {
     private val graph = activity.graph
 
@@ -167,7 +169,7 @@ class PlaybackController(
                 }
                 val capabilities = withContext(Dispatchers.Default) { CapabilityProbe.probe(activity) }
                 val start = startAtMs ?: if (fromStart) 0L else null
-                val created = graph.api.startPlayback(PlaybackRequest(itemId, versionId, start, capabilities))
+                val created = graph.api.startPlayback(PlaybackRequest(itemId, versionId, start, capabilities, extraId))
                 if (released) return@launch
                 markers = created.markers
                 skipMode = created.skipMarkers

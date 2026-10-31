@@ -211,3 +211,38 @@ func TestAdminSetsAndClearsMarkers(t *testing.T) {
 	}
 	_ = markers.ModeAuto
 }
+
+// A trailer plays under its film's item id, but it is not the film: its
+// session carries none of the film's markers, so "skip automatically" can
+// never jump inside a trailer.
+func TestNoMarkersOnAnExtrasSession(t *testing.T) {
+	f := newExtraFixture(t)
+	if err := markers.SetManual(context.Background(), f.db, f.movieID, markers.Intro, 1000, 31_000); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.do("PUT", "/api/v1/me/playback-settings", f.friendTok, map[string]string{"skip_markers": "auto"}); r.code != 200 {
+		t.Fatalf("set auto: %d", r.code)
+	}
+	start := func(body map[string]any) []markerJSON {
+		t.Helper()
+		var sess struct{ Markers []markerJSON }
+		r := f.do("POST", "/api/v1/playback/sessions", f.friendTok, body)
+		if r.code != 201 {
+			t.Fatalf("session %v: %d %s", body, r.code, r.body)
+		}
+		r.json(t, &sess)
+		return sess.Markers
+	}
+	// The film itself: the admin's intro, skipped automatically. This shows
+	// the check below can fail.
+	film := start(map[string]any{"item_id": f.movieID, "capabilities": tclCaps()})
+	if len(film) != 1 || film[0].AutoSkip == nil || !*film[0].AutoSkip {
+		t.Fatalf("film session markers: %+v", film)
+	}
+	if got := start(map[string]any{"extra_id": f.trailer, "item_id": f.movieID, "capabilities": tclCaps()}); len(got) != 0 {
+		t.Errorf("trailer session carries the film's markers: %+v", got)
+	}
+	if got := start(map[string]any{"extra_id": f.trailer, "capabilities": tclCaps()}); len(got) != 0 {
+		t.Errorf("trailer session (no item_id) carries the film's markers: %+v", got)
+	}
+}

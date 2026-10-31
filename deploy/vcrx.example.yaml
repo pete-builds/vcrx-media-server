@@ -30,6 +30,11 @@ server_name: VCRX
 #marker_intro_minutes: 10      # how much of the start of each episode is compared
 #marker_credits_minutes: 8     # and of the end
 
+# Trailers from local files (Movie-trailer.mkv, a Trailers folder) always work,
+# offline. With a TMDb key, this also offers each title's official YouTube
+# trailer when there is no local one; playing it needs the internet.
+#trailers_youtube: true
+
 # Radarr and Sonarr webhooks find the folder by name in a library. If they see
 # the NAS at another path and folder names differ, map their prefix to VCRX's.
 #arr_path_map:

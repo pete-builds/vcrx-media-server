@@ -143,6 +143,7 @@ private fun Details(item: Item, vm: DetailsViewModel) {
     val primaryFocus = remember { FocusRequester() }
     var pickVersion by remember { mutableStateOf(false) }
     val isContainer = item.kind == "show" || item.kind == "season"
+    ThemeMusic(item)
 
     LazyColumn(contentPadding = PaddingValues(48.dp), verticalArrangement = Arrangement.spacedBy(32.dp)) {
         item(key = "header") {
@@ -174,6 +175,7 @@ private fun Details(item: Item, vm: DetailsViewModel) {
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         if (isContainer) ShowButtons(item, vm, primaryFocus) else PlayButtons(item, vm, primaryFocus)
+                        TrailerButton(item)
                     }
                     // On its own row: four buttons do not fit beside the poster.
                     if (!isContainer && item.versions.size > 1) {
@@ -192,6 +194,9 @@ private fun Details(item: Item, vm: DetailsViewModel) {
                     vm.actionError?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
                 }
             }
+        }
+        if (item.extras.isNotEmpty()) {
+            item(key = "extras") { ExtrasRow(item) }
         }
         if (isContainer && item.kind == "show" && vm.seasons.isNotEmpty()) {
             item(key = "seasons") { SeasonRow(vm) }

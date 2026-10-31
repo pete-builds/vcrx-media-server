@@ -74,9 +74,7 @@ func (s *Server) webApp() http.Handler {
 			return
 		}
 		h := w.Header()
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; "+
-			"style-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; "+
-			"base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+		h.Set("Content-Security-Policy", s.contentSecurityPolicy())
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")
@@ -109,6 +107,23 @@ func (s *Server) webApp() http.Handler {
 		h.Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
 	})
+}
+
+// youTubeEmbed is the only frame the web app ever shows: a YouTube trailer in
+// YouTube's no-cookie player, and only when the admin turned trailers_youtube on.
+const youTubeEmbed = "https://www.youtube-nocookie.com"
+
+// contentSecurityPolicy keeps the web app to its own origin. With YouTube
+// trailers on, it adds exactly one frame source (which also stops same-origin
+// frames, unused anyway); off, it is the policy VCRX always sent.
+func (s *Server) contentSecurityPolicy() string {
+	frames := ""
+	if s.TrailersYouTube {
+		frames = "frame-src " + youTubeEmbed + "; "
+	}
+	return "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; " +
+		"style-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; " +
+		frames + "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 }
 
 func etags(fsys fs.FS) map[string]string {

@@ -83,6 +83,11 @@ type Server struct {
 	// into the binary. For development only.
 	WebDir string
 
+	// TrailersYouTube is the trailers_youtube setting with a TMDb key present:
+	// details may offer a YouTube trailer, and the web app's CSP allows that
+	// one embed. Off, the CSP allows no frames at all.
+	TrailersYouTube bool
+
 	streams streamRegistry
 }
 
@@ -136,6 +141,8 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/playback/sessions/{session_id}/hls/{run}/{segment}", signedIn, s.hlsSegment},
 		{"GET", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"HEAD", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
+		{"GET", "/api/v1/extras/{extra_id}/file", signedIn, s.streamExtra},
+		{"HEAD", "/api/v1/extras/{extra_id}/file", signedIn, s.streamExtra},
 		{"GET", "/api/v1/subtitles/{stream_id}", signedIn, s.subtitle},
 		{"GET", "/api/v1/admin/libraries", adminOnly, s.adminLibraries},
 		{"POST", "/api/v1/admin/libraries", adminOnly, s.adminCreateLibrary},
@@ -146,6 +153,7 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/admin/users", adminOnly, s.adminCreateUser},
 		{"PUT", "/api/v1/admin/users/{user_id}/grants", adminOnly, s.adminSetGrants},
 		{"PUT", "/api/v1/admin/users/{user_id}/policy", adminOnly, s.adminSetPolicy},
+		{"GET", "/api/v1/admin/labels", adminOnly, s.adminLabels},
 		{"GET", "/api/v1/admin/activity/sessions", adminOnly, s.adminSessions},
 		{"GET", "/api/v1/admin/metadata/unmatched", adminOnly, s.unmatched},
 		{"GET", "/api/v1/admin/items/{item_id}/match", adminOnly, s.matchSearch},

@@ -43,9 +43,9 @@ func (s *Server) withMarkers(ctx context.Context, d catalog.ItemDetail) (itemWit
 }
 
 // sessionMarkers adds the markers to a started session, only when the user
-// may see the item itself: on main, starting a session checks the version's
-// policy but not the item's grants and labels (#35 closes that), and markers
-// must not leak through it in the meantime.
+// may see the item itself, and never to a session playing one of the item's
+// extras: a trailer is not the film, and an intro marker set on the film
+// would otherwise skip (automatically, for "auto") inside its trailer.
 func (s *Server) sessionMarkers(ctx context.Context, pol policy.Policy, userID int64, out *playback.Session) (sessionWithMarkers, error) {
 	mode, err := markers.SkipMode(ctx, s.DB, userID)
 	if err != nil {
@@ -56,7 +56,7 @@ func (s *Server) sessionMarkers(ctx context.Context, pol policy.Policy, userID i
 	if err != nil {
 		return sessionWithMarkers{}, err
 	}
-	if len(seen) == 1 {
+	if len(seen) == 1 && out.ExtraID == nil {
 		if ms, err = markers.ForItem(ctx, s.DB, out.ItemID); err != nil {
 			return sessionWithMarkers{}, err
 		}

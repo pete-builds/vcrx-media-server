@@ -28,6 +28,7 @@ class PlayerActivity : ComponentActivity() {
             versionId = intent.getLongExtra(EXTRA_VERSION_ID, -1).takeIf { it > 0 },
             fromStart = intent.getBooleanExtra(EXTRA_FROM_START, false),
             title = intent.getStringExtra(EXTRA_TITLE).orEmpty(),
+            extraId = intent.getLongExtra(EXTRA_EXTRA_ID, -1).takeIf { it > 0 },
         )
         onBackPressedDispatcher.addCallback(this) { exit() }
         setContent {
@@ -66,6 +67,7 @@ class PlayerActivity : ComponentActivity() {
         private const val EXTRA_VERSION_ID = "version_id"
         private const val EXTRA_FROM_START = "from_start"
         private const val EXTRA_TITLE = "title"
+        private const val EXTRA_EXTRA_ID = "extra_id"
 
         fun intent(context: Context, itemId: Long, versionId: Long?, fromStart: Boolean, title: String): Intent =
             Intent(context, PlayerActivity::class.java)
@@ -73,5 +75,9 @@ class PlayerActivity : ComponentActivity() {
                 .putExtra(EXTRA_VERSION_ID, versionId ?: -1L)
                 .putExtra(EXTRA_FROM_START, fromStart)
                 .putExtra(EXTRA_TITLE, title)
+
+        /** Plays one of the item's extras, such as its trailer, from the start. */
+        fun extraIntent(context: Context, itemId: Long, extraId: Long, title: String): Intent =
+            intent(context, itemId, null, fromStart = true, title).putExtra(EXTRA_EXTRA_ID, extraId)
     }
 }

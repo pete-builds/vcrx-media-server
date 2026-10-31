@@ -17,7 +17,7 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 | Works now | Comes later |
 |---|---|
 | Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, smart collections and hidden labels from YAML rules, genre and decade filters | Online lists (IMDb Top 250 and the like), playlists, automatic director and studio collections |
-| Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
+| Local accounts and per-user access: library grants, a resolution ceiling, a content-rating ceiling, label allow and deny lists, converting allowed or not, all edited in Settings > Users and enforced on every route (a test walks them all) | Access settings in the TV app |
 | Direct play over HTTP with Range; converted streams for clients that ask for them (fragmented MP4, or HLS for Safari: video copied, or transcoded to H.264 when the client cannot decode it; audio copied or converted to AAC); sidecar and embedded text subtitles (also as WebVTT for browsers) | Video transcoding for the TV app (HLS), picture subtitle burn-in, VA-API hardware acceleration |
 | Skip Intro and Skip Credits (web and TV): intros and end credits found from each season's audio at night, chapter titles and Plex-style NFO markers honoured, an admin editor, and a per-user choice of button, automatic or off | Skip markers for movies other than by hand |
 | Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, per-title history, stats, per-user totals, stop a stream, webhooks, a watch state export for cleanup tools | Activity screens in a client |
@@ -58,12 +58,12 @@ docker compose exec vcrx vcrx user add -username friend
 docker compose exec vcrx vcrx user grant -username friend -libraries Movies,TV
 ```
 
-A new user sees nothing until granted a library. Admins see everything. To keep a user off 4K versions, set their policy through the API:
+A new user sees nothing until granted a library. Admins see everything. Set what each user sees in the web app under Settings > Users (from the local network): libraries, a highest resolution (a friend capped at 1080p never sees, streams or gets artwork from the 4K version), a highest content rating (PG-13 also allows TV-14; while one is set, titles with no rating are hidden), labels to hide or to require, and whether the server may convert streams for them. Each user gets a one-line summary such as "Sees Movies and TV, up to 1080p and PG-13, never titles labelled horror." The same settings are in the API:
 
 ```bash
 curl -X PUT http://<server-ip>:3750/api/v1/admin/users/<id>/policy \
   -H "Authorization: Bearer <admin token>" -H "Content-Type: application/json" \
-  -d '{"max_resolution": "1080p", "allow_transcode": true}'
+  -d '{"max_resolution": "1080p", "max_content_rating": "PG-13", "deny_labels": ["horror"], "allow_transcode": true}'
 ```
 
 ### CLI
@@ -124,6 +124,12 @@ List `overlays` under a library in `vcrx.yaml` and the server draws badges onto 
 All three take `position`: `top_left`, `top_right`, `bottom_left` or `bottom_right`. Badges are VCRX's own lettering, not copies of third-party logos. Kometa's `ribbon` default draws on IMDb Top 250 and Rotten Tomatoes lists that VCRX has no source for, so VCRX's ribbon is a rule on the IMDb rating and vote count instead.
 
 **IMDb ratings:** set `imdb_ratings: true` and the server downloads IMDb's public ratings file once a day (and only when it changed) and keeps the rating and vote count for every title with an IMDb id. NFO files and TMDb enrichment supply the ids. `vcrx metadata imdb` runs the sync now. IMDb licenses the file for personal, non-commercial use, so it is off by default.
+
+### Trailers and extras
+
+Extras laid out the way Plex reads them work with no internet: `<name>-trailer.mkv` beside a film, and the folders `Trailers`, `Featurettes`, `Behind The Scenes`, `Deleted Scenes`, `Interviews`, `Scenes`, `Shorts` and `Other` inside a film's or show's folder (a season's folder works too and attaches to the show). They never become titles of their own. Each film or show page gets a Trailer button and an Extras row; they play in the VCRX player through the same decision and access rules as the film, so a friend who cannot see a film cannot play its trailer either, and a trailer never moves the film's resume point. A show's `theme.mp3` plays quietly on its TV page (and on the web page when you press Theme music). Like any file, an extra that disappears is kept for 30 days before it is forgotten.
+
+**YouTube trailers (optional):** with a TMDb key, `trailers_youtube: true` (or `VCRX_TRAILERS_YOUTUBE=true`) looks up each title's official trailer on TMDb and offers it when there is no local one. The web app plays it in YouTube's no-cookie player (the only outside frame the web app's security policy then allows, and only with this setting on); the TV app opens the YouTube app. Off by default, because playing one needs the internet and YouTube then sees the request.
 
 ### Collections
 
@@ -222,13 +228,13 @@ Any other media server on the same host keeps running untouched; VCRX only reads
 - Stopping a stream in Activity ends that session; it does not lock the user out. Disable the account to do that.
 - Browsers scope cookies by host, not port: every other web app on the same host and address receives the web app's session cookie. Give VCRX its own host name if other apps there are not trusted.
 - LAN-first. Never forward VCRX's port on your router. Admin routes answer only from loopback and private addresses unless `VCRX_ADMIN_ALLOW_REMOTE=true`.
-- Passwords are hashed with argon2id. Tokens are random, stored only as SHA-256 hashes, and expire after 90 idle days. Failed logins are rate limited per address and per username.
+- Passwords are hashed with argon2id. Tokens are random, stored only as SHA-256 hashes, and expire after 90 idle days. Failed sign-ins are limited per address (IPv6 per /64, Tailscale per peer): 10 in 15 minutes. They are also limited per username, in two separate counts: 10 for clients off the LAN (Tailscale included) and 50 for the LAN. Nobody on the internet can lock you out at home, and a guest or IoT device rotating addresses on the LAN still stops at 50.
 - Every file is reached through a version id; paths are resolved with symlinks evaluated and must stay inside their library root, which must sit under `VCRX_MEDIA_ROOTS`.
 - Remote access later: put VCRX behind a reverse proxy that terminates HTTPS (Caddy, nginx), add the proxy's address to `VCRX_TRUSTED_PROXIES` so client IPs are logged correctly, and keep admin routes LAN-only. Use a VPN rather than a port forward where you can.
 
 ## Privacy
 
-VCRX sends nothing anywhere unless you add a TMDb key. No telemetry, no usage reports, no update checks. With a key, the server sends TMDb the titles and years it searches for and the TMDb ids it looks up, and downloads images from TMDb; it sends nothing about users or what they watch. Activity history (who played what, from which device and IP) stays in your database.
+VCRX sends nothing anywhere unless you add a TMDb key. No telemetry, no usage reports, no update checks. With a key, the server sends TMDb the titles and years it searches for and the TMDb ids it looks up, and downloads images from TMDb; it sends nothing about users or what they watch. With `trailers_youtube` on, pressing a YouTube trailer's button makes that browser or TV fetch it from YouTube, which then sees that device's address; the web app sends YouTube only its own origin as the referrer, never the page. Activity history (who played what, from which device and IP) stays in your database.
 
 ## Development
 

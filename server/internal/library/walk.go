@@ -31,7 +31,15 @@ type walker struct {
 	dirs   map[string]*listing
 	failed []string // rel folders that could not be read
 	videos []*videoFile
+	// extras are trailers and other bonus files: in extras folders, which the
+	// walk does not descend into as titles, or named "-trailer" and the like.
+	// They attach to an item after the titles are written (extras.go).
+	extraDirs  []extraDir
+	extraFiles []string // rel paths of files named as extras
 }
+
+// extraDir is an extras folder, such as Trailers, and the kind of its files.
+type extraDir struct{ rel, kind string }
 
 func newWalker(root, kind string, log *slog.Logger) *walker {
 	return &walker{root: filepath.Clean(root), kind: kind, log: log, dirs: map[string]*listing{}}
@@ -114,8 +122,11 @@ func (w *walker) walk(ctx context.Context, start string) error {
 		for _, e := range l.entries {
 			child := joinRel(rel, e.name)
 			if e.isDir {
-				if SkipDir(e.name, w.kind) == "" {
+				switch skipDirAt(e.name, w.kind, rel != "") {
+				case "":
 					subdirs = append(subdirs, child)
+				case "extras":
+					w.extraDirs = append(w.extraDirs, extraDir{rel: child, kind: ExtrasDirKind(e.name, w.kind, rel != "")})
 				}
 				continue
 			}
@@ -140,7 +151,12 @@ func (w *walker) addFile(rel string) {
 	if err != nil || !fi.Mode().IsRegular() {
 		return
 	}
-	if SkipFile(name, fi.Size()) != "" {
+	switch SkipFile(name, fi.Size()) {
+	case "":
+	case "extras":
+		w.extraFiles = append(w.extraFiles, rel)
+		return
+	default:
 		return
 	}
 	w.videos = append(w.videos, &videoFile{rel: rel, abs: w.absOf(rel), size: fi.Size(), mtime: fi.ModTime().UnixMilli()})

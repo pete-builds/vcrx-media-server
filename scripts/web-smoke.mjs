@@ -113,7 +113,10 @@ async function main() {
         out.transcoded = by("Tin Kettle Road") ? by("Tin Kettle Road").id : null;
         out.cast = by("Harbor Lights") ? by("Harbor Lights").id : null;
       } else {
-        out.show = items[0] && items[0].id;
+        // Quiet Street by name: it has the two seasons and the theme music the
+        // checks below need, and Lantern Bay (Skip Intro) sorts before it.
+        const qs = items.find((i) => i.title === "Quiet Street") || items[0];
+        out.show = qs && qs.id;
       }
     }
     return out;`);
@@ -175,7 +178,7 @@ async function main() {
     ["/activity/users", "table.list"],
     ["/settings", ".settings h1"],
     ["/settings/libraries", "table.list"],
-    ["/settings/users", ".add-user"],
+    ["/settings/users", ".user-summary"],
     ["/settings/newsletter", ".newsletter-form"],
     ["/settings/markers", "table.list"],
   ];
@@ -384,6 +387,71 @@ async function main() {
     if (!moved.same) fail("season tabs", `the panel did not switch to that season's episodes: ${moved.got.join(" ")}`);
   }
   if (exceptions.length) fail("season tabs", `threw: ${exceptions[0]}`);
+
+  // Extras: Harbor Lights has a -trailer file and two extras folders, and Quiet
+  // Street a theme.mp3 (scripts/dev-server.sh). None may become a title of its
+  // own. The film's page shows an Extras row and a Trailer button; the trailer,
+  // clicked with a real mouse, plays in the VCRX player as a direct stream.
+  console.log(`trailer and extras (#/item/${ids.cast})`);
+  exceptions = [];
+  const indexed = await evaluate(`
+    const j = (p) => fetch("/api/v1" + p).then((r) => r.json());
+    const titles = [];
+    for (const l of (await j("/libraries")).libraries) titles.push(...(await j("/libraries/" + l.id + "/items?limit=200")).items.map((i) => i.title));
+    const files = (await j("/items/${ids.cast}")).versions.map((v) => v.file_name);
+    return { titles, files };`);
+  const leaked = indexed.titles.filter((t) => /trailer|Raising the Lighthouse|The Long Night|theme/i.test(t));
+  if (leaked.length) fail("extras", `extras became titles: ${leaked.join(", ")}`);
+  // With title_year grouping, an extra read as a film would join Harbor Lights as a version instead.
+  if (indexed.files.length !== 1) fail("extras", `Harbor Lights has ${indexed.files.length} versions: ${indexed.files.join(", ")}`);
+  await s("Page.navigate", { url: `${base}/#/item/${ids.cast}` });
+  const ex = await evaluate(`${wait(`document.querySelector(".extras .extra") && document.querySelector(".hero .trailer-btn")`)}
+    const b = document.querySelector(".hero .trailer-btn");
+    const row = document.querySelector(".extras");
+    if (!b) return { tiles: row ? row.querySelectorAll(".extra").length : 0, text: row ? row.innerText : "" };
+    b.scrollIntoView({ block: "center" });
+    const r = b.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    return { tiles: row ? row.querySelectorAll(".extra").length : 0, text: row ? row.innerText : "", x, y,
+      hit: document.elementFromPoint(x, y)?.closest("button") === b };`);
+  if (ex.tiles < 3) fail("extras", `the Extras row shows ${ex.tiles} extras, want the trailer, a featurette and a deleted scene`);
+  if (!/Raising the Lighthouse/.test(ex.text) || !/Deleted scene/.test(ex.text)) fail("extras", `Extras row: ${ex.text.replace(/\n/g, " ").slice(0, 160)}`);
+  const exJunk = ex.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
+  if (exJunk) fail("extras", `shows "${exJunk[0]}"`);
+  if (ex.x === undefined) fail("trailer", "no Trailer button on the film's page");
+  else {
+    if (!ex.hit) fail("trailer", "the Trailer button is covered by something else");
+    await evaluate(`document.querySelectorAll("video").forEach((v) => { v.dataset.stale = "1"; v.pause(); });`);
+    await s("Input.dispatchMouseEvent", { type: "mouseMoved", x: ex.x, y: ex.y });
+    await s("Input.dispatchMouseEvent", { type: "mousePressed", x: ex.x, y: ex.y, button: "left", clickCount: 1 });
+    await s("Input.dispatchMouseEvent", { type: "mouseReleased", x: ex.x, y: ex.y, button: "left", clickCount: 1 });
+    const tr = await evaluate(`
+      const fresh = () => document.querySelector("video:not([data-stale])");
+      for (let i = 0; i < 60 && !fresh(); i++) await new Promise((r) => setTimeout(r, 150));
+      const v = fresh();
+      if (!v) return { ok: false, hash: location.hash, why: document.getElementById("view").innerText.slice(0, 200) };
+      v.muted = true;
+      v.play().catch(() => {});
+      for (let i = 0; i < 80 && !(v.currentTime > 1.5); i++) await new Promise((r) => setTimeout(r, 150));
+      return { ok: v.currentTime > 1.5, t: v.currentTime, err: v.error && v.error.code, hash: location.hash, src: v.currentSrc,
+        title: (document.querySelector(".player .ptitle") || {}).innerText || "" };`);
+    if (!/^#\/play\/\d+\?extra=\d+$/.test(tr.hash)) fail("trailer", `the Trailer button went to ${tr.hash}`);
+    if (!tr.ok) fail("trailer", `trailer did not play (t=${tr.t}, media error ${tr.err}) ${tr.why || ""}`);
+    if (!/\/api\/v1\/extras\/\d+\/file\?session=/.test(tr.src || "")) fail("trailer", `played ${tr.src}, not the extra's file`);
+    if (!/Harbor Lights · Trailer/.test(tr.title)) fail("trailer", `player title "${tr.title}"`);
+  }
+  // Theme music: a button on the show's page, which plays only when pressed.
+  await s("Page.navigate", { url: `${base}/#/item/${ids.show}` });
+  const theme = await evaluate(`${wait(`document.querySelector(".hero .theme-btn")`)}
+    const b = document.querySelector(".hero .theme-btn");
+    if (!b) return { found: false };
+    const before = b.getAttribute("aria-pressed");
+    b.click();
+    ${wait(`b.getAttribute("aria-pressed") === "true"`)}
+    return { found: true, before, after: b.getAttribute("aria-pressed") };`);
+  if (!theme.found) fail("theme music", "no Theme music button on the show's page");
+  else if (theme.before !== "false" || theme.after !== "true") fail("theme music", `played before a click or not after one (${theme.before} then ${theme.after})`);
+  if (exceptions.length) fail("trailer and extras", `threw: ${exceptions[0]}`);
 
   // Playback: a file the browser plays directly, one whose audio it needs
   // converted, and one whose video it cannot decode at all. The pill says
@@ -636,4 +704,4 @@ if (failures.length) {
   process.exit(1);
 }
 console.log("\nweb-smoke: every page, every playback path (HLS included), Continue Watching removal, search as you type, the shortcuts list, " +
-  "the Home feature, season tabs and the phone menu, the History section, and Skip Intro and Next Episode passed");
+  "the Home feature, season tabs and the phone menu, the History section, the trailer, extras and theme music, and Skip Intro and Next Episode passed");
