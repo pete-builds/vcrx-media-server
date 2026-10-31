@@ -92,6 +92,7 @@ func wantError(t *testing.T, what string, r resp, code int, errCode string) {
 }
 
 func TestProfilesListAndSwitch(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	var list struct {
 		Profiles []struct {
@@ -157,6 +158,7 @@ func mustUserID(t *testing.T, f *fixture, username string) int64 {
 // own slot back. One device guessing locks only itself; the right PIN still
 // works on every other device until the whole home's allowance is spent.
 func TestPINRateLimit(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	tok := f.adminTok
 	wrong := func(addr string) resp {
@@ -200,6 +202,7 @@ func TestPINRateLimit(t *testing.T) {
 // A kid failing an admin's PIN on the shared TV cannot keep the admin out: the
 // admin's password counts against the sign-in limiter, not the PIN buckets.
 func TestAdminPasswordGetsPastAFullPINBucket(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	pete := mustUserID(t, f.fixture, "pete")
 	if r := f.do("PUT", fmt.Sprintf("/api/v1/admin/profiles/%d/pin", pete), f.adminTok, map[string]any{"pin": "8080"}); r.code != 204 {
@@ -217,6 +220,7 @@ func TestAdminPasswordGetsPastAFullPINBucket(t *testing.T) {
 // Concurrent wrong PINs: the limit holds before the hash, so no more PINs are
 // hashed than the buckets allow, however many arrive at once.
 func TestPINLimitHoldsUnderConcurrency(t *testing.T) {
+	// Not parallel: it counts household.HashChecks, which every test shares.
 	f := newHouseholdFixture(t)
 	burst := func(addr func(i int) string, n int) int64 {
 		before := household.HashChecks()
@@ -260,6 +264,7 @@ func TestPINLimitHoldsUnderConcurrency(t *testing.T) {
 
 // Each profile has its own watched state and Continue Watching.
 func TestWatchStateIsPerProfile(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	path := fmt.Sprintf("/api/v1/items/%d/watched", f.movieID)
 	if r := f.do("PUT", path, f.adminTok, map[string]any{"played": true}); r.code != 204 {
@@ -296,6 +301,7 @@ func TestWatchStateIsPerProfile(t *testing.T) {
 // A kid's profile sees nothing above its ceiling: not in lists, not by search,
 // not by id. The admin sees both films.
 func TestKidProfileCeiling(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	lib := func(tok string) string {
 		var libs struct{ Libraries []struct{ ID int64 } }
@@ -343,6 +349,7 @@ func (f *householdFixture) picker(on bool) {
 // on auto_sign_in_user, and the picker counts as restricted: an admin needs a
 // credential there. Without it, today's automatic sign-in is unchanged.
 func TestAutoSignInLandsOnThePicker(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	home := []string{"RemoteAddr", "192.168.1.30:5000", csrfHeader, "tv"}
 	dev := map[string]any{"device": map[string]string{"id": "tv-1", "name": "Living room", "platform": "android_tv", "client": "vcrx-tv", "client_version": "1"}}
@@ -397,6 +404,7 @@ func TestAutoSignInLandsOnThePicker(t *testing.T) {
 // header, and so must a picker request with no session at all, since a
 // cross-site form could otherwise plant a profile's session cookie.
 func TestSwitchCSRF(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	f.picker(true)
 	r := f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": "pete", "password": "adminpass1", "cookie": true})
@@ -433,6 +441,7 @@ func TestSwitchCSRF(t *testing.T) {
 }
 
 func TestAdminProfilesAndAvatar(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	// Friends join the household and become kids through the admin API.
 	friend := mustUserID(t, f.fixture, "friend")
@@ -507,6 +516,7 @@ func TestAdminProfilesAndAvatar(t *testing.T) {
 // The skip-markers choice (#42) is per user, so it follows the active profile
 // across switches.
 func TestPlaybackSettingsFollowTheProfile(t *testing.T) {
+	t.Parallel()
 	f := newHouseholdFixture(t)
 	mode := func(tok string) string {
 		var s struct {

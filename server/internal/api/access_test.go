@@ -687,6 +687,7 @@ func (w *walkFixture) become(kind string) {
 }
 
 func TestAccessWalkEveryRouteAppliesThePolicy(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"user", "profile", "token", "peer"} {
 		t.Run(kind, func(t *testing.T) { accessWalk(t, kind) })
 	}
@@ -850,6 +851,7 @@ func accessWalk(t *testing.T, kind string) {
 // A content-rating ceiling admits the TV ratings for the same audience, hides
 // titles with no known rating, and judges an episode by its own rating too.
 func TestContentRatingCeiling(t *testing.T) {
+	t.Parallel()
 	w := newWalkFixture(t)
 	w.open()
 	set := func(item int64, rating any) {
@@ -895,6 +897,7 @@ func TestContentRatingCeiling(t *testing.T) {
 
 // Marking a show watched marks only the episodes the caller can see.
 func TestWatchedShowSkipsHiddenEpisodes(t *testing.T) {
+	t.Parallel()
 	w := newWalkFixture(t)
 	w.restrict()
 	if r := w.do("PUT", fmt.Sprintf("/api/v1/items/%d/watched", w.showID), w.friendTok, map[string]any{"played": true}); r.code != 204 {
@@ -910,6 +913,7 @@ func TestWatchedShowSkipsHiddenEpisodes(t *testing.T) {
 
 // The labels the policy editor offers.
 func TestAdminLabelsAndSummary(t *testing.T) {
+	t.Parallel()
 	w := newWalkFixture(t)
 	w.restrict()
 	var labels struct {
@@ -940,6 +944,7 @@ func TestAdminLabelsAndSummary(t *testing.T) {
 // counts and only blocks clients off the LAN, so nobody on the internet can
 // keep Pete from signing in at home.
 func TestLoginLockoutSparesTheLAN(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	login := func(addr, user, pass string) int {
 		return f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": user, "password": pass}, "RemoteAddr", addr).code
@@ -994,6 +999,7 @@ func TestLoginLockoutSparesTheLAN(t *testing.T) {
 // account (50 per window), apart from the internet's count; Tailscale peers
 // count as off the LAN for sign-in limits and each is its own address.
 func TestLoginLANAccountBucketAndTailscale(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	login := func(addr, user, pass string) int {
 		return f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": user, "password": pass}, "RemoteAddr", addr).code

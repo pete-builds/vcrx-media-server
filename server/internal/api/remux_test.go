@@ -29,6 +29,7 @@ func browserCaps(fmp4 bool) map[string]any {
 }
 
 func TestConvertedStreamDecision(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.srv.Playback.CanRemux = true
 	f.srv.Remux = remux.New("ffmpeg", "ffprobe", 2, nil)
@@ -74,6 +75,7 @@ func TestConvertedStreamDecision(t *testing.T) {
 }
 
 func TestConvertedStreamEndToEnd(t *testing.T) {
+	t.Parallel()
 	ff, err1 := osexec.LookPath("ffmpeg")
 	fp, err2 := osexec.LookPath("ffprobe")
 	if err1 != nil || err2 != nil {
@@ -158,6 +160,7 @@ func firefoxCaps(fmp4 bool) map[string]any {
 }
 
 func TestTranscodeDecision(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.srv.Playback.CanRemux = true
 	f.srv.Remux = remux.New("ffmpeg", "ffprobe", 2, nil)
@@ -236,6 +239,7 @@ func TestTranscodeDecision(t *testing.T) {
 }
 
 func TestTranscodeEndToEnd(t *testing.T) {
+	t.Parallel()
 	ff, err1 := osexec.LookPath("ffmpeg")
 	fp, err2 := osexec.LookPath("ffprobe")
 	if err1 != nil || err2 != nil {
@@ -336,6 +340,7 @@ func TestTranscodeEndToEnd(t *testing.T) {
 // reading after it stopped does not hold a conversion slot. Other events leave
 // them alone.
 func TestStopEventCutsOpenStreams(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.srv.Playback.CanRemux = true
 	f.srv.Remux = remux.New("ffmpeg", "ffprobe", 2, nil)
@@ -380,6 +385,7 @@ func TestStopEventCutsOpenStreams(t *testing.T) {
 // A cancelled stream must not wait for a client that has stopped reading: the
 // pending write fails at once, so the conversion slot frees.
 func TestCancelledStreamDoesNotWaitForASlowReader(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	returned := make(chan time.Duration, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -7,6 +7,7 @@ import (
 )
 
 func TestChapterTitles(t *testing.T) {
+	t.Parallel()
 	got := fromChapters([]Chapter{
 		{"Chapter 1", 0, 60_000},
 		{" Opening ", 60_000, 150_000},
@@ -26,6 +27,7 @@ func TestChapterTitles(t *testing.T) {
 }
 
 func TestNFOMarkers(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	media := filepath.Join(dir, "Show - S01E01.mkv")
 	if m, err := fromNFO(media); err != nil || len(m) != 0 {

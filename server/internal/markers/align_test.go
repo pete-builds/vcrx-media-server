@@ -6,6 +6,7 @@ import "testing"
 // second, whatever the frame grid does: offsets of a whole, a quarter and
 // half a hop.
 func TestAlignFindsSharedThemeOnBothSides(t *testing.T) {
+	t.Parallel()
 	th := theme(1, 30)
 	for _, frac := range []float64{0, 0.25, 0.5} {
 		bAt := 12.0 + frac*Hop/SampleRate
@@ -33,6 +34,7 @@ func TestAlignFindsSharedThemeOnBothSides(t *testing.T) {
 // Unrelated audio, silence and a steady tone never match, the last two
 // however long they are shared.
 func TestAlignFindsNothingUnshared(t *testing.T) {
+	t.Parallel()
 	cases := map[string][2][]float64{
 		"unrelated": {programme(30, 300), programme(31, 300)},
 		"silence":   {cat(programme(32, 20), silence(60), programme(33, 20)), cat(silence(60), programme(34, 40))},
@@ -48,6 +50,7 @@ func TestAlignFindsNothingUnshared(t *testing.T) {
 // Two different shared stretches (a theme, and a scene repeated as a recap)
 // both come back, best first.
 func TestAlignReturnsEachSharedStretch(t *testing.T) {
+	t.Parallel()
 	th, scene := theme(1, 30), programme(77, 20)
 	a := Compute(pcm(cat(programme(1, 10), th, programme(2, 20), scene, programme(3, 30)), 1))
 	b := Compute(pcm(cat(scene, programme(4, 5), th, programme(5, 60)), 2))

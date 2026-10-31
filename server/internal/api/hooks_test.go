@@ -13,6 +13,7 @@ import (
 )
 
 func TestArrWebhook(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	body := `{"eventType":"Download","movie":{"id":7,"title":"The Film","folderPath":"/volume1/movies/Film 2001 1080p","year":2001},
 		"movieFile":{"relativePath":"film.1080p.mkv","quality":"Bluray-1080p"},"isUpgrade":false,"instanceName":"Radarr"}`
