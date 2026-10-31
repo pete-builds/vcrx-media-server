@@ -29,6 +29,7 @@ import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.PlaybackRequest
 import io.github.pete_builds.vcrx.tv.net.PlaybackSession
+import io.github.pete_builds.vcrx.tv.net.streamRefusal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -238,7 +239,7 @@ class PlaybackController(
     private fun describe(error: PlaybackException): String {
         val http = generateSequence(error.cause) { it.cause }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
         return when {
-            http != null -> "The server refused the stream (HTTP ${http.responseCode})."
+            http != null -> streamRefusal(http.responseCode, http.responseBody, graph.json)
             error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
                 error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
                 "Lost the connection to the server."

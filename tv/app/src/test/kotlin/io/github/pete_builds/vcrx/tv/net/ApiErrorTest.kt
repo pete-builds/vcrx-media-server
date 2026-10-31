@@ -29,4 +29,11 @@ class ApiErrorTest {
         assertEquals("The server cannot play this file on this device yet.", e.message)
         assertEquals("The server had an internal error (HTTP 502).", httpError(502, null, ApiJson).message)
     }
+
+    @Test
+    fun aStoppedStreamShowsTheAdminsMessage() {
+        val body = """{"error": "session_terminated", "message": "Bedtime, finish tomorrow."}""".toByteArray()
+        assertEquals("Playback was stopped on the server: Bedtime, finish tomorrow.", streamRefusal(410, body, ApiJson))
+        assertEquals("The server refused the stream (HTTP 404).", streamRefusal(404, null, ApiJson))
+    }
 }

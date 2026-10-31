@@ -18,6 +18,8 @@ data class ServerInfo(
     val product: String = "",
     val version: String = "",
     @SerialName("api_version") val apiVersion: Int = 0,
+    /** True when this device's network may sign in without a password (POST /api/v1/auth/auto). */
+    @SerialName("auto_sign_in") val autoSignIn: Boolean = false,
 )
 
 @Serializable
@@ -36,6 +38,9 @@ data class LoginRequest(
     val password: String,
     val device: Device,
 )
+
+@Serializable
+data class AutoLoginRequest(val device: Device)
 
 @Serializable
 data class User(
