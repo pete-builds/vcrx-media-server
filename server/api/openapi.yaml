@@ -164,7 +164,10 @@ paths:
               schema:
                 allOf:
                   - { $ref: "#/components/schemas/LoginResponse" }
-                  - { type: object, properties: { device: { $ref: "#/components/schemas/InvitedDevice" } } }
+                  - type: object
+                    properties:
+                      device: { $ref: "#/components/schemas/InvitedDevice" }
+                      loan: { oneOf: [{ $ref: "#/components/schemas/BorrowerLoan" }, { type: "null" }], description: "Set when the invite is a lent tape's card." }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
@@ -351,7 +354,13 @@ paths:
                     properties:
                       kind: { type: string, enum: [user, profile, token], description: "token: an invited device, which never sees the profile picker." }
                       device_expires_at: { type: integer, description: When an invited device's access ends. }
-        "401": { $ref: "#/components/responses/Error" }
+                      loan: { $ref: "#/components/schemas/BorrowerLoan" }
+        "401":
+          description: >-
+            Not signed in. A lent tape's device whose loan is over gets error loan_ended, with "Be kind, rewind."
+            in message and the title, so it can say so instead of asking to sign in. Every signed-in route answers
+            a borrower this way once the loan has ended.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /api/v1/me/playback-settings:
     get:
       operationId: getPlaybackSettings
@@ -597,7 +606,9 @@ paths:
         (decision transcode; needs an ffmpeg with libx264 and a client that decodes
         H.264). A client that reports hls_stream (Safari) gets the same conversion as
         HLS instead (protocol hls), and gets HLS when it reports both. Any other client
-        is refused with transcode_unavailable when its video needs converting.
+        is refused with transcode_unavailable when its video needs converting. A movie
+        out on loan to someone else is refused with 409 on_loan ("Out on loan, due
+        back ..."), for admins too: one loan per copy.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackRequest" } } }
@@ -605,6 +616,7 @@ paths:
         "201": { description: Session created, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackSession" } } } }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
   /api/v1/playback/sessions/{session_id}/events:
     post:
@@ -1278,6 +1290,75 @@ paths:
                 type: object
                 properties:
                   device: { $ref: "#/components/schemas/InvitedDevice" }
+                  streams_stopped: { type: integer }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/loans:
+    get:
+      operationId: adminListLoans
+      summary: Lent tapes, newest first, out, returned early or expired, with who borrowed them and when.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 500 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [loans], properties: { loans: { type: array, items: { $ref: "#/components/schemas/Loan" } } } }
+    post:
+      operationId: adminLend
+      summary: >-
+        Lend a tape: one movie, for 24 hours to 7 days (72 by default). The answer carries an invite, shown once,
+        for the printed card's QR code; the device that redeems it sees and streams that movie only, at up to
+        1080p unless allow_4k, with its subtitles. While the loan is out nobody else can play the owner's copy,
+        admins included (playback answers 409 on_loan), and every stream of it open at lending time stops.
+        One loan per copy: a second loan of a title that is out answers 409 on_loan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [item_id, name]
+              properties:
+                item_id: { type: integer }
+                name: { type: string, maxLength: 64, description: Who it is lent to, as the card and Activity show it. }
+                hours: { type: integer, minimum: 24, maximum: 168, default: 72 }
+                allow_4k: { type: boolean, description: Lift the 1080p cap. }
+                allow_transcode: { type: boolean, description: Let the server convert files the borrower's device cannot play as they are. }
+      responses:
+        "201":
+          description: Lent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loan, invite, url, qr_png]
+                properties:
+                  loan: { $ref: "#/components/schemas/Loan" }
+                  invite: { type: string, description: The invite secret. Shown once. }
+                  url: { type: string, description: "The invite link for the card's QR code." }
+                  qr_png: { type: string, format: byte, description: A QR code of url, as base64 PNG. }
+                  streams_stopped: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/loans/{loan_id}/return:
+    post:
+      operationId: adminReturnLoan
+      summary: >-
+        Return a tape early. The title is back on the shelf at once; the borrower's device is signed out, its open
+        streams stop, and its next request answers 401 loan_ended ("Be kind, rewind."). Returning twice is harmless.
+      parameters:
+        - { name: loan_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  loan: { $ref: "#/components/schemas/Loan" }
                   streams_stopped: { type: integer }
         "404": { $ref: "#/components/responses/Error" }
   /api/v1/admin/pairings/{code}:
@@ -2395,6 +2476,32 @@ components:
       description: Error
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   schemas:
+    Loan:
+      type: object
+      description: A lent tape.
+      properties:
+        id: { type: integer }
+        item_id: { type: [integer, "null"], description: Null once the movie is gone from the library. }
+        token_id: { type: [integer, "null"], description: The borrower's invited device. }
+        title: { type: string }
+        borrower: { type: string }
+        state: { type: string, enum: [out, returned, expired] }
+        lent_by: { type: [string, "null"] }
+        created_at: { type: integer }
+        due_at: { type: integer }
+        ended_at: { type: [integer, "null"] }
+        ended_by: { type: [string, "null"] }
+        redeemed_at: { type: [integer, "null"], description: When the card was scanned. }
+        device_name: { type: [string, "null"] }
+        last_seen_at: { type: [integer, "null"] }
+        summary: { type: string }
+    BorrowerLoan:
+      type: object
+      description: A lent tape's device's own loan.
+      properties:
+        item_id: { type: [integer, "null"] }
+        title: { type: string }
+        due_at: { type: integer }
     Error:
       type: object
       required: [error, message]
@@ -2670,6 +2777,17 @@ components:
                   role: { type: [string, "null"] }
             ratings: { type: object, additionalProperties: { type: number }, description: "Keyed by source: imdb, tmdb, nfo." }
             versions: { type: array, items: { $ref: "#/components/schemas/Version" }, description: Only versions the caller may play, best first. }
+            loan:
+              description: Set while the movie is out on loan; only its borrower can play it until due_at.
+              oneOf:
+                - type: "null"
+                - type: object
+                  required: [id, due_at, yours]
+                  properties:
+                    id: { type: integer }
+                    due_at: { type: integer }
+                    yours: { type: boolean, description: True on the borrower's own device. }
+                    borrower: { type: [string, "null"], description: Who has it; admins only. }
             collections:
               type: array
               items:

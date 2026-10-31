@@ -45,6 +45,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
+	"github.com/pete-builds/vcrx-media-server/server/internal/loans"
 	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/music"
 	"github.com/pete-builds/vcrx-media-server/server/internal/newsletter"
@@ -408,6 +409,8 @@ func serve() error {
 	// polls with an unknown code, and ten wrong codes typed by an admin, per
 	// address per window.
 	srv.Invites, srv.Pairings, srv.PairLimiter = &invites.Store{DB: a.db}, &invites.Pairings{}, auth.NewLimiter(10, 15*time.Minute)
+	// Lent tapes; their expiry is swept with the devices' every minute.
+	srv.Loans = &loans.Store{DB: a.db, Invites: srv.Invites}
 	// Friends' servers: link with a server invite, stream from each other,
 	// never copy (milestone 9, item 3).
 	srv.SetUpFederation(federation.Guard{AllowLoopback: cfg.PeerAllowLoopback})

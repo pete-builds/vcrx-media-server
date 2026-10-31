@@ -143,7 +143,9 @@ func (c *Catalog) Home(ctx context.Context, pol policy.Policy, userID int64) ([]
 		}
 		built = append(built, rows...)
 	}
-	return q.load(built, true)
+	// A lent tape's device has one title: its rows are short by nature, and
+	// dropping them would leave its Home (the TV's first screen) empty.
+	return q.load(built, !pol.Borrower)
 }
 
 // HomeRowItems is a row's "See all": the same row with up to SeeAllSize

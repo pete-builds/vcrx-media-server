@@ -200,6 +200,9 @@ func (s *Server) gate(rt route) http.Handler {
 				return
 			}
 			if errors.Is(err, auth.ErrInvalidToken) {
+				if s.loanEnded(w, r, tok) {
+					return
+				}
 				writeError(w, http.StatusUnauthorized, "unauthorized", "Your session has expired. Sign in again.")
 				return
 			}

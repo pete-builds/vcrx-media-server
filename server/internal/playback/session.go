@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
+	"github.com/pete-builds/vcrx-media-server/server/internal/loans"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
@@ -231,6 +232,15 @@ func (s *Service) Start(ctx context.Context, pol policy.Policy, c Client, req St
 	}
 
 	converted, hls, refusal := s.gate(pol, v, d, req.Capabilities)
+	lent, due, err := s.Catalog.OnLoan(ctx, pol, req.ItemID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if lent {
+		// One loan per copy: the owner's copy is out, so nobody else plays it,
+		// the owner included. Refused like any policy block, and recorded.
+		converted, hls, refusal = false, false, &Refusal{Status: 409, Code: "on_loan", Message: loans.OnLoanMessage(time.UnixMilli(due))}
+	}
 
 	resume := int64(0)
 	if req.StartPositionMs != nil {
