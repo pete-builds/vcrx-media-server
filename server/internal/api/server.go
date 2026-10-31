@@ -17,6 +17,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
+	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
 	"github.com/pete-builds/vcrx-media-server/server/internal/subtitles"
 )
 
@@ -37,6 +38,7 @@ type Server struct {
 	Playback   *playback.Service
 	Artwork    *artwork.Service
 	Subtitles  *subtitles.Service
+	Remux      *remux.Service
 	Activity   *activity.Service
 	Webhooks   *notify.Webhooks
 	Admin      *admin.Admin
@@ -93,6 +95,9 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/items/{item_id}/artwork/{kind}", signedIn, s.artwork},
 		{"POST", "/api/v1/playback/sessions", signedIn, s.startPlayback},
 		{"POST", "/api/v1/playback/sessions/{session_id}/events", signedIn, s.playbackEvent},
+		{"GET", "/api/v1/playback/sessions/{session_id}/seek", signedIn, s.convertedSeek},
+		{"GET", "/api/v1/playback/sessions/{session_id}/stream.mp4", signedIn, s.convertedStream},
+		{"HEAD", "/api/v1/playback/sessions/{session_id}/stream.mp4", signedIn, s.convertedStream},
 		{"GET", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"HEAD", "/api/v1/versions/{version_id}/file", signedIn, s.streamVersion},
 		{"GET", "/api/v1/subtitles/{stream_id}", signedIn, s.subtitle},

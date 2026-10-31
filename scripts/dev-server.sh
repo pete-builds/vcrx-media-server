@@ -51,6 +51,19 @@ if [ ! -d "$media" ]; then
   clip "$media/TV/Quiet Street/Season 02/Quiet Street - S02E01.mp4" 40 libx264 aac
 fi
 
+# H.264 with AC-3 audio in Matroska, the common case browsers cannot play
+# directly: it plays as a converted stream (audio to AAC). Keyframes every 2 s
+# and an embedded English track, to exercise seeking and subtitle timing.
+river="$media/Movies/River Line (2011)/River Line (2011).mkv"
+if [ ! -f "$river" ]; then
+  mkdir -p "$(dirname "$river")"
+  cues "$dir/r.srt" "River Line subtitle"
+  ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=1280x720:rate=24:duration=90" -f lavfi -i "sine=frequency=550:duration=90" \
+    -i "$dir/r.srt" -map 0 -map 1 -map 2 -c:v libx264 -g 48 -sc_threshold 0 -pix_fmt yuv420p -c:a ac3 -ac 2 -c:s srt \
+    -metadata:s:s:0 language=eng "$river"
+  rm -f "$dir/r.srt"
+fi
+
 # NFO ratings let the poster overlays show without network access.
 nfo() { # dir file rating votes
   [ -f "$1/$2" ] && return
