@@ -19,7 +19,7 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 | Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, genre and decade filters | Collections from YAML rules |
 | Local accounts, per-library grants, a per-user resolution ceiling, label deny lists | Content-rating ceilings, playback policy UI |
 | Direct play over HTTP with Range; converted streams for clients that ask for them (video copied, audio converted to AAC, fragmented MP4); sidecar and embedded text subtitles (also as WebVTT for browsers) | Video transcoding, picture subtitle burn-in, VA-API hardware acceleration |
-| Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, stats, per-user totals, stop a stream, webhooks | Activity screens in a client |
+| Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, per-title history, stats, per-user totals, stop a stream, webhooks, a watch state export for cleanup tools | Activity screens in a client |
 | Web app at `/`: browse, details, search, play in the browser with subtitles, Activity screens. REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Browser playback of files the browser cannot decode, other TV platforms |
 
 A file the TV cannot play directly is refused with a message saying why ("needs video conversion: the device has no av1 video decoder"). Transcoding arrives in milestone 3.
@@ -75,6 +75,8 @@ vcrx user add|grant|passwd|list
 vcrx library add|list|scan
 vcrx metadata refresh [-all]  fetch posters and plots from TMDb now
 vcrx metadata status          matched and unmatched counts, and why each miss was skipped
+vcrx watch export [-library NAME] [-unplayed-days N]
+                              every movie and show with its files and watch state, as JSON lines
 vcrx healthcheck              what the container HEALTHCHECK runs
 ```
 
@@ -105,7 +107,7 @@ Open `http://<server>:3750/` in a browser. It is part of the server: no separate
 - **Search as you type:** after two characters the search box lists up to eight matching titles with poster, year or episode, and kind. Arrow keys and Enter open one; Enter with none highlighted shows every result; Escape closes the list.
 - **Keyboard:** press `?` anywhere outside a text field for the list of shortcuts, `/` to jump to search. In the player: Space or K to play or pause, the arrow keys to skip back or forward, F for full screen, M to mute, Escape to leave.
 - **Play** in the browser, resuming where any device left off. The browser tells the server what it can decode. A file it cannot play directly because of its container or its audio (most often E-AC-3, AC-3 or DTS, which browsers do not decode) plays as a converted stream: the video is copied untouched and only the audio is converted to AAC, a fraction of one CPU core, with VCRX's own seek bar. Video the browser cannot decode at all is refused with the reason until full transcoding lands; the TV app still plays it. Subtitles: pick any text track, sidecar or inside the file.
-- **Activity** for admins: now playing with a Stop button, history, stats and users.
+- **Activity** for admins: now playing with a Stop button, history, stats and users. A movie, show or episode page also shows admins its own History: the latest 20 plays with who, when, device, how much was watched and how far it got, and the totals.
 - **Sign-in:** with `auto_sign_in_user` set, a browser on a trusted network is signed straight in; otherwise it shows a sign-in form. The session is an HttpOnly cookie, and every change the page makes carries a header a cross-site page cannot send.
 
 ### Poster overlays (Kometa style)
@@ -144,6 +146,8 @@ Like Tautulli, without a second program. Every play request is logged with the d
 |---|---|
 | `GET /api/v1/admin/activity/now` | What is playing now: who, what, where, progress, direct play or not, bitrate, and the total bandwidth |
 | `GET /api/v1/admin/activity/history` | Finished plays, newest first, by user or by title (a show includes its episodes) |
+| `GET /api/v1/admin/items/{id}/history` | One title's plays, newest first, with its totals: plays, people, watch time. What the details page shows |
+| `GET /api/v1/admin/watch/export` | Every movie and show with its file paths, size, when it was added and last played, play count and who finished it, for a cleanup tool (see below) |
 | `GET /api/v1/admin/activity/stats?days=30` | Plays and watch time, top movies, shows, users, clients, devices and platforms, plays by day, hour and weekday, direct play against converted, and the most streams at once |
 | `GET /api/v1/admin/activity/users` | Every account with its totals and when and where it was last seen |
 | `POST /api/v1/admin/activity/sessions/{id}/terminate` | Stop a stream now, with a message the viewer sees |
@@ -151,6 +155,8 @@ Like Tautulli, without a second program. Every play request is logged with the d
 A play counts in stats once 30 seconds have actually played, and is watched at 90%. Days and hours follow the container's `TZ`. Each chart on the Stats page has a "Show as a table" view with the same numbers.
 
 Addresses are labelled by the kind of network they are on: This server, Local network, Tailscale (100.64.0.0/10 and its IPv6 prefix) or Internet. That works offline; public addresses are not placed on a map.
+
+**Watch state for cleanup tools:** a script that deletes watched or never-played media needs to know, per title, whether anyone watched it and when. `GET /api/v1/admin/watch/export` answers that for every movie and show still on disk, a show rolled up from its episodes: `item_id`, `kind`, `title`, `year`, `library`, `paths` (absolute, as the server sees them), `size_bytes`, `added_at`, `last_played_at` (any user, a stream in progress included; `null` if never), `play_count` (times finished, all users), `finished_by` (usernames), and for shows `episodes_total` and `episodes_watched`. `?library_id=` narrows it to one library, and `?unplayed_days=30` keeps only titles nobody has played in 30 days, never-played ones included. On the host, `vcrx watch export -library Movies -unplayed-days 30` prints the same rows as JSON lines. The paths are the container's; map them to the host's before deleting anything.
 
 **Webhooks:** set `VCRX_WEBHOOK_URLS` in `.env` to one or more URLs, comma separated. Each gets a JSON post for `play`, `stop`, `refused`, `terminated` and `added` (new titles after a scan, such as `＋ New in Movies: The Film (2024), Show (3 new episodes)`; narrow the events with `webhook_events` in `vcrx.yaml`). A Discord webhook URL gets a plain Discord message instead, such as `▶ pete started The Film on Living Room TV (direct play)`.
 

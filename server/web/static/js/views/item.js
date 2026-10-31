@@ -1,5 +1,5 @@
 import { api, artUrl } from "../api.js";
-import { h, icon, runtime, clock, size, bitrate, episodeCode, toast, fadeImg, placeholderArt, cardArt } from "../dom.js";
+import { h, icon, runtime, clock, size, bitrate, episodeCode, toast, fadeImg, placeholderArt, cardArt, when, hours } from "../dom.js";
 import { go, state } from "../app.js";
 
 // The details page for a movie, show, season or episode.
@@ -7,10 +7,15 @@ export async function itemView({ match, params }) {
   const id = Number(match[1]);
   const item = await api(`/items/${id}`);
   const playable = item.kind === "movie" || item.kind === "episode";
-  const children = playable ? null : await api(`/items/${id}/children`);
-  const admin = state.me && state.me.is_admin && (item.kind === "movie" || item.kind === "show");
+  const isAdmin = !!(state.me && state.me.is_admin);
+  const [children, history] = await Promise.all([
+    playable ? null : api(`/items/${id}/children`),
+    isAdmin && item.kind !== "season" ? loadHistory(id) : null,
+  ]);
+  const admin = isAdmin && (item.kind === "movie" || item.kind === "show");
   const fix = admin ? fixMatch(item, params && params.get("fix") === "1") : null;
-  const el = h("div", {}, hero(item), fix, castSection(item), playable ? techFacts(item) : null, children ? childrenSection(item, children.items || []) : null);
+  const el = h("div", {}, hero(item), fix, castSection(item), playable ? techFacts(item) : null, children ? childrenSection(item, children.items || []) : null,
+    history ? historySection(item, history) : null);
   return { el, title: item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)}`.trim() : item.title, hero: true };
 }
 
@@ -276,6 +281,43 @@ function episodeCard(ep) {
   const play = h("button", { class: "ep-play", type: "button", "aria-label": `Play ${code} ${ep.title}`.trim(), onclick: () => go(`/play/${ep.id}`) },
     h("span", {}, icon("play")));
   return h("div", { class: "ep-card" + (w.played ? " watched" : "") }, link, play);
+}
+
+// History, for admins: the latest plays of this title, like Tautulli's item
+// page. A show's history is its episodes'. Admin routes answer only on the LAN,
+// so a failure here leaves the section out rather than breaking the page.
+const HISTORY_ROWS = 20;
+
+async function loadHistory(id) {
+  try {
+    const data = await api(`/admin/items/${id}/history?limit=${HISTORY_ROWS}`);
+    return data && data.plays > 0 ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+function historySection(item, data) {
+  const showEpisodes = item.kind === "show";
+  const head = ["When", "User", showEpisodes ? "Episode" : null, "Device", "Watched", "Reached"].filter(Boolean);
+  const numeric = (c) => c === "Watched" || c === "Reached";
+  const rows = data.sessions.map((x) => h("tr", {},
+    h("td", {}, when(x.started_at)),
+    h("td", {}, x.username || "Unknown"),
+    showEpisodes ? h("td", {}, x.item_id ? h("a", { href: `#/item/${x.item_id}` }, x.item_title || "Episode") : x.item_title || "") : null,
+    h("td", {}, x.device_name || x.client || ""),
+    h("td", { class: "num" }, hours(x.played_ms)),
+    h("td", { class: "num", title: x.decision_reason || "" },
+      x.progress != null ? `${Math.round(x.progress * 100)}%` : "", " ",
+      h("span", { class: `decision ${x.decision}` }, x.decision.replace(/_/g, " ")))));
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  return h("section", { class: "section item-history" },
+    h("h2", {}, "History"),
+    h("p", { class: "muted" }, [plural(data.plays, "play", "plays"), plural(data.users, "person", "people"), `${hours(data.watch_ms)} watched`].join(" · "),
+      data.plays > data.sessions.length ? ` · latest ${data.sessions.length} shown` : ""),
+    h("table", { class: "list" },
+      h("thead", {}, h("tr", {}, head.map((c) => h("th", { class: numeric(c) ? "num" : "" }, c)))),
+      h("tbody", {}, rows)));
 }
 
 // Fix Match, for admins: search TMDb and pick the right title when automatic
