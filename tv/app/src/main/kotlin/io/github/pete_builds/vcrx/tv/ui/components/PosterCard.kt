@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -52,24 +53,30 @@ fun ItemCard(
     shape: CardShape = CardShape.Poster,
     width: Dp? = if (shape == CardShape.Poster) 146.dp else 252.dp,
     focusModifier: Modifier = Modifier,
+    /** Home leaves the title off: its hero names whichever card has focus, as Plex does. */
+    showTitle: Boolean = true,
+    onFocused: (() -> Unit)? = null,
 ) {
     Column(if (width != null) modifier.width(width) else modifier.fillMaxWidth()) {
-        FrameCard(onClick = onClick, modifier = Modifier.fillMaxWidth().then(focusModifier)) {
+        val focusWatch = if (onFocused != null) Modifier.onFocusChanged { if (it.isFocused) onFocused() } else Modifier
+        FrameCard(onClick = onClick, modifier = Modifier.fillMaxWidth().then(focusModifier).then(focusWatch)) {
             Box(Modifier.fillMaxWidth().aspectRatio(shape.aspect)) {
                 val (kind, hasArt) = artworkFor(item, shape)
                 Artwork(item.id, kind, hasArt, item.title, shape.requestWidth)
                 WatchBadge(item)
             }
         }
-        Text(
-            item.title,
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 8.dp),
-        )
-        subtitle(item)?.let {
-            Label(it, style = MaterialTheme.typography.labelSmall, color = Gray)
+        if (showTitle) {
+            Text(
+                item.title,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            subtitle(item)?.let {
+                Label(it, style = MaterialTheme.typography.labelSmall, color = Gray)
+            }
         }
     }
 }
