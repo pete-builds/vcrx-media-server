@@ -49,7 +49,7 @@ func (f Folder) Pick() string {
 	if len(clips) == 0 {
 		return ""
 	}
-	return clips[rand.IntN(len(clips))]
+	return clips[rand.IntN(len(clips))] //nolint:gosec // which bumper plays, not a secret
 }
 
 // Has reports whether name is one of the clips. Only a listed name is ever
