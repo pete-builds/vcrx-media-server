@@ -48,6 +48,10 @@ type Enricher struct {
 	Busy  func(libraryID int64) bool
 	Batch int
 	Now   func() time.Time
+	// Changed, when set, is called after a pass that matched anything and
+	// after a Fix Match: genres and ratings just changed, so smart collections
+	// and the labels they stamp rebuild at once instead of on their timer.
+	Changed func()
 }
 
 type Stats struct {
@@ -90,6 +94,9 @@ func (e *Enricher) Run(ctx context.Context, initial, interval time.Duration) {
 		}
 		wait = interval
 		st, err := e.Drain(ctx)
+		if e.Changed != nil && st.Matched+st.Episodes > 0 {
+			e.Changed()
+		}
 		if st.Matched+st.Unmatched+st.Errors > 0 {
 			e.log().Info("tmdb enrichment pass", "matched", st.Matched, "unmatched", st.Unmatched, "errors", st.Errors,
 				"episodes", st.Episodes)

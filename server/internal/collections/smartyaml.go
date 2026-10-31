@@ -55,6 +55,10 @@ func LoadDir(dir string) ([]FileResult, error) {
 	return out, nil
 }
 
+// ErrNoCollectionsKey refuses a file that is empty or has no top-level
+// collections: key. Write collections: [] to define nothing on purpose.
+var ErrNoCollectionsKey = errors.New("no collections: key (the file is empty or cut short); write collections: [] to remove its collections on purpose")
+
 // ParseFile parses one collections file. Every error names the file and line.
 func ParseFile(file string, data []byte) ([]Definition, error) {
 	p := parser{file: file}
@@ -62,18 +66,23 @@ func ParseFile(file string, data []byte) ([]Definition, error) {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("%s: %w", file, err)
 	}
+	// An empty, comment-only or truncated file is what an editor, rsync or
+	// Syncthing leaves mid-save. It is refused, never read as "no rules":
+	// emptying a file on purpose takes an explicit collections: [].
 	if doc.Kind == 0 || len(doc.Content) == 0 {
-		return nil, nil // an empty file defines nothing
+		return nil, fmt.Errorf("%s: %w", file, ErrNoCollectionsKey)
 	}
 	root := doc.Content[0]
 	if root.Kind != yaml.MappingNode {
 		return nil, p.errf(root, "the file must be a mapping with a collections: list")
 	}
 	var defs []Definition
+	hasKey := false
 	err := p.fields(root, func(kn, val *yaml.Node) error {
 		if kn.Value != "collections" {
 			return p.unknown(kn, "collections")
 		}
+		hasKey = true
 		if val.Kind != yaml.SequenceNode {
 			return p.errf(val, "collections must be a list")
 		}
@@ -88,6 +97,9 @@ func ParseFile(file string, data []byte) ([]Definition, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if !hasKey {
+		return nil, fmt.Errorf("%s:%d: %w", file, root.Line, ErrNoCollectionsKey)
 	}
 	seen := map[string]int{}
 	for _, d := range defs {

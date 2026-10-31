@@ -3,6 +3,7 @@ package collections
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -31,6 +32,7 @@ const day = int64(24 * 60 * 60 * 1000)
 type smartDB struct {
 	t    *testing.T
 	conn *sql.DB
+	now  time.Time // the builders' clock
 }
 
 func newSmartDB(t *testing.T) *smartDB {
@@ -43,7 +45,7 @@ func newSmartDB(t *testing.T) *smartDB {
 	if _, err := db.Migrate(context.Background(), conn, "", slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatal(err)
 	}
-	s := &smartDB{t: t, conn: conn}
+	s := &smartDB{t: t, conn: conn, now: testNow}
 	now := testNow.UnixMilli()
 	s.exec(`INSERT INTO libraries (id, name, kind, root_path, created_at, updated_at) VALUES (1, 'Movies', 'movie', '/m', 0, 0), (2, 'TV', 'show', '/t', 0, 0)`)
 	movie := func(id int64, title string, year int, rating string, addedDaysAgo int64, genres ...string) {
@@ -257,8 +259,15 @@ func TestParseErrors(t *testing.T) {
 	if defs[1].Label != "horror" || defs[1].Visible != (Visible{}) || len(defs[1].Smart.All) != 2 || defs[1].Line != 10 {
 		t.Fatalf("example second definition: %+v", defs[1])
 	}
-	if defs, err := ParseFile("empty.yaml", nil); err != nil || len(defs) != 0 {
-		t.Fatalf("empty file: %v %v", defs, err)
+	// Empty, comment-only and key-less files are refused; collections: [] is
+	// the way to define nothing on purpose.
+	for name, body := range map[string]string{"empty": "", "blank": " \n\n", "comments": "# nothing yet\n", "empty mapping": "{}\n"} {
+		if defs, err := ParseFile("empty.yaml", []byte(body)); !errors.Is(err, ErrNoCollectionsKey) || !strings.HasPrefix(err.Error(), "empty.yaml") {
+			t.Fatalf("%s file: %v %v", name, defs, err)
+		}
+	}
+	if defs, err := ParseFile("none.yaml", []byte("collections: []\n")); err != nil || len(defs) != 0 {
+		t.Fatalf("collections: []: %v %v", defs, err)
 	}
 }
 
@@ -289,7 +298,7 @@ func writeFile(t *testing.T, dir, name, body string) {
 }
 
 func newSmart(s *smartDB, dir string) *SmartBuilder {
-	return &SmartBuilder{DB: s.conn, Dir: dir, Now: func() time.Time { return testNow }}
+	return &SmartBuilder{DB: s.conn, Dir: dir, Now: func() time.Time { return s.now }, Debounce: 10 * time.Millisecond}
 }
 
 func (s *smartDB) build(b *SmartBuilder) Report {
@@ -358,6 +367,11 @@ func TestSmartLabelOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	rep = s.build(b)
+	if got := s.labels("horror"); !reflect.DeepEqual(got, []string{"2:manual", "3:collection", "4:nfo"}) || rep.Removed != 0 || !rep.Files[0].LastGood {
+		t.Fatalf("a just-deleted file was not held: %v %+v", got, rep)
+	}
+	s.now = s.now.Add(DeleteGrace)
+	rep = s.build(b)
 	if got := s.labels("horror"); !reflect.DeepEqual(got, []string{"2:manual", "4:nfo"}) || rep.Removed != 1 {
 		t.Fatalf("after deleting the file: %v %+v", got, rep)
 	}
@@ -416,16 +430,18 @@ func TestSmartBrokenFileKeepsLastGood(t *testing.T) {
 		t.Fatalf("the good file did not build: drama labels %v", got)
 	}
 
-	// A file deleted while another is broken: its collection goes, but its
-	// label is held until every file loads (a rename with a typo looks the same).
+	// A label no definition owns any more (drama.yaml now stamps "weepy")
+	// is held while another file is broken, since that file may be the one
+	// that owns it after its typo is fixed.
 	s.exec(`INSERT INTO item_tags (item_id, kind, value) VALUES (2, 'genre', 'Drama')`)
 	s.build(b)
-	if err := os.Remove(filepath.Join(dir, "drama.yaml")); err != nil {
-		t.Fatal(err)
-	}
+	writeFile(t, dir, "drama.yaml", "collections:\n  - name: Dramas\n    library: Movies\n    smart: {all: [{genre: Drama}]}\n    label: weepy\n")
 	s.build(b)
 	if got := s.labels("drama"); !reflect.DeepEqual(got, []string{"2:collection"}) {
 		t.Fatalf("orphaned label cleared while a file is broken: %v", got)
+	}
+	if got := s.labels("weepy"); !reflect.DeepEqual(got, []string{"2:collection"}) {
+		t.Fatalf("relabel: %v", got)
 	}
 
 	// The directory vanishes (a mount went away): nothing changes at all.
@@ -440,6 +456,7 @@ func TestSmartBrokenFileKeepsLastGood(t *testing.T) {
 
 	// Fixed: the new rule applies and the orphaned label clears.
 	writeFile(t, dir, "horror.yaml", strings.Replace(horrorFile, "content_rating: R", "year: 1988", 1))
+	s.now = s.now.Add(DeleteGrace)
 	rep = s.build(b)
 	if got := s.labels("horror"); !reflect.DeepEqual(got, []string{"3:collection"}) {
 		t.Fatalf("fixed file: %v (%+v)", got, rep)
@@ -448,10 +465,12 @@ func TestSmartBrokenFileKeepsLastGood(t *testing.T) {
 		t.Fatalf("orphan not cleared once every file loads: %v", got)
 	}
 
-	// An empty directory is the admin removing everything.
+	// Deleting the file removes what it built, once the grace has passed.
 	if err := os.Remove(filepath.Join(dir, "horror.yaml")); err != nil {
 		t.Fatal(err)
 	}
+	s.build(b)
+	s.now = s.now.Add(DeleteGrace)
 	rep = s.build(b)
 	if got := s.labels("horror"); len(got) != 0 || rep.Removed != 1 {
 		t.Fatalf("empty dir: %v %+v", got, rep)
@@ -561,5 +580,45 @@ func TestDeployExampleParses(t *testing.T) {
 	defs, err = ParseFile("uncommented.yaml", []byte(strings.Join(lines, "\n")))
 	if err != nil || len(defs) != 3 || len(defs[2].Smart.All) != 3 || len(defs[2].Smart.All[2].Any) != 2 {
 		t.Fatalf("commented example: %v %+v", err, defs)
+	}
+}
+
+// TestSmartTruncatedFileKeepsLabels: a file an editor or sync tool has emptied
+// or cut short mid-save is refused, so friends never regain hidden titles.
+// Only collections: [] empties a file on purpose.
+func TestSmartTruncatedFileKeepsLabels(t *testing.T) {
+	s := newSmartDB(t)
+	dir := t.TempDir()
+	writeFile(t, dir, "horror.yaml", horrorFile)
+	b := newSmart(s, dir)
+	s.build(b)
+	want := []string{"1:collection"}
+	for name, body := range map[string]string{
+		"zero bytes":   "",
+		"whitespace":   "\n  \n",
+		"comment only": "# saving...\n",
+		"cut short":    horrorFile[:40],
+		"no key":       "{}\n",
+	} {
+		writeFile(t, dir, "horror.yaml", body)
+		rep := s.build(b)
+		if got := s.labels("horror"); !reflect.DeepEqual(got, want) || rep.LabelsRemoved != 0 || rep.Removed != 0 {
+			t.Fatalf("%s: labels %v, report %+v", name, got, rep)
+		}
+		if len(rep.Files) != 1 || rep.Files[0].Error == "" || !rep.Files[0].LastGood {
+			t.Fatalf("%s: not refused: %+v", name, rep.Files)
+		}
+	}
+	// A brand new empty file has nothing to protect and is not an error.
+	writeFile(t, dir, "new.yaml", "")
+	writeFile(t, dir, "horror.yaml", horrorFile)
+	if rep := s.build(b); rep.Files[1].Error != "" {
+		t.Fatalf("new empty file: %+v", rep.Files)
+	}
+	// collections: [] is the admin emptying the file on purpose.
+	writeFile(t, dir, "horror.yaml", "collections: []\n")
+	rep := s.build(b)
+	if got := s.labels("horror"); len(got) != 0 || rep.Removed != 1 {
+		t.Fatalf("collections: []: %v %+v", got, rep)
 	}
 }

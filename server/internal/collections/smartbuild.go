@@ -21,9 +21,14 @@ import (
 //   - A file that fails to load is refused whole, and its collections are built
 //     from the last good copy, which is kept in each row's definition column.
 //     So a typo never wipes collections or labels, even across a restart.
+//   - A file that is empty, comment-only or has no collections: key is refused
+//     like any other broken file (an editor or sync tool mid-save leaves one).
+//     collections: [] empties a file on purpose.
+//   - A deleted file is held for DeleteGrace, then its collections and labels
+//     go at the next build that still finds it gone.
 //   - A missing or unreadable directory changes nothing (a mount that went
-//     away is not an admin deleting every file). An empty directory does
-//     remove everything built from YAML.
+//     away is not an admin deleting every file). An empty directory removes
+//     everything built from YAML, after the same grace.
 //   - Labels are owned through item_labels.source = 'collection'. Only those
 //     rows are ever removed; a label set by hand or read from an NFO file is
 //     never touched, and an NFO that names a stamped label takes it over.
@@ -43,7 +48,12 @@ type SmartBuilder struct {
 	kick   chan struct{}
 	mu     sync.Mutex // guards last
 	last   *Report
-	logged map[string]string // file errors already logged, so a timer does not repeat them
+	logged map[string]string    // file errors already logged, so a timer does not repeat them
+	gone   map[string]time.Time // files that built collections and were first found gone then
+
+	// Debounce gathers a burst of Triggers (a scan, then an enrichment pass)
+	// into one build. Zero means two seconds.
+	Debounce time.Duration
 }
 
 // Report is what the last build did, for the admin API and logs.
@@ -125,6 +135,9 @@ func (b *SmartBuilder) Run(ctx context.Context, interval time.Duration) {
 			return
 		case <-t.C:
 		case <-b.kick:
+			if !b.settle(ctx) {
+				return
+			}
 		}
 		res, err := b.Build(ctx)
 		switch {
@@ -143,6 +156,26 @@ func (b *SmartBuilder) Run(ctx context.Context, interval time.Duration) {
 			}
 		}
 		t.Reset(interval)
+	}
+}
+
+// settle waits out the debounce window, absorbing further Triggers. It
+// reports false when ctx ends.
+func (b *SmartBuilder) settle(ctx context.Context) bool {
+	d := b.Debounce
+	if d <= 0 {
+		d = 2 * time.Second
+	}
+	quiet := time.NewTimer(d)
+	defer quiet.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-b.kick:
+		case <-quiet.C:
+			return true
+		}
 	}
 }
 
@@ -187,6 +220,9 @@ func (b *SmartBuilder) Build(ctx context.Context) (Report, error) {
 	}
 
 	files, dirErr := LoadDir(b.Dir)
+	if dirErr == nil {
+		files = b.holdMissing(files, lastGood, b.now())
+	}
 	if dirErr != nil {
 		// Without the directory there is nothing to compare against: keep every
 		// collection and label exactly as the last good load left them.
@@ -207,6 +243,10 @@ func (b *SmartBuilder) Build(ctx context.Context) (Report, error) {
 	for _, f := range files {
 		fr := FileReport{File: f.File}
 		defs, fromLast := f.Defs, false
+		if errors.Is(f.Err, ErrNoCollectionsKey) && len(lastGood[f.File]) == 0 {
+			// A new empty file has nothing to protect: it defines nothing.
+			f.Err = nil
+		}
 		if f.Err != nil {
 			fr.Error = f.Err.Error()
 			defs, fromLast = lastGood[f.File], true
@@ -262,6 +302,46 @@ func (b *SmartBuilder) Build(ctx context.Context) (Report, error) {
 	b.last = &rep
 	b.mu.Unlock()
 	return rep, nil
+}
+
+// DeleteGrace is how long a deleted file must stay gone before its
+// collections and labels go. A file replaced by a sync tool or an editor's
+// save is gone for a moment; one deleted on purpose stays gone.
+const DeleteGrace = time.Minute
+
+// holdMissing keeps a file that built collections before and is gone now as if
+// it had been refused, until it has been gone for DeleteGrace and a later build
+// still finds it gone. The count lives in memory: after a restart the grace
+// starts again, which only delays a removal.
+func (b *SmartBuilder) holdMissing(files []FileResult, lastGood map[string][]Definition, now time.Time) []FileResult {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	present := map[string]bool{}
+	for _, f := range files {
+		present[f.File] = true
+		delete(b.gone, f.File)
+	}
+	if b.gone == nil {
+		b.gone = map[string]time.Time{}
+	}
+	for _, name := range sortedKeys(lastGood) {
+		if present[name] {
+			continue
+		}
+		since, seen := b.gone[name]
+		if !seen {
+			since = now
+			b.gone[name] = now
+		}
+		if seen && now.Sub(since) >= DeleteGrace {
+			delete(b.gone, name)
+			continue // gone on purpose: its collections and labels are removed
+		}
+		files = append(files, FileResult{File: name, Err: fmt.Errorf("%s: deleted; its collections and labels are removed at the first build after %s",
+			name, since.Add(DeleteGrace).Format(time.RFC3339))})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].File < files[j].File })
+	return files
 }
 
 // logFileError logs a file's load error once per change, so the timer does not

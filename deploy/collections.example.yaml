@@ -4,9 +4,12 @@
 #   cp collections.example.yaml data/config/collections/labels.yaml
 #
 # These files are the source of truth. VCRX rebuilds the collections from them
-# after every scan and every 15 minutes; `vcrx metadata collections` does it now
-# and prints any error. A file with a mistake is refused whole (the error names
-# the file and line) and its collections keep their last good definition.
+# after every scan, after TMDb fills in metadata, and every 15 minutes; `vcrx
+# metadata collections` does it now and prints any error. A file with a mistake
+# is refused whole (the error names the file and line) and its collections keep
+# their last good definition. An empty or cut-short file is refused the same
+# way; write `collections: []` to empty one on purpose. A deleted file's
+# collections and labels go once it has been gone for a minute.
 #
 # Each collection names a library and a smart rule. all: every rule must match.
 # any: at least one must. Lists nest. One condition per list entry. A list of

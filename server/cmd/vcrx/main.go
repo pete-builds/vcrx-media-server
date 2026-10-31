@@ -294,6 +294,7 @@ func serve() error {
 	if cfg.TMDbAPIKey != "" {
 		enr := newEnricher(a)
 		enr.Busy = scans.Running
+		enr.Changed = smart.Trigger
 		srv.Metadata = enr
 		go enr.Run(ctx, 2*time.Minute, 15*time.Minute)
 	} else {

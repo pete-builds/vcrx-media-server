@@ -125,7 +125,7 @@ Every film series (a TMDb collection) with two or more of its films in a movie l
 
 ### Smart collections and hidden labels (Kometa style)
 
-Write collections as YAML files in `/config/collections/` (`collections_dir` in `vcrx.yaml` or `VCRX_COLLECTIONS_DIR` moves it); `deploy/collections.example.yaml` is a commented start. The files are the source of truth: the database copy is rebuilt from them after every scan and every 15 minutes, so losing the database loses nothing.
+Write collections as YAML files in `/config/collections/` (`collections_dir` in `vcrx.yaml` or `VCRX_COLLECTIONS_DIR` moves it); `deploy/collections.example.yaml` is a commented start. The files are the source of truth: the database copy is rebuilt from them after every scan, every TMDb pass and every 15 minutes, so losing the database loses nothing.
 
 ```yaml
 collections:
@@ -139,7 +139,9 @@ collections:
     visible: { library: false, home: false, shared: false }   # label only, never listed
 ```
 
-Rules use local metadata only: genre, studio, director, writer, actor, country, network, decade, year or a year range, resolution (of any present version), HDR, content rating, label and `added_within_days`. A list of values means any of them. A file with a mistake is refused whole, with the file and line in the log, in `vcrx metadata collections` (which builds everything now) and in `GET /api/v1/admin/collections`; its collections keep building from the last good copy, and nothing else changes. If the directory itself is missing, nothing changes at all.
+Rules use local metadata only: genre, studio, director, writer, actor, country, network, decade, year or a year range, resolution (of any present version), HDR, content rating, label and `added_within_days`. A list of values means any of them. A file with a mistake is refused whole, with the file and line in the log, in `vcrx metadata collections` (which builds everything now) and in `GET /api/v1/admin/collections`; its collections keep building from the last good copy, and nothing else changes. An empty, comment-only or cut-short file counts as a mistake, because editors and sync tools leave one mid-save; to empty a file on purpose, write `collections: []`. Deleting a file removes its collections and labels once it has stayed gone for a minute and a later build still finds it gone. If the directory itself is missing, nothing changes at all.
+
+Rebuilds also follow TMDb: after each enrichment pass that matched anything and after a Fix Match, a rebuild runs within seconds, so a deny label lands as soon as the genre or rating that triggers it arrives.
 
 `label:` is how friends' access follows your rules: deny `horror` in a user's policy and a title disappears for them as soon as a rebuild finds it matches, and comes back when it stops matching. VCRX only ever takes off labels it stamped. A label you set by hand or that an NFO file carries is never removed, and an NFO naming a stamped label takes it over. Collections with `visible.library: false` are left out of library collection lists, title pages and Home; `home` and `shared` are stored for Home rows, which do not show collections yet.
 
