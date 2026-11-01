@@ -131,3 +131,35 @@ func TestTranscodeVideo(t *testing.T) {
 		}
 	}
 }
+
+// A client's max_channels is its decoder's input limit: a 7.1 track does not
+// direct play to a decoder that takes six, the same rule ChooseAudio uses when
+// it picks a track to copy into a converted stream.
+func TestAudioChannelsWithinTheDecoder(t *testing.T) {
+	sixCh := Capabilities{Containers: tcl.Containers, VideoCodecs: tcl.VideoCodecs,
+		AudioCodecs: []AudioCodecCap{{Codec: "eac3", MaxChannels: 6}, {Codec: "aac", MaxChannels: 8}}}
+	withChannels := func(n int64, codecs ...string) catalog.Version {
+		v := version("mkv", "h264", "high", 1920, 1080, 8, codecs...)
+		for i := range v.AudioTracks {
+			v.AudioTracks[i].Channels, v.AudioTracks[i].Index = ip(n), ip(int64(i+1))
+		}
+		return v
+	}
+	for _, c := range []struct {
+		name string
+		v    catalog.Version
+		want string
+	}{
+		{"7.1 eac3 to a 6-channel decoder", withChannels(8, "eac3"), AudioTranscode},
+		{"5.1 eac3 to a 6-channel decoder", withChannels(6, "eac3"), DirectPlay},
+		{"7.1 eac3 with a 7.1 aac track the decoder takes", withChannels(8, "eac3", "aac"), DirectPlay},
+		{"no channel count known", version("mkv", "h264", "high", 1920, 1080, 8, "eac3"), DirectPlay},
+	} {
+		if d := Decide(c.v, sixCh); d.Kind != c.want {
+			t.Errorf("%s: kind = %s (%s), want %s", c.name, d.Kind, d.Reason, c.want)
+		}
+	}
+	if ok, _ := audioOK(withChannels(8, "eac3"), Capabilities{AudioCodecs: []AudioCodecCap{{Codec: "eac3"}}}); !ok {
+		t.Error("max_channels 0 (not reported) refused a 7.1 track")
+	}
+}
