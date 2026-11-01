@@ -597,8 +597,14 @@ func (s *Server) streamVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+	if beforeStreamRegister != nil {
+		beforeStreamRegister(session)
+	}
 	s.streams.add(session, &cancel)
 	defer s.streams.remove(session, &cancel)
+	if s.terminatedSinceCheck(w, r, session) {
+		return
+	}
 	// A cut (a stop, a terminate, a revoked invite or link) also fails the
 	// write in progress, which on a slow or capped connection may hold a
 	// whole read buffer of the file.

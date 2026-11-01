@@ -13,6 +13,24 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 )
 
+// beforeStreamRegister, when a test sets it, runs between a stream's session
+// check and its registration, the window terminatedSinceCheck closes.
+var beforeStreamRegister func(session string)
+
+// terminatedSinceCheck answers 410 when the session was terminated after the
+// handler checked it but before its stream was registered: Terminate writes
+// the session's state and then cancels what is registered, so a stream
+// registered just after that cancel would otherwise play on. Checking again
+// once registered closes the gap: either the cancel reaches the stream, or
+// this check sees the terminated state.
+func (s *Server) terminatedSinceCheck(w http.ResponseWriter, r *http.Request, session string) bool {
+	msg, ok := s.Playback.Terminated(r.Context(), session)
+	if ok {
+		writeError(w, http.StatusGone, "session_terminated", msg)
+	}
+	return ok
+}
+
 // streamRegistry tracks open file responses by playback session, so stopping a
 // session from Activity also cuts off the bytes already flowing to the device.
 type streamRegistry struct {
