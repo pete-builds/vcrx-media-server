@@ -6,10 +6,12 @@
 #
 # 1. Refuses a dirty or diverged checkout, then fast-forwards to origin/main.
 # 2. Refuses while a stream is playing (checked as the flexbot admin, whose
-#    password stays in deploy/.flexbot-password on this host).
+#    password stays in deploy/.flexbot-password on this host), and refuses
+#    when that check cannot run.
 # 3. Builds with the commit as the version (an old VCRX_VERSION in .env would
 #    otherwise label every build with a stale commit), restarts, waits for
-#    /healthz, and runs scripts/smoke-api.sh.
+#    /healthz, checks the server reports that version, and runs
+#    scripts/smoke-api.sh.
 set -euo pipefail
 
 force=0
@@ -27,13 +29,19 @@ git fetch -q origin
 git merge-base --is-ancestor HEAD origin/main || die "this checkout has commits origin/main does not; resolve that by hand"
 before=$(git rev-parse --short HEAD)
 
-if [ "$force" = 0 ] && [ -f "$pwfile" ] && command -v jq > /dev/null; then
+# The guard fails closed: if it cannot sign in or read the activity count, it
+# cannot say nobody is watching, so it refuses rather than assume zero.
+if [ "$force" = 0 ]; then
+  cant() { die "cannot tell whether anyone is watching ($1); fix that, or run with --force"; }
+  [ -f "$pwfile" ] || cant "no $pwfile"
+  command -v jq > /dev/null || cant "jq is not installed"
   body=$(jq -n --arg p "$(cat "$pwfile")" '{username:"flexbot", password:$p, device:{id:"deploy", name:"deploy.sh", platform:"script", client:"deploy", client_version:"1"}}')
-  if token=$(curl -fsS -H 'Content-Type: application/json' -d "$body" "$url/api/v1/auth/login" 2> /dev/null | jq -r .token); then
-    playing=$(curl -fsS -H "Authorization: Bearer $token" "$url/api/v1/admin/activity/now" 2> /dev/null | jq '.stream_count // 0' || echo 0)
-    curl -fsS -X POST -H "Authorization: Bearer $token" "$url/api/v1/auth/logout" > /dev/null 2>&1 || true
-    [ "$playing" = 0 ] || die "$playing stream(s) playing now; run again later, or with --force"
-  fi
+  token=$(curl -fsS -H 'Content-Type: application/json' -d "$body" "$url/api/v1/auth/login" 2> /dev/null | jq -r '.token // empty') || token=""
+  [ -n "$token" ] || cant "the flexbot sign-in failed"
+  playing=$(curl -fsS -H "Authorization: Bearer $token" "$url/api/v1/admin/activity/now" 2> /dev/null | jq -r '.stream_count // empty') || playing=""
+  curl -fsS -X POST -H "Authorization: Bearer $token" "$url/api/v1/auth/logout" > /dev/null 2>&1 || true
+  case "$playing" in '' | *[!0-9]*) cant "the activity check failed" ;; esac
+  [ "$playing" = 0 ] || die "$playing stream(s) playing now; run again later, or with --force"
 fi
 
 git merge -q --ff-only origin/main
@@ -41,7 +49,8 @@ after=$(git rev-parse --short HEAD)
 echo "deploy: $before -> $after"
 
 cd "$here"
-VCRX_VERSION="$(git describe --always --dirty)" docker compose build > "${TMPDIR:-/tmp}/vcrx-build.log" 2>&1 ||
+version="$(git describe --always --dirty)"
+VCRX_VERSION="$version" docker compose build > "${TMPDIR:-/tmp}/vcrx-build.log" 2>&1 ||
   { tail -30 "${TMPDIR:-/tmp}/vcrx-build.log"; die "build failed"; }
 docker compose up -d
 
@@ -49,7 +58,10 @@ for _ in $(seq 1 60); do
   curl -fsS "$url/healthz" > /dev/null 2>&1 && break
   sleep 1
 done
-curl -fsS "$url/api/v1/server" | jq -c '{name, version}' || die "the server did not come back"
+served=$(curl -fsS "$url/api/v1/server" | jq -r .version) || die "the server did not come back"
+# /healthz answers for whatever container is up; the version says it is the new one.
+[ "$served" = "$version" ] || die "the server reports version $served, not the $version just built; check docker compose ps"
+echo "deploy: serving $served"
 
 if [ -f "$pwfile" ]; then
   VCRX_URL="$url" VCRX_USER=flexbot VCRX_PASSWORD="$(cat "$pwfile")" VCRX_KEEP_POSITION=0 bash "$repo/scripts/smoke-api.sh"

@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/pete-builds/vcrx-media-server/server/internal/fsafe"
 )
 
 // Decoder reads what detection needs out of a media file with ffmpeg and
@@ -167,9 +169,11 @@ func fromChapters(cs []Chapter) map[string]Marker {
 // with the same name: <Marker type="intro" startTimeOffset="0"
 // endTimeOffset="51000"/>, times in milliseconds, as Plex's own API writes
 // them. Anything else in the file is ignored, and a missing file is no error.
-func fromNFO(mediaPath string) (map[string]Marker, error) {
+// It is read only from inside root and only as a regular file, like every other
+// file the server opens from a library.
+func fromNFO(root, mediaPath string) (map[string]Marker, error) {
 	p := strings.TrimSuffix(mediaPath, filepath.Ext(mediaPath)) + ".nfo"
-	f, err := os.Open(p)
+	f, _, err := fsafe.OpenUnder(root, p)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}

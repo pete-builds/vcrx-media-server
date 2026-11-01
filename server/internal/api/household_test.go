@@ -407,7 +407,7 @@ func TestSwitchCSRF(t *testing.T) {
 	t.Parallel()
 	f := newHouseholdFixture(t)
 	f.picker(true)
-	r := f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": "pete", "password": "adminpass1", "cookie": true})
+	r := f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": "pete", "password": "adminpass1", "cookie": true}, csrfHeader, "web")
 	cookie := strings.SplitN(r.hdr.Get("Set-Cookie"), ";", 2)[0]
 	call := func(cookie string, hdr ...string) *httptest.ResponseRecorder {
 		t.Helper()
