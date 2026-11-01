@@ -78,9 +78,18 @@ func (s *Scanner) scanMusic(ctx context.Context, lib Library, opt Options, run *
 	for _, f := range mw.files {
 		seen[f.abs] = true
 	}
-	present, gone := 0, 0
+	// As for video: files already missing and still not back count toward
+	// the half rule, so losing folders a scan at a time aborts too.
+	present, gone, stillMissing, indexed := 0, 0, 0, 0
 	for _, t := range stored {
-		if !inScope(t.rel, sub, isFile) || t.missingSince != 0 {
+		if !inScope(t.rel, sub, isFile) {
+			continue
+		}
+		indexed++
+		if t.missingSince != 0 {
+			if !seen[t.abs] {
+				stillMissing++
+			}
 			continue
 		}
 		present++
@@ -96,8 +105,9 @@ func (s *Scanner) scanMusic(ctx context.Context, lib Library, opt Options, run *
 			}
 			return "", abortf("%s holds no audio files but %d are indexed under it; the share may be unmounted or emptied. Nothing was changed; rescan with force to accept", where, present)
 		}
-		if sub == "" && present > 0 && gone*2 > present {
-			return "", abortf("%d of %d indexed files (more than half) are no longer under %s. Nothing was changed; rescan with force to accept", gone, present, lib.RootPath)
+		if sub == "" && gone > 0 && (gone+stillMissing)*2 > indexed {
+			return "", abortf("%d of %d indexed files (more than half) are no longer under %s%s. Nothing was changed; rescan with force to accept",
+				gone+stillMissing, indexed, lib.RootPath, alreadyMissing(stillMissing))
 		}
 	}
 
