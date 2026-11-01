@@ -3,6 +3,7 @@ package io.github.pete_builds.vcrx.tv.player
 import android.content.Context
 import android.net.Uri
 import android.view.KeyEvent
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.annotation.OptIn
 import androidx.compose.runtime.getValue
@@ -534,6 +535,16 @@ class PlaybackController(
         }
     }
 
+    /** Lets the screen sleep while paused; see [PlaybackPolicy.keepScreenOn]. */
+    private fun updateKeepScreenOn() {
+        val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        if (PlaybackPolicy.keepScreenOn(player.playWhenReady, player.playbackState)) {
+            activity.window.addFlags(flag)
+        } else {
+            activity.window.clearFlags(flag)
+        }
+    }
+
     private fun listener() = object : Player.Listener {
         override fun onIsPlayingChanged(playing: Boolean) {
             isPlaying = playing
@@ -546,10 +557,12 @@ class PlaybackController(
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            updateKeepScreenOn()
             if (!playWhenReady) reporter?.onPaused(position(), duration())
         }
 
         override fun onPlaybackStateChanged(state: Int) {
+            updateKeepScreenOn()
             buffering = state == Player.STATE_BUFFERING
             when (state) {
                 Player.STATE_BUFFERING -> if (player.playWhenReady) reporter?.onBuffering(position(), duration())
