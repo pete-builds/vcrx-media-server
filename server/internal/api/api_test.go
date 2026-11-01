@@ -1471,3 +1471,45 @@ func TestEveryResponseIsNosniff(t *testing.T) {
 		}
 	}
 }
+
+// A browser cannot draw picture subtitles (PGS, VobSub, DVB), so they get no
+// WebVTT copy, but the play response still names them in the version's
+// subtitle_tracks with is_image_based set: the web player lists them greyed
+// out with "Picture subtitles need the TV app" rather than hiding them.
+func TestPlayResponseNamesPictureSubtitles(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	if _, err := f.db.Exec(`INSERT INTO media_streams (version_id, stream_index, kind, codec, language, is_image_based)
+		VALUES (?, 2, 'subtitle', 'hdmv_pgs_subtitle', 'fre', 1)`, f.v4k); err != nil {
+		t.Fatal(err)
+	}
+	type track struct {
+		Codec        *string `json:"codec"`
+		IsImageBased bool    `json:"is_image_based"`
+	}
+	var sess struct {
+		Version struct {
+			SubtitleTracks []track `json:"subtitle_tracks"`
+		} `json:"version"`
+		WebVTT []struct {
+			Codec string `json:"codec"`
+		} `json:"webvtt_subtitles"`
+	}
+	r := f.do("POST", "/api/v1/playback/sessions", f.adminTok, map[string]any{"item_id": f.movieID, "version_id": f.v4k, "capabilities": tclCaps()})
+	if r.code != 201 {
+		t.Fatalf("start: %d %s", r.code, r.body)
+	}
+	r.json(t, &sess)
+	picture := 0
+	for _, tr := range sess.Version.SubtitleTracks {
+		if tr.IsImageBased && tr.Codec != nil && *tr.Codec == "hdmv_pgs_subtitle" {
+			picture++
+		}
+	}
+	if picture != 1 {
+		t.Fatalf("version.subtitle_tracks does not name the PGS track as a picture subtitle: %s", r.body)
+	}
+	if len(sess.WebVTT) != 0 {
+		t.Fatalf("a picture subtitle was offered as WebVTT: %+v", sess.WebVTT)
+	}
+}

@@ -4,6 +4,7 @@
 // missing its main content, a details panel without its writers, release date
 // or votes, a video that does not play, search as you type that
 // lists nothing, a C key or CC button that does not toggle captions, a
+// picture subtitle missing from the subtitle menu or choosable there, a
 // pre-roll that does not play before a movie or whose Skip does not start it, a
 // loading bar left showing once a page has loaded, a
 // Continue Watching Remove control that does not remove, a
@@ -654,6 +655,34 @@ async function main() {
     (await evaluate(`return document.createElement("video").canPlayType("application/vnd.apple.mpegurl") !== ""`));
   if (nativeHLS) await hlsPlayer(s, evaluate, ids);
   else await hlsMSE(evaluate, ids);
+
+  // Picture subtitles: the dev server's PGS sidecar is listed, greyed out
+  // with its note, and cannot be chosen; the text tracks still can.
+  if (ids.direct) {
+    console.log(`subtitles: picture subtitles listed, not choosable (#/play/${ids.direct})`);
+    exceptions = [];
+    await s("Page.navigate", { url: `${base}/#/` });
+    await sleep(500);
+    await s("Page.navigate", { url: `${base}/#/play/${ids.direct}?start=0` });
+    const pic = await evaluate(`
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const wait = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = await fn(); if (v) return v; await sleep(150); } return null; };
+      const sel = await wait(() => document.querySelector('.player select[aria-label="Subtitles"]'));
+      if (!sel) return { why: "no subtitle menu" };
+      const opts = [...sel.options];
+      const picture = opts.filter((o) => /Picture subtitles need the TV app/.test(o.textContent));
+      if (picture.length !== 1) return { why: "expected one picture subtitle in the menu, got " + picture.length + ": " + opts.map((o) => o.textContent).join(" | ") };
+      const o = picture[0];
+      if (!o.disabled) return { why: "the picture subtitle can be chosen: " + o.textContent };
+      if (!/^\\S.* \\(PGS\\) · Picture/.test(o.textContent)) return { why: "the picture subtitle is not named with its format: " + o.textContent };
+      if (getComputedStyle(o).color === getComputedStyle(sel).color) return { why: "the picture subtitle is not greyed out" };
+      const text = opts.filter((x) => /^\\d+$/.test(x.value));
+      if (!text.length || text.some((x) => x.disabled)) return { why: "the text subtitles are not choosable" };
+      return { ok: true, label: o.textContent };`);
+    if (!pic.ok) fail("picture subtitles", pic.why);
+    else console.log(`  listed "${pic.label}", greyed out and disabled`);
+    if (exceptions.length) fail("picture subtitles", `threw: ${exceptions[0]}`);
+  }
 
   // Subtitles: "Search for subtitles…" (the dev server's offline stub, never
   // OpenSubtitles), download and switch in one click, then the timing control,

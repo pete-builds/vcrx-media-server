@@ -447,6 +447,8 @@ main select:hover { background-color: var(--surface-3); }
 .player .top .cc-btn[aria-pressed="true"] { background: var(--orange); color: #000; }
 .player .top .ptitle { font-family: Rajdhani, sans-serif; font-weight: 700; font-size: 22px; margin-right: auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 8px rgba(0,0,0,.6); }
 .player .top select { height: var(--control); background-color: rgba(20,20,24,.85); border: 0; border-radius: var(--r-control); padding: 0 32px 0 12px; }
+/* Picture subtitles: listed so the file does not look as if it had none, greyed out because a browser cannot draw them. */
+.player .top select option.sub-picture { color: var(--faint); }
 .player .status { position: absolute; bottom: 96px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.75); padding: 8px 16px; border-radius: var(--r-pill); font-size: 14px; }
 .player .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,.85); z-index: 3; }
 .player .overlay .error-box { margin: 0; }

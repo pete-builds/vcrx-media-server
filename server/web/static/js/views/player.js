@@ -101,9 +101,15 @@ export async function playerView({ match, params }) {
   // converted stream restarts somewhere else.
   const subs = session.webvtt_subtitles || [];
   const canSearch = !!(session.subtitle_search && session.subtitle_search.enabled);
-  const subSel = subs.length || canSearch ? h("select", { "aria-label": "Subtitles" },
+  // Picture subtitles (PGS, VobSub, DVB) cannot be drawn in a browser, so the
+  // server sends no WebVTT copy. They are listed greyed out, so the file does
+  // not look as if it had none.
+  const pictureSubs = ((session.version && session.version.subtitle_tracks) || []).filter((t) => t.is_image_based);
+  const subSel = subs.length || canSearch || pictureSubs.length ? h("select", { "aria-label": "Subtitles" },
     h("option", { value: "" }, "Subtitles off"),
     subs.map((t, i) => h("option", { value: String(i) }, subLabel(t))),
+    pictureSubs.map((t) => h("option", { value: `picture-${t.id}`, class: "sub-picture", disabled: true, title: PICTURE_SUBS_NOTE },
+      pictureLabel(t))),
     canSearch ? h("option", { value: "search" }, "Search for subtitles…") : null) : null;
   // Search and timing live in subtitle-tools.js. The server shifts the cues it
   // serves by the saved delay, so a change refetches the chosen track.
@@ -113,7 +119,7 @@ export async function playerView({ match, params }) {
       let i = subs.findIndex((x) => x.track_id === t.track_id);
       if (i < 0) {
         i = subs.push(t) - 1;
-        subSel.insertBefore(h("option", { value: String(i) }, subLabel(t)), subSel.querySelector('option[value="search"]'));
+        subSel.insertBefore(h("option", { value: String(i) }, subLabel(t)), subSel.querySelector('option.sub-picture, option[value="search"]'));
       }
       subSel.value = String(i);
       subSel.dispatchEvent(new Event("change"));
@@ -485,6 +491,16 @@ function beforeView(clips, shell, backBtn, done) {
 function subLabel(t) {
   const lang = t.language ? languageName(t.language) : "Unknown";
   return [t.title || lang, t.is_forced ? "(forced)" : "", t.downloaded ? "(downloaded)" : t.embedded ? "" : "(file)"].filter(Boolean).join(" ");
+}
+
+const PICTURE_SUBS_NOTE = "Picture subtitles need the TV app";
+const PICTURE_SUB_FORMATS = { hdmv_pgs_subtitle: "PGS", dvd_subtitle: "VobSub", dvb_subtitle: "DVB", xsub: "XSUB" };
+
+// pictureLabel names a picture subtitle track and says why it cannot be chosen.
+function pictureLabel(t) {
+  const lang = t.language ? languageName(t.language) : "Unknown";
+  const format = PICTURE_SUB_FORMATS[(t.codec || "").toLowerCase()] || "";
+  return [t.title || lang, format ? `(${format})` : "", t.is_forced ? "(forced)" : "", "·", PICTURE_SUBS_NOTE].filter(Boolean).join(" ");
 }
 
 function audioLabel(t) {

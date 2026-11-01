@@ -76,7 +76,7 @@ is the one at 8.021 s. A stream from 30 s delivers 750 frames (30 s at 25 fps) f
 - **HLS output** for Safari was decided, not fetched or validated.
 - **Dolby Vision.** No synthetic sample exists; needs a real profile 5 and profile 8 file. Code reading suggests
   profile 5 transcodes with wrong colours (P2, suspected).
-- **PGS and VobSub subtitles.** Not offered to browsers (documented gap); untested on TV.
+- **PGS and VobSub subtitles.** Not playable in browsers: the web player lists them greyed out with "Picture subtitles need the TV app" (web smoke test, against a PGS sidecar); untested on TV.
 - **Skip intro, skip credits, Up Next, completion.** Covered by unit tests on the server, not by this corpus.
 - **Concurrent clients and interrupted streams.** Covered by fake-ffmpeg slot tests; one session can hold every
   conversion slot (P2).
