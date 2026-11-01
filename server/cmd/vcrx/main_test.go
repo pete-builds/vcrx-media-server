@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,5 +141,57 @@ func TestNightlyBackupOncePerDay(t *testing.T) {
 	got, _ := filepath.Glob(filepath.Join(backups, "vcrx-nightly-*.db"))
 	if len(got) != 1 {
 		t.Fatalf("nightlies after two runs on one day = %v, want 1", got)
+	}
+}
+
+type fakeScans struct{ live bool }
+
+func (f *fakeScans) Shutdown(ctx context.Context) error {
+	f.live = ctx.Err() == nil
+	return nil
+}
+
+// A stream never finishes by itself, so shutdown must not spend the whole
+// budget waiting for it: after the request grace its context (which ffmpeg
+// runs on) is cancelled, and the scans still get a deadline of their own.
+func TestShutdownStopsStreamsAndLeavesTheScansTime(t *testing.T) {
+	reqCtx, cancelRequests := context.WithCancel(context.Background())
+	defer cancelRequests()
+	started, stopped := make(chan struct{}), make(chan struct{})
+	hs := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(started)
+			<-r.Context().Done() // a stream: runs until its client or the server ends it
+			close(stopped)
+		}),
+		BaseContext: func(net.Listener) context.Context { return reqCtx },
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = hs.Serve(ln) }()
+	go func() {
+		if resp, err := http.Get("http://" + ln.Addr().String() + "/stream.mp4"); err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	<-started
+	scans := &fakeScans{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	begin := time.Now()
+	if err := shutdown(log, hs, cancelRequests, scans, 200*time.Millisecond, time.Second); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the open stream's context was never cancelled")
+	}
+	if took := time.Since(begin); took > 2*time.Second {
+		t.Errorf("shutdown took %s", took)
+	}
+	if !scans.live {
+		t.Error("the scans were handed an expired context")
 	}
 }
