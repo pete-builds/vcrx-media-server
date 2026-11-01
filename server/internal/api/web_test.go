@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -58,7 +59,7 @@ func TestWebAppServing(t *testing.T) {
 func TestCookieSessionAndCSRF(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	r := f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": "pete", "password": "adminpass1", "cookie": true})
+	r := f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": "pete", "password": "adminpass1", "cookie": true}, csrfHeader, "web")
 	if r.code != 200 {
 		t.Fatalf("login: %d %s", r.code, r.body)
 	}
@@ -104,5 +105,40 @@ func TestCookieSessionAndCSRF(t *testing.T) {
 	}
 	if w := call("GET", "/api/v1/me", ""); w.Code != 401 {
 		t.Fatalf("cookie after logout: %d, want 401", w.Code)
+	}
+}
+
+// Signing in with "cookie": true plants a session cookie, so like redeeming
+// an invite or switching profile it needs the client header: a page on
+// another site must not be able to sign this browser in. Bearer sign-ins
+// (the TV) are unaffected.
+func TestSignInCookieNeedsTheClientHeader(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	lan, _ := netip.ParsePrefix("192.168.0.0/16")
+	f.srv.AutoSignInUser, f.srv.TrustedNetworks = "pete", []netip.Prefix{lan}
+	f.h = f.srv.Handler()
+	home := []string{"RemoteAddr", "192.168.1.20:5555"}
+	login := map[string]any{"username": "pete", "password": "adminpass1", "cookie": true}
+	auto := map[string]any{"device": map[string]string{"id": "web-1"}, "cookie": true}
+	for _, c := range []struct {
+		path string
+		body map[string]any
+	}{{"/api/v1/auth/login", login}, {"/api/v1/auth/auto", auto}} {
+		r := f.do("POST", c.path, "", c.body, home...)
+		wantError(t, c.path+" with cookie:true and no header", r, 403, "csrf")
+		if r.hdr.Get("Set-Cookie") != "" {
+			t.Errorf("%s: a refused sign-in set a cookie", c.path)
+		}
+		r = f.do("POST", c.path, "", c.body, append(home, csrfHeader, "web")...)
+		if r.code != 200 || !strings.HasPrefix(r.hdr.Get("Set-Cookie"), cookieName+"=") {
+			t.Errorf("%s with the header: %d %s", c.path, r.code, r.body)
+		}
+	}
+	if r := f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": "pete", "password": "adminpass1"}, home...); r.code != 200 {
+		t.Errorf("bearer login without the header: %d %s", r.code, r.body)
+	}
+	if r := f.do("POST", "/api/v1/auth/auto", "", map[string]any{"device": map[string]string{"id": "tv-1"}}, home...); r.code != 200 {
+		t.Errorf("bearer auto sign-in without the header: %d %s", r.code, r.body)
 	}
 }
