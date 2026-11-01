@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -147,8 +148,8 @@ func (w *walker) addFile(rel string) {
 	if !IsVideo(name) || strings.HasPrefix(name, ".") {
 		return
 	}
-	fi, err := os.Stat(w.absOf(rel))
-	if err != nil || !fi.Mode().IsRegular() {
+	fi := w.statFile(rel)
+	if fi == nil {
 		return
 	}
 	switch SkipFile(name, fi.Size()) {
@@ -162,7 +163,26 @@ func (w *walker) addFile(rel string) {
 	w.videos = append(w.videos, &videoFile{rel: rel, abs: w.absOf(rel), size: fi.Size(), mtime: fi.ModTime().UnixMilli()})
 }
 
-// underFailed reports whether rel lies in a folder the walk could not read.
+// statFile stats a file the walk listed and returns it when it is a regular
+// file. One that no longer exists answers nil. Any other error (EIO, ESTALE,
+// EACCES on a flaky share) says nothing about whether the file is still there,
+// so it goes in failed, like an unreadable folder, and is never marked missing.
+func (w *walker) statFile(rel string) os.FileInfo {
+	fi, err := os.Stat(w.absOf(rel))
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			w.log.Warn("file unreadable, it will not be marked missing", "path", rel, "err", err)
+			w.failed = append(w.failed, rel)
+		}
+		return nil
+	}
+	if !fi.Mode().IsRegular() {
+		return nil
+	}
+	return fi
+}
+
+// underFailed reports whether rel is, or lies in a folder, the walk could not read.
 func (w *walker) underFailed(rel string) bool {
 	for _, f := range w.failed {
 		if f == "" || rel == f || strings.HasPrefix(rel, f+"/") {
