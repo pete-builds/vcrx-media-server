@@ -26,6 +26,8 @@ type SourceSpec struct {
 	Name     string
 	Location string
 	Guide    string
+	// MaxStreams is the playlist's own cap on channels pulled at once; 0 is none.
+	MaxStreams int
 }
 
 // Refresher reads each playlist when the server starts and then every
@@ -45,8 +47,12 @@ type Refresher struct {
 	// may not have written: public addresses only (PublicOnlyClient).
 	Logos *http.Client
 
-	ids map[string]int64
+	ids  map[string]int64
+	maxs map[int64]int
 }
+
+// SourceMax is a source's max_streams, 0 for none.
+func (r *Refresher) SourceMax(id int64) int { return r.maxs[id] }
 
 // Limits on what a refresh downloads.
 const (
@@ -59,13 +65,13 @@ const DefaultInterval = 12 * time.Hour
 
 // Register records the sources from vcrx.yaml, matched by name.
 func (r *Refresher) Register(ctx context.Context) error {
-	r.ids = map[string]int64{}
+	r.ids, r.maxs = map[string]int64{}, map[int64]int{}
 	for _, src := range r.Sources {
 		id, err := r.Store.EnsureSource(ctx, src.Name, src.Location, src.Guide)
 		if err != nil {
 			return fmt.Errorf("live_tv source %q: %w", src.Name, err)
 		}
-		r.ids[src.Name] = id
+		r.ids[src.Name], r.maxs[id] = id, src.MaxStreams
 	}
 	return nil
 }

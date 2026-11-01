@@ -15,7 +15,7 @@ func TestLiveTVSources(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("VCRX_CONFIG_DIR", dir)
 	c, err := Load()
-	if err != nil || len(c.LiveTV.Sources) != 0 || c.LiveRefreshInterval() != 12*time.Hour || c.LiveGuideInterval() != 6*time.Hour {
+	if err != nil || len(c.LiveTV.Sources) != 0 || c.LiveRefreshInterval() != 12*time.Hour || c.LiveGuideInterval() != 6*time.Hour || c.LiveMaxStreams() != 4 {
 		t.Fatalf("defaults: %+v %v", c.LiveTV, err)
 	}
 	secret := filepath.Join(dir, "provider.url")
@@ -26,9 +26,9 @@ func TestLiveTVSources(t *testing.T) {
 	if err := os.WriteFile(guideKey, []byte("https://guide.example/epg.xml.gz?key=s3cret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	yaml := "live_tv:\n  refresh_hours: 6\n  guide_refresh_hours: 3\n  sources:\n" +
+	yaml := "live_tv:\n  refresh_hours: 6\n  guide_refresh_hours: 3\n  max_streams: 3\n  sources:\n" +
 		"    - name: Free\n      m3u: https://playlists.example/free.m3u\n      xmltv: /config/guide.xml\n" +
-		"    - name: Provider\n      m3u_url_file: " + secret + "\n      xmltv_url_file: " + guideKey + "\n" +
+		"    - name: Provider\n      m3u_url_file: " + secret + "\n      xmltv_url_file: " + guideKey + "\n      max_streams: 2\n" +
 		"    - name: Local file\n      m3u: /config/channels.m3u\n"
 	if err := os.WriteFile(filepath.Join(dir, "vcrx.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestLiveTVSources(t *testing.T) {
 	got := c.LiveTV.Sources
 	if len(got) != 3 || got[0].Location != "https://playlists.example/free.m3u" ||
 		got[1].Location != "https://provider.example/get.php?username=me&password=s3cret" || got[2].Location != "/config/channels.m3u" ||
-		c.LiveRefreshInterval() != 6*time.Hour || c.LiveGuideInterval() != 3*time.Hour ||
+		c.LiveRefreshInterval() != 6*time.Hour || c.LiveGuideInterval() != 3*time.Hour || c.LiveMaxStreams() != 3 || got[1].MaxStreams != 2 ||
 		got[0].GuideLocation != "/config/guide.xml" || got[1].GuideLocation != "https://guide.example/epg.xml.gz?key=s3cret" || got[2].GuideLocation != "" {
 		t.Fatalf("sources %+v, interval %v", got, c.LiveRefreshInterval())
 	}
@@ -54,6 +54,8 @@ func TestLiveTVSources(t *testing.T) {
 		"rtsp":        "live_tv:\n  sources:\n    - {name: A, m3u: rtsp://user:hunter2@cam.example/live}\n",
 		"refresh":     "live_tv:\n  refresh_hours: 500\n",
 		"guide hours": "live_tv:\n  guide_refresh_hours: -1\n",
+		"streams":     "live_tv:\n  max_streams: 100\n",
+		"src streams": "live_tv:\n  sources:\n    - {name: A, m3u: https://a.example/x.m3u, max_streams: -1}\n",
 		"guide both":  "live_tv:\n  sources:\n    - {name: A, m3u: https://a.example/x.m3u, xmltv: /g.xml, xmltv_url_file: " + secret + "}\n",
 		"guide rtsp":  "live_tv:\n  sources:\n    - {name: A, m3u: https://a.example/x.m3u, xmltv: rtsp://user:hunter2@g.example/x}\n",
 		"unknown key": "live_tv:\n  channels: []\n",

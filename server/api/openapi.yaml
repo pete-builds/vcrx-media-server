@@ -2569,6 +2569,56 @@ paths:
                           properties:
                             programs: { type: array, items: { $ref: "#/components/schemas/Program" } }
         "400": { $ref: "#/components/responses/Error" }
+  /api/v1/live/channels/{channel_id}/watch:
+    post:
+      operationId: liveWatch
+      summary: >-
+        Watch a channel: starts its stream on the server, or joins the one already running (one pull per channel,
+        shared by everyone watching it), and answers with VCRX's own HLS playlist for it. The channel's stream URL is
+        never sent. 404 without the Live TV grant or for a channel turned off; 409 streams_busy when the playlist's
+        max_streams or the server's live_tv.max_streams are all in use; 502 stream_refused for a stream on a private
+        address named by a playlist from the internet.
+      parameters:
+        - { name: channel_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The stream to play.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run, playlist]
+                properties:
+                  run: { type: string }
+                  playlist: { type: string, description: "The live HLS playlist, /api/v1/live/channels/{channel_id}/hls/{run}/index.m3u8." }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /api/v1/live/channels/{channel_id}/hls/{run}/index.m3u8:
+    get:
+      operationId: liveWatchPlaylist
+      summary: >-
+        The channel's live playlist: a sliding window of eight fMP4 segments, video copied and audio converted to AAC.
+        Waits for the first segments. Asks the grant again on every request, so taking it away or turning the channel off
+        ends the stream at the viewer's next request. A pull nobody requests anything from for a minute stops.
+      parameters:
+        - { name: channel_id, in: path, required: true, schema: { type: integer } }
+        - { name: run, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The playlist, content: { application/vnd.apple.mpegurl: {} } }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /api/v1/live/channels/{channel_id}/hls/{run}/{segment}:
+    get:
+      operationId: liveWatchSegment
+      summary: The init segment or a media segment, by a name the playlist uses and no other.
+      parameters:
+        - { name: channel_id, in: path, required: true, schema: { type: integer } }
+        - { name: run, in: path, required: true, schema: { type: string } }
+        - { name: segment, in: path, required: true, schema: { type: string, pattern: '^(init\.mp4|seg[0-9]{5,9}\.m4s)$' } }
+      responses:
+        "200": { description: The segment, content: { video/mp4: {} } }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/admin/live/sources:
     get:
       operationId: adminLiveSources
