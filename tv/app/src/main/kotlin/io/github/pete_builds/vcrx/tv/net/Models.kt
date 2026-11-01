@@ -260,7 +260,7 @@ data class HomeLayoutEntry(val key: String, val enabled: Boolean)
 data class HomeLayoutInput(val rows: List<HomeLayoutEntry>)
 
 @Serializable
-data class SetWatchedRequest(val played: Boolean, val bogus: Int = 0)
+data class SetWatchedRequest(val played: Boolean)
 
 @Serializable
 data class VideoCodecCapability(
