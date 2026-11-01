@@ -37,6 +37,22 @@ object HomeRows {
     fun restores(restoreItemId: Long?, restoreRowId: String?, itemId: Long, rowId: String?): Boolean =
         restoreItemId == itemId && (restoreRowId == null || rowId == null || restoreRowId == rowId)
 
+    /** A button in the hero that can take focus. */
+    enum class HeroFocus { First, MoreInfo }
+
+    /**
+     * Which hero button takes focus as Home appears, or null to leave it to the
+     * cards: More info again after it opened Details (it used to fall through
+     * to the rail), the first button when the rail hands over, nothing while a
+     * card is taking focus back.
+     */
+    fun heroFocus(hasHero: Boolean, toContent: Boolean, restoreItemId: Long?, restoreHero: Boolean): HeroFocus? = when {
+        !hasHero -> null
+        restoreHero -> HeroFocus.MoreInfo
+        toContent && restoreItemId == null -> HeroFocus.First
+        else -> null
+    }
+
     /**
      * The hero's featured title, the same pick as the web's Home (views/home.js
      * feature()): movies and shows from the Recently Added rows first, then the

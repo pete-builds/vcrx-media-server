@@ -140,8 +140,15 @@ fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
         } else {
             val heroItem = vm.hero
             val heroFocus = remember { FocusRequester() }
+            val heroMoreInfo = remember { FocusRequester() }
             Column(Modifier.fillMaxSize()) {
-                if (heroItem != null) HomeHero(heroItem, vm.heroFeatured, heroFocus)
+                if (heroItem != null) {
+                    HomeHero(heroItem, vm.heroFeatured, heroFocus, heroMoreInfo, onMoreInfo = {
+                        focus.restoreHero = true
+                        focus.restoreItemId = null
+                        focus.restoreRowId = null
+                    })
+                }
                 LazyColumn(
                     Modifier.weight(1f),
                     contentPadding = PaddingValues(top = if (heroItem != null) 8.dp else 24.dp, bottom = 48.dp),
@@ -153,13 +160,17 @@ fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
                 }
             }
             // The rail handed over: the hero's Play takes focus, as the first
-            // card did before Home had a hero.
-            val heroTakes = heroItem != null && focus.toContent && focus.restoreItemId == null
+            // card did before Home had a hero. Back from Details: More info.
+            val heroTakes = HomeRows.heroFocus(heroItem != null, focus.toContent, focus.restoreItemId, focus.restoreHero)
             LaunchedEffect(heroTakes) {
-                if (heroTakes) {
-                    runCatching { heroFocus.requestFocus() }
-                    focus.toContent = false
+                val requester = when (heroTakes) {
+                    HomeRows.HeroFocus.First -> heroFocus
+                    HomeRows.HeroFocus.MoreInfo -> heroMoreInfo
+                    null -> return@LaunchedEffect
                 }
+                runCatching { requester.requestFocus() }
+                focus.toContent = false
+                focus.restoreHero = false
             }
         }
     }
