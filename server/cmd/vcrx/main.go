@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -619,10 +620,12 @@ func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, a
 				log.Warn("purge expired sessions", "err", err)
 			}
 		}
-		// Ten minutes after start, then daily: a consistent snapshot of the
-		// database (watch history, resume points, matches), keeping a week.
-		if i%1440 == 10 {
-			nightlyBackup(ctx, log, conn, backupDir)
+		// Ten minutes after start, then hourly, take the day's snapshot of the
+		// database (watch history, resume points, matches) if there is none
+		// yet, keeping a week. Going by the date rather than uptime means
+		// restarts neither stack copies from one day nor skip days.
+		if i%60 == 10 {
+			maybeNightlyBackup(ctx, log, conn, backupDir, time.Now())
 		}
 		select {
 		case <-ctx.Done():
@@ -632,7 +635,22 @@ func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, a
 	}
 }
 
-func nightlyBackup(ctx context.Context, log *slog.Logger, conn *sql.DB, dir string) {
+// nightlyDue reports whether dir lacks a nightly backup from now's UTC date
+// (backup names carry a UTC timestamp, so they sort and compare by date).
+func nightlyDue(dir string, now time.Time) bool {
+	matches, err := filepath.Glob(filepath.Join(dir, "vcrx-nightly-*.db"))
+	if err != nil || len(matches) == 0 {
+		return true
+	}
+	sort.Strings(matches)
+	newest := strings.TrimPrefix(filepath.Base(matches[len(matches)-1]), "vcrx-nightly-")
+	return newest < now.UTC().Format("20060102")
+}
+
+func maybeNightlyBackup(ctx context.Context, log *slog.Logger, conn *sql.DB, dir string, now time.Time) {
+	if !nightlyDue(dir, now) {
+		return
+	}
 	path, err := db.Backup(ctx, conn, dir, "nightly")
 	if err != nil {
 		log.Warn("nightly database backup failed", "err", err)
