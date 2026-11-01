@@ -66,7 +66,8 @@ class SubtitleDelay(private val delegate: SubtitleParser.Factory = DefaultSubtit
          * a start of zero, so it starts at the delay. The duration never changes.
          */
         fun shift(cues: CuesWithTiming, offsetUs: Long): CuesWithTiming {
-            return cues // CONTROL: the shift is switched off
+            val start = if (cues.startTimeUs == C.TIME_UNSET) offsetUs else cues.startTimeUs + offsetUs
+            return CuesWithTiming(cues.cues, start, cues.durationUs)
         }
     }
 }
