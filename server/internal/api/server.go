@@ -323,7 +323,17 @@ func (s *Server) Handler() http.Handler {
 		writeError(w, http.StatusNotFound, "not_found", "No such API route.")
 	})
 	mux.Handle("/", s.webApp())
-	return s.recoverer(s.logRequests(s.checkHost(mux)))
+	return s.recoverer(noSniff(s.logRequests(s.checkHost(mux))))
+}
+
+// noSniff marks every response X-Content-Type-Options: nosniff, so a browser
+// never reads a body as a type other than the one declared (artwork or a
+// subtitle as HTML or script). Handlers that already set it are unaffected.
+func noSniff(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // HTTPServer wraps Handler with timeouts that suit long range requests: no write
