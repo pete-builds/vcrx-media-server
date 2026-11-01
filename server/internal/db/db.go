@@ -158,11 +158,20 @@ func migrateTo(ctx context.Context, conn *sql.DB, backupDir string, log *slog.Lo
 		return 0, nil
 	}
 	if current > 0 && backupDir != "" {
-		dest, err := Backup(ctx, conn, backupDir, fmt.Sprintf("pre-migrate-v%d", current))
+		tag := fmt.Sprintf("pre-migrate-v%d", current)
+		dest, err := Backup(ctx, conn, backupDir, tag)
 		if err != nil {
 			return 0, fmt.Errorf("backup before migration: %w", err)
 		}
 		log.Info("database backed up before migration", "path", dest)
+		// A migration that fails on every start would otherwise leave a full
+		// copy per restart on the disk the live database shares. The schema is
+		// unchanged since the last attempt, so the new copy supersedes the old.
+		if removed, err := Prune(backupDir, tag, 1); err != nil {
+			log.Warn("could not remove an older pre-migration backup", "err", err)
+		} else if removed > 0 {
+			log.Info("older pre-migration backups replaced", "tag", tag, "removed", removed)
+		}
 	}
 	for _, m := range ms[current:] {
 		start := time.Now()
@@ -244,7 +253,8 @@ func Backup(ctx context.Context, conn *sql.DB, dir, tag string) (string, error) 
 }
 
 // Prune deletes all but the newest keep backups with tag in dir, and returns
-// how many it removed. Backups with other tags (pre-migrate) are left alone.
+// how many it removed. Backups with other tags are left alone, so a
+// pre-migrate-vN copy survives until a newer pre-migrate-vN replaces it.
 func Prune(dir, tag string, keep int) (int, error) {
 	matches, err := filepath.Glob(filepath.Join(dir, "vcrx-"+tag+"-*.db"))
 	if err != nil {
