@@ -11,7 +11,9 @@ services:
       context: ..
       args:
         VERSION: ${VCRX_VERSION:-dev}
-    image: vcrx-media-server:local
+    # Built here by default; deploy.sh --release vX.Y.Z runs the released image
+    # from ghcr.io instead, recorded as VCRX_IMAGE in .env.
+    image: ${VCRX_IMAGE:-vcrx-media-server:local}
     container_name: vcrx
     # Host networking: the server sees real client IPs (activity history and the
     # LAN-only admin check depend on them) and takes no Docker network.
