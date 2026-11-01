@@ -154,6 +154,11 @@ func streamAudio(w http.ResponseWriter, r *http.Request, v catalog.Version, ss p
 func convertOptions(ss playback.StreamSession, v catalog.Version, path string, startMs int64, audio int, transcode bool) remux.Options {
 	opts := remux.Options{Path: path, StartMs: max(0, startMs), AudioIndex: audio, TranscodeAudio: transcode,
 		HEVC: deref(v.VideoCodec) == "hevc"}
+	for _, t := range v.AudioTracks {
+		if t.Index != nil && int(*t.Index) == audio {
+			opts.AudioCodec = deref(t.Codec)
+		}
+	}
 	if ss.Decision == playback.Transcode {
 		video := playback.TranscodeVideo(v, ss.Caps)
 		opts.Video, opts.HEVC = &video, false
