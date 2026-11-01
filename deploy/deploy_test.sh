@@ -32,8 +32,8 @@ cat > "$stub/curl" << 'S'
 #!/usr/bin/env bash
 for a in "$@"; do
   case "$a" in
-    */auth/login) echo '{"token":"t"}'; exit 0 ;;
-    */activity/now) echo "{\"stream_count\":$PLAYING}"; exit 0 ;;
+    */auth/login) [ "${FAIL:-}" = login ] && exit 22; echo '{"token":"t"}'; exit 0 ;;
+    */activity/now) [ "${FAIL:-}" = activity ] && exit 22; echo "{\"stream_count\":$PLAYING}"; exit 0 ;;
     */api/v1/server) echo '{"name":"VCRX","version":"x"}'; exit 0 ;;
   esac
 done
@@ -49,6 +49,18 @@ if PLAYING=1 bash deploy/deploy.sh > "$work/out" 2>&1; then fail "deployed while
 grep -q "1 stream(s) playing" "$work/out" || fail "no reason given: $(cat "$work/out")"
 [ ! -s "$work/docker.log" ] || fail "built while a stream played"
 [ "$(git log --oneline | wc -l | tr -d ' ')" = 1 ] || fail "pulled while a stream played"
+
+# The check cannot run: refused too, since nobody can say no one is watching.
+refused() {
+  if bash deploy/deploy.sh > "$work/out" 2>&1; then fail "deployed when $1"; fi
+  grep -q "cannot tell whether anyone is watching" "$work/out" || fail "$1, no reason given: $(cat "$work/out")"
+  [ ! -s "$work/docker.log" ] || fail "built when $1"
+}
+FAIL=login PLAYING=0 refused "the sign-in failed"
+FAIL=activity PLAYING=0 refused "the activity check failed"
+mv deploy/.flexbot-password "$work/pw"
+PLAYING=0 refused "the password file was missing"
+mv "$work/pw" deploy/.flexbot-password
 
 # --force deploys, fast-forwards, and labels the build with the new commit.
 PLAYING=1 bash deploy/deploy.sh --force > "$work/out" 2>&1 || fail "--force failed: $(cat "$work/out")"
