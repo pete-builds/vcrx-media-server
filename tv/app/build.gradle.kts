@@ -83,7 +83,14 @@ android {
     }
 }
 
+// The server's API contract, outside tv/. RequestContractTest checks every request
+// body against it. The Docker build copies it to the same place relative to tv/
+// (tv/Dockerfile, build context "openapi"), so this path holds there too.
+val openApiSpec: File = rootProject.file("../server/api/openapi.yaml")
+
 tasks.withType<Test>().configureEach {
+    inputs.file(openApiSpec).withPathSensitivity(PathSensitivity.NONE).withPropertyName("openApiSpec")
+    systemProperty("vcrx.openapi", openApiSpec.absolutePath)
     testLogging {
         events("passed", "skipped", "failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
@@ -118,4 +125,5 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.snakeyaml)
 }

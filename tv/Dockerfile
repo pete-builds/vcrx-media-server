@@ -97,6 +97,9 @@ RUN ./gradlew --no-daemon --quiet :app:dependencies :ffmpeg:dependencies > /dev/
 
 FROM deps AS source
 COPY --from=ffmpeg /out/ext ffmpeg/ext
+# The server's API contract for RequestContractTest, at ../server/api as in the repo.
+# A named context: CI and build-apk.sh pass --build-context openapi=server/api.
+COPY --from=openapi openapi.yaml /server/api/openapi.yaml
 COPY . .
 
 FROM source AS check

@@ -12,9 +12,16 @@ class EventRetryTest {
     @Test
     fun theServerSayingNoIsFinal() {
         assertTrue(EventRetry.permanent(ApiException.Unauthorized("signed out")))
-        for (status in listOf(400, 404, 409, 410)) {
+        for (status in listOf(403, 404, 409, 410)) {
             assertTrue("$status", EventRetry.permanent(ApiException.Http(status, "x", "x")))
         }
+    }
+
+    @Test
+    fun aBodyTheServerCouldNotReadIsKept() {
+        // A 400 is the server rejecting the body (a field it does not know yet), not the
+        // stop itself; dropping it would lose the resume position.
+        assertFalse(EventRetry.permanent(ApiException.Http(400, "bad_request", "Invalid JSON body")))
     }
 
     @Test
