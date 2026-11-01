@@ -18,6 +18,28 @@ import (
 type streamRegistry struct {
 	mu   sync.Mutex
 	open map[string]map[*context.CancelFunc]bool
+	// converted is each session's one converted (fMP4) stream. Direct play
+	// may have several responses open at once (a browser's range requests);
+	// a converted stream holds a conversion slot, so a session gets one.
+	converted map[string]*context.CancelFunc
+}
+
+// addConverted registers a session's converted stream, stopping the one it
+// replaces, and reports whether there was one. A seek, a retry or a second
+// tab then never needs a second slot.
+func (g *streamRegistry) addConverted(session string, cancel *context.CancelFunc) bool {
+	g.mu.Lock()
+	if g.converted == nil {
+		g.converted = map[string]*context.CancelFunc{}
+	}
+	prev := g.converted[session]
+	g.converted[session] = cancel
+	g.mu.Unlock()
+	if prev != nil {
+		(*prev)()
+	}
+	g.add(session, cancel)
+	return prev != nil
 }
 
 func (g *streamRegistry) add(session string, cancel *context.CancelFunc) {
@@ -38,6 +60,9 @@ func (g *streamRegistry) remove(session string, cancel *context.CancelFunc) {
 	delete(g.open[session], cancel)
 	if len(g.open[session]) == 0 {
 		delete(g.open, session)
+	}
+	if g.converted[session] == cancel {
+		delete(g.converted, session)
 	}
 }
 
