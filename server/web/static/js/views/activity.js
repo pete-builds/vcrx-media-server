@@ -161,7 +161,7 @@ async function statsTab(body, params) {
   const st = await api(`/admin/activity/stats?days=${days}`);
   const range = h("div", { class: "toolbar" },
     h("h2", {}, `Last ${days} days`),
-    [7, 30, 90, 365].map((d) => h("a", { class: "btn btn-small" + (d === days ? " btn-primary" : ""), href: `#/activity/stats?days=${d}` }, `${d} days`)));
+    [7, 30, 90, 365].map((d) => h("a", { class: "toggle-chip", "aria-current": d === days ? "true" : null, href: `#/activity/stats?days=${d}` }, `${d} days`)));
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const titleLink = (r) => (r.id ? `#/item/${r.id}` : null);
   body.replaceChildren(range,

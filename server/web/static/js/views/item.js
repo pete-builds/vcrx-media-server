@@ -18,12 +18,16 @@ export async function itemView({ match, params }) {
     isAdmin && item.kind !== "season" ? loadHistory(id) : null,
   ]);
   const admin = isAdmin && (item.kind === "movie" || item.kind === "show");
-  const fix = admin ? fixMatch(item, params && params.get("fix") === "1") : null;
+  const fixOpen = !!(params && params.get("fix") === "1");
+  const fix = admin ? fixMatch(item, fixOpen) : null;
   const subs = playable && state.me && state.me.is_admin ? downloadedSubtitles(item) : null;
   const tools = admin && item.kind === "movie" ? versionTools(item) : null;
   const markers = state.me && state.me.is_admin && item.kind === "episode" ? markerEditor(item) : null;
-  const el = h("div", {}, hero(item), fix, tools, markers, extrasSection(item), castSection(item), playable ? techFacts(item) : null, subs, children ? childrenSection(item, children.items || []) : null,
-    history ? historySection(item, history) : null);
+  // What everyone came for first (episodes, extras, cast, the facts), then the
+  // admin tools. Fix match stays at the top when a link opened it.
+  const el = h("div", {}, hero(item), fixOpen ? fix : null, children ? childrenSection(item, children.items || []) : null,
+    extrasSection(item), castSection(item), playable ? techFacts(item) : null,
+    subs, tools, markers, fixOpen ? null : fix, history ? historySection(item, history) : null);
   return { el, title: item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)}`.trim() : item.title, hero: true };
 }
 
@@ -171,8 +175,11 @@ function actions(item) {
   }
   row.append(...extraActions(item));
   const played = item.kind === "show" || item.kind === "season" ? w.played && !w.unplayed_count : w.played;
-  const toggle = h("button", { class: "btn btn-glass" + (played ? " is-on" : ""), type: "button", "aria-pressed": played ? "true" : "false" },
-    icon("check"), played ? "Mark unwatched" : "Mark watched");
+  // Watched and Remove are icons in circles: they matter less than Play and
+  // Trailer, so they take less room. The name stays in the text for screen readers.
+  const toggleName = played ? "Mark unwatched" : "Mark watched";
+  const toggle = h("button", { class: "btn btn-glass btn-icon" + (played ? " is-on" : ""), type: "button", title: toggleName,
+    "aria-pressed": played ? "true" : "false" }, icon("check"), h("span", { class: "sr-only" }, toggleName));
   toggle.addEventListener("click", async () => {
     toggle.disabled = true;
     try {
@@ -186,7 +193,8 @@ function actions(item) {
   });
   row.append(toggle);
   if ((item.kind === "movie" || item.kind === "episode") && w.position_ms > 0 && !w.played) {
-    const forget = h("button", { class: "btn btn-glass", type: "button" }, icon("close"), "Remove from Continue Watching");
+    const forget = h("button", { class: "btn btn-glass btn-icon", type: "button", title: "Remove from Continue Watching" },
+      icon("close"), h("span", { class: "sr-only" }, "Remove from Continue Watching"));
     forget.addEventListener("click", async () => {
       forget.disabled = true;
       try {
