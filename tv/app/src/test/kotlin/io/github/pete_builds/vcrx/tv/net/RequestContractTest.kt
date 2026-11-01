@@ -80,7 +80,8 @@ class RequestContractTest {
     fun everyEncodedBodyIsListed() {
         val sources = listOf("ServerApi.kt", "MusicApi.kt").map { File("src/main/kotlin/io/github/pete_builds/vcrx/tv/net/$it").readText() }
         val sent = sources.flatMap { source ->
-            Regex("""post\([^\n]*?,\s*(\w+)\.serializer\(\)\)""").findAll(source).map { it.groupValues[1] } +
+            // ServerApi.post(path, body, serializer): the path is a literal, unlike OkHttp's post(EMPTY_BODY).
+            Regex("""post\("[^"\n]*",[^\n]*?,\s*(\w+)\.serializer\(\)\)""").findAll(source).map { it.groupValues[1] } +
                 Regex("""encodeToString\((\w+)\.serializer\(\)""").findAll(source).map { it.groupValues[1] }
         }.toSet()
         assertTrue("found no request bodies in the sources; the patterns are stale", sent.size >= 10)
