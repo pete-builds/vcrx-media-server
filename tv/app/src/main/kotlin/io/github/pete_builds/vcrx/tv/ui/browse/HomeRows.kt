@@ -37,6 +37,17 @@ object HomeRows {
     fun restores(restoreItemId: Long?, restoreRowId: String?, itemId: Long, rowId: String?): Boolean =
         restoreItemId == itemId && (restoreRowId == null || rowId == null || restoreRowId == rowId)
 
+    /**
+     * Whether a card takes focus now: the card that opened Details, or the
+     * first card after the rail handed over, and only while Browse is the page
+     * in front ([inFront]). Browse stays on screen for the 700ms that Details
+     * fades in over it, and recomposes there: a card taking focus back then
+     * used up the restore before Details had even opened, so Back always fell
+     * through to the rail.
+     */
+    fun cardTakesFocus(inFront: Boolean, restoring: Boolean, first: Boolean, toContent: Boolean, restoreItemId: Long?): Boolean =
+        inFront && (restoring || (first && toContent && restoreItemId == null))
+
     /** A button in the hero that can take focus. */
     enum class HeroFocus { First, MoreInfo }
 
@@ -44,10 +55,11 @@ object HomeRows {
      * Which hero button takes focus as Home appears, or null to leave it to the
      * cards: More info again after it opened Details (it used to fall through
      * to the rail), the first button when the rail hands over, nothing while a
-     * card is taking focus back.
+     * card is taking focus back. [inFront] is Browse being the page in front:
+     * see [cardTakesFocus].
      */
-    fun heroFocus(hasHero: Boolean, toContent: Boolean, restoreItemId: Long?, restoreHero: Boolean): HeroFocus? = when {
-        !hasHero -> null
+    fun heroFocus(inFront: Boolean, hasHero: Boolean, toContent: Boolean, restoreItemId: Long?, restoreHero: Boolean): HeroFocus? = when {
+        !inFront || !hasHero -> null
         restoreHero -> HeroFocus.MoreInfo
         toContent && restoreItemId == null -> HeroFocus.First
         else -> null

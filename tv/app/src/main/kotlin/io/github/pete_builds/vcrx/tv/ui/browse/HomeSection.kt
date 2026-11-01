@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import androidx.tv.material3.MaterialTheme
 import io.github.pete_builds.vcrx.tv.AppGraph
@@ -147,7 +148,7 @@ fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
                         focus.restoreHero = true
                         focus.restoreItemId = null
                         focus.restoreRowId = null
-                    })
+                    }, returningToMoreInfo = focus.restoreHero)
                 }
                 LazyColumn(
                     Modifier.weight(1f),
@@ -161,8 +162,11 @@ fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
             }
             // The rail handed over: the hero's Play takes focus, as the first
             // card did before Home had a hero. Back from Details: More info.
-            val heroTakes = HomeRows.heroFocus(heroItem != null, focus.toContent, focus.restoreItemId, focus.restoreHero)
+            val heroTakes = HomeRows.heroFocus(browseInFront(), heroItem != null, focus.toContent, focus.restoreItemId, focus.restoreHero)
+            val lifecycle = LocalLifecycleOwner.current.lifecycle
             LaunchedEffect(heroTakes) {
+                // Not in the frame a click navigates away in (browseInFront).
+                if (!lifecycle.inFrontNow()) return@LaunchedEffect
                 val requester = when (heroTakes) {
                     HomeRows.HeroFocus.First -> heroFocus
                     HomeRows.HeroFocus.MoreInfo -> heroMoreInfo
@@ -223,9 +227,11 @@ private fun HomeRowView(row: HomeRow, focus: BrowseFocus, firstRow: Boolean, onF
 fun itemFocus(focus: BrowseFocus, itemId: Long, first: Boolean, rowId: String? = null): Modifier {
     val requester = remember { FocusRequester() }
     val restoring = HomeRows.restores(focus.restoreItemId, focus.restoreRowId, itemId, rowId)
-    val take = restoring || (first && focus.toContent && focus.restoreItemId == null)
+    val take = HomeRows.cardTakesFocus(browseInFront(), restoring, first, focus.toContent, focus.restoreItemId)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(take) {
-        if (take) {
+        // Not in the frame a click navigates away in (browseInFront).
+        if (take && lifecycle.inFrontNow()) {
             runCatching { requester.requestFocus() }
             focus.toContent = false
             if (restoring) {

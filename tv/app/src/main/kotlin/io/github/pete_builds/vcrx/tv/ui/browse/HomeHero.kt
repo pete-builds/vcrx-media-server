@@ -46,7 +46,8 @@ val HERO_HEIGHT = 250.dp
  * day's featured title ([featured] true) until focus moves into the rows, then
  * whichever card has focus, so the rows need no titles under their posters.
  * [onMoreInfo] runs before More info opens Details, so Home can give that
- * button focus back through [moreInfo] on return.
+ * button focus back through [moreInfo] on return; [returningToMoreInfo] is
+ * set while it does.
  */
 @Composable
 fun HomeHero(
@@ -55,6 +56,7 @@ fun HomeHero(
     firstButton: FocusRequester,
     moreInfo: FocusRequester,
     onMoreInfo: () -> Unit,
+    returningToMoreInfo: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val api = LocalContext.current.graph.api
@@ -84,8 +86,12 @@ fun HomeHero(
             (item.overview ?: item.tagline)?.takeIf { it.isNotBlank() }?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = White, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
+            // The restorer sends focus coming into the row to the button it last
+            // had, else its fallback: Play, or More info when coming back from the
+            // Details it opened. The row is new on return, with nothing to restore,
+            // so a fixed Play fallback overrode More info's own focus request.
             Row(
-                Modifier.padding(top = 6.dp).focusRestorer(firstButton).focusGroup(),
+                Modifier.padding(top = 6.dp).focusRestorer(if (returningToMoreInfo) moreInfo else firstButton).focusGroup(),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 val play = heroPlay(item)
