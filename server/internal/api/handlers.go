@@ -140,6 +140,12 @@ func (s *Server) autoLogin(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
+	if req.Cookie && r.Header.Get(csrfHeader) == "" {
+		// The answer plants a session cookie: a page on another site must
+		// not be able to post here and sign this browser in.
+		writeError(w, http.StatusForbidden, "csrf", "Missing the "+csrfHeader+" header.")
+		return
+	}
 	ip := info(r).IP
 	if s.AutoSignInUser == "" {
 		writeError(w, http.StatusNotFound, "auto_sign_in_off", "Sign-in without a password is turned off on this server.")
@@ -196,6 +202,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		Cookie   bool       `json:"cookie"`
 	}
 	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.Cookie && r.Header.Get(csrfHeader) == "" {
+		// As for /auth/auto: a cross-site post must not plant a session
+		// cookie, even for an account the attacker owns.
+		writeError(w, http.StatusForbidden, "csrf", "Missing the "+csrfHeader+" header.")
 		return
 	}
 	ip := info(r).IP
@@ -275,7 +287,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	clearSessionCookie(w, r)
+	s.clearSessionCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
