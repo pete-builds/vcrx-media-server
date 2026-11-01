@@ -319,3 +319,28 @@ func TestHLSPlaylistReady(t *testing.T) {
 		t.Errorf("withStart:\n%s", got)
 	}
 }
+
+// A stream that fails to start removes only its own run's folder. Two seeks
+// on one session can race, so the session folder may hold the other run's
+// live segments, which must survive.
+func TestHLSStartFailureLeavesOtherRuns(t *testing.T) {
+	h, root := newHLS(t, filepath.Join(t.TempDir(), "no-such-ffmpeg"), 2)
+	session := strings.Repeat("ab", 16)
+	other := filepath.Join(root, session, "0123456789abcdef", "seg00000.m4s")
+	if err := os.MkdirAll(filepath.Dir(other), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte("live"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Start(context.Background(), session, Options{Path: "/m/f.mkv", AudioIndex: -1}); err == nil {
+		t.Fatal("started with no ffmpeg")
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("the other run's segment is gone: %v", err)
+	}
+	runs, _ := os.ReadDir(filepath.Join(root, session))
+	if len(runs) != 1 {
+		t.Fatalf("session folder holds %d runs, want only the other one", len(runs))
+	}
+}
