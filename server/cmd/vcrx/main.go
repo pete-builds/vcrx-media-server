@@ -45,6 +45,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/imdb"
 	"github.com/pete-builds/vcrx-media-server/server/internal/invites"
 	"github.com/pete-builds/vcrx-media-server/server/internal/library"
+	"github.com/pete-builds/vcrx-media-server/server/internal/live"
 	"github.com/pete-builds/vcrx-media-server/server/internal/loans"
 	"github.com/pete-builds/vcrx-media-server/server/internal/markers"
 	"github.com/pete-builds/vcrx-media-server/server/internal/music"
@@ -400,6 +401,19 @@ func serve() error {
 	// does nothing until switched on in Settings.
 	srv.Newsletter = &newsletter.Service{DB: a.db, Hooks: hooks, Log: log.With("component", "newsletter")}
 	go srv.Newsletter.Run(ctx)
+	// Live TV: the admin's M3U playlists, read now and every refresh_hours.
+	// Logos come only from public addresses (a playlist names them).
+	liveStore := &live.Store{DB: a.db}
+	var sources []live.SourceSpec
+	for _, src := range cfg.LiveTV.Sources {
+		sources = append(sources, live.SourceSpec{Name: src.Name, Location: src.Location})
+	}
+	refresher := &live.Refresher{Store: liveStore, Sources: sources, Interval: cfg.LiveRefreshInterval(), LogoDir: cfg.LogoCacheDir(),
+		Log: log.With("component", "live"), Logos: live.PublicOnlyClient(10 * time.Second)}
+	if err := refresher.Start(ctx); err != nil {
+		return err
+	}
+	srv.Live = &api.Live{Store: liveStore, Refresher: refresher, LogoDir: cfg.LogoCacheDir()}
 	srv.MarkerHours = markerHours
 	if markerJob != nil {
 		srv.Markers = markerJob

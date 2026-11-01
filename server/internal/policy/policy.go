@@ -72,6 +72,9 @@ type Policy struct {
 	// AllowSubtitleDownload lets a non-admin spend the server's OpenSubtitles
 	// quota. Off unless an admin turns it on.
 	AllowSubtitleDownload bool
+	// AllowLiveTV lets a non-admin watch Live TV channels. Off unless an
+	// admin turns it on; a borrower never has it.
+	AllowLiveTV bool
 }
 
 // Load reads a user's grants and policy row. A missing policy row means no extra
@@ -96,8 +99,8 @@ func Load(ctx context.Context, conn *sql.DB, userID int64, isAdmin bool) (Policy
 	var maxRes, maxRating sql.NullString
 	var allow, deny string
 	err = conn.QueryRowContext(ctx, `SELECT max_resolution, max_content_rating, allow_labels, deny_labels, allow_transcode, allow_4k_transcode,
-		allow_subtitle_download FROM user_policies WHERE user_id = ?`, userID).Scan(&maxRes, &maxRating, &allow, &deny, &p.AllowTranscode,
-		&p.Allow4KTranscode, &p.AllowSubtitleDownload)
+		allow_subtitle_download, allow_live_tv FROM user_policies WHERE user_id = ?`, userID).Scan(&maxRes, &maxRating, &allow, &deny, &p.AllowTranscode,
+		&p.Allow4KTranscode, &p.AllowSubtitleDownload, &p.AllowLiveTV)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, nil
 	}
@@ -126,6 +129,15 @@ func grants(ctx context.Context, conn *sql.DB, userID int64) ([]int64, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// CanWatchLive reports whether the caller may see and watch Live TV channels:
+// admins always, others with the grant, a lent tape's borrower never.
+func (p Policy) CanWatchLive() bool {
+	if p.Borrower {
+		return false
+	}
+	return p.IsAdmin || p.AllowLiveTV
 }
 
 // CanSeeLibrary reports whether the library is granted.

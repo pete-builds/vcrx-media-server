@@ -2512,6 +2512,90 @@ paths:
       responses:
         "200": { description: Headers only }
 
+  /api/v1/live/channels:
+    get:
+      operationId: liveChannels
+      summary: >-
+        Live TV channels the caller may watch, by number then name: enabled, and still listed by their playlist.
+        Empty without the Live TV grant (admins always have it; a lent tape's borrower never). Stream and playlist
+        URLs are never sent.
+      responses:
+        "200":
+          description: The channels.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [channels]
+                properties:
+                  channels: { type: array, items: { $ref: "#/components/schemas/Channel" } }
+  /api/v1/live/channels/{channel_id}/logo:
+    get:
+      operationId: liveChannelLogo
+      summary: A channel's logo, cached by the server from its playlist. 404 without the grant, for a disabled channel, or with no logo.
+      parameters:
+        - { name: channel_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: The logo, content: { image/png: {}, image/jpeg: {}, image/webp: {}, image/gif: {} } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/live/sources:
+    get:
+      operationId: adminLiveSources
+      summary: The playlists listed under live_tv in vcrx.yaml, when each was last read, and why the last read failed. Their URLs are not shown.
+      responses:
+        "200":
+          description: The playlists.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sources]
+                properties:
+                  sources: { type: array, items: { $ref: "#/components/schemas/LiveSource" } }
+  /api/v1/admin/live/sources/{source_id}/refresh:
+    post:
+      operationId: adminRefreshLiveSource
+      summary: >-
+        Read one playlist again now (up to two minutes). A playlist that cannot be read answers 200 all the same, with
+        the reason in last_error and its channels as they were.
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: The playlist after the read, content: { application/json: { schema: { $ref: "#/components/schemas/LiveSource" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/admin/live/channels:
+    get:
+      operationId: adminLiveChannels
+      summary: Every channel, disabled ones and ones their playlist no longer lists too, with the admin's own fields.
+      responses:
+        "200":
+          description: The channels.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [channels]
+                properties:
+                  channels: { type: array, items: { $ref: "#/components/schemas/Channel" } }
+  /api/v1/admin/live/channels/{channel_id}:
+    put:
+      operationId: adminUpdateLiveChannel
+      summary: Turn a channel on or off, or give it a number of your own. Both survive the playlist's refreshes.
+      parameters:
+        - { name: channel_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                number: { type: string, maxLength: 16, description: Empty goes back to the playlist's number. }
+      responses:
+        "204": { description: Saved }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     bearer:
@@ -2533,6 +2617,28 @@ components:
       description: Error
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   schemas:
+    Channel:
+      type: object
+      required: [id, name, has_logo]
+      properties:
+        id: { type: integer }
+        number: { type: [string, "null"], description: The admin's number, else the playlist's tvg-chno. }
+        name: { type: string }
+        group: { type: [string, "null"], description: The playlist's group-title. }
+        has_logo: { type: boolean }
+        source_id: { type: integer, description: Admin list only. }
+        enabled: { type: boolean, description: Admin list only. }
+        gone: { type: boolean, description: Admin list only. The playlist no longer lists it. }
+        playlist_number: { type: [string, "null"], description: Admin list only. }
+    LiveSource:
+      type: object
+      required: [id, name, channel_count]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        refreshed_at: { type: [integer, "null"], description: Last successful read, Unix milliseconds. }
+        last_error: { type: [string, "null"], description: Why the last read failed, without the playlist's URL. }
+        channel_count: { type: integer }
     Loan:
       type: object
       description: A lent tape.
@@ -3191,6 +3297,7 @@ components:
         allow_transcode: { type: boolean }
         allow_4k_transcode: { type: boolean }
         allow_subtitle_download: { type: boolean, description: May download subtitles from OpenSubtitles (spends the server's daily quota). Default false; admins always may. }
+        allow_live_tv: { type: boolean, description: May watch Live TV channels. Default false; admins always may. }
     SubtitleHit:
       type: object
       required: [file_id, language_code, release, file_name, hearing_impaired, hash_match, trusted, download_count, matched_by]

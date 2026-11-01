@@ -185,9 +185,11 @@ type walkFixture struct {
 	horrorShow, horrorSeason, horrorEpisode int64 // denied label on the show
 	strictSeason, strictEpisode             int64 // TV-MA episode of a TV-14 show
 	mixedCollection, hiddenCollection       int64
-	hiddenVersions                          []int64 // one per hidden playable, plus the film's 4K
-	hiddenSubs                              []int64
-	posters                                 []int64
+	// channel is a Live TV channel, seen only with the Live TV grant.
+	channel        int64
+	hiddenVersions []int64 // one per hidden playable, plus the film's 4K
+	hiddenSubs     []int64
+	posters        []int64
 	// A music library the restricted friend is not granted.
 	music musicIDs
 	// Extras hidden with their film (a denied label) or by the ceiling (4K).
@@ -202,6 +204,7 @@ func newWalkFixture(t *testing.T) *walkFixture {
 	f.srv.PINs = household.NewLimiter(household.PINWindow)
 	withHLS(t, f, remux.New("ffmpeg", "ffprobe", 2, nil))
 	w.music = withMusic(t, f)
+	w.channel = withLive(t, f)
 	now := time.Now().UnixMilli()
 	exec := func(q string, args ...any) int64 {
 		t.Helper()
@@ -367,7 +370,7 @@ func newWalkFixture(t *testing.T) *walkFixture {
 
 // open lets the friend see everything; restrict applies the policy under test.
 func (w *walkFixture) open() {
-	w.setAccess([]int64{w.movies, w.tv, w.vault, w.music.library}, map[string]any{"allow_transcode": true, "allow_4k_transcode": true})
+	w.setAccess([]int64{w.movies, w.tv, w.vault, w.music.library}, map[string]any{"allow_transcode": true, "allow_4k_transcode": true, "allow_live_tv": true})
 }
 
 func (w *walkFixture) restrict() {
@@ -466,7 +469,7 @@ func (w *walkFixture) startExtraSession(tok string, extra int64) string {
 // while the friend could still play the hidden things; adminSession is not the
 // friend's at all.
 func (w *walkFixture) probes(sessions []string, adminSession, listen string) []probe {
-	ps := w.musicProbes(listen)
+	ps := append(w.musicProbes(listen), w.liveProbes()...)
 	return append(ps, w.videoProbes(sessions, adminSession)...)
 }
 
@@ -496,6 +499,15 @@ func (w *walkFixture) musicProbes(listen string) []probe {
 		at("GET /api/v1/music/search").query("q=o").hides("Low Tide", "Apogee", "Glass Harbor", "Cedar Static"),
 		at("GET /api/v1/libraries").hides(`"name":"Music"`),
 		at("POST /api/v1/playback/sessions/{session_id}/events", listen).with(map[string]any{"type": "progress", "position_ms": 1000}),
+	}
+}
+
+// liveProbes cover Live TV: restricting the friend takes away the Live TV
+// grant, so the channel list stops naming the channel and its logo is a 404.
+func (w *walkFixture) liveProbes() []probe {
+	return []probe{
+		at("GET /api/v1/live/channels").hides("Walk News", "Walk Weather"),
+		at("GET /api/v1/live/channels/{channel_id}/logo", w.channel),
 	}
 }
 
