@@ -261,9 +261,10 @@ func serve() error {
 		// A bad library entry should not stop the server from serving the others.
 		log.Error("vcrx.yaml libraries", "err", err)
 	}
-	// A scan cannot survive a restart; close out any the last process left open.
-	if _, err := a.db.ExecContext(ctx, `UPDATE scan_runs SET status = 'aborted', error = 'server restarted during the scan', finished_at = ?
-		WHERE status = 'running'`, db.NowMs()); err != nil {
+	// A scan cannot survive a restart; close out any the last process left
+	// open. A run whose library lock is still held is a live scan in another
+	// process (vcrx library scan beside the server) and is left alone.
+	if _, err := library.AbortOrphanedRuns(ctx, a.db, cfg.ConfigDir, time.Now()); err != nil {
 		return err
 	}
 
@@ -274,7 +275,8 @@ func serve() error {
 	} else {
 		log.Info("ffprobe", "version", v)
 	}
-	scanner := &library.Scanner{DB: a.db, Prober: prober, Log: log.With("component", "scanner"), ProbeConcurrency: cfg.ProbeConcurrency}
+	scanner := &library.Scanner{DB: a.db, Prober: prober, Log: log.With("component", "scanner"), ProbeConcurrency: cfg.ProbeConcurrency,
+		LockDir: cfg.ConfigDir}
 	scans := library.NewManager(scanner, log.With("component", "scans"))
 	seasons, err := catalog.LoadSeasons(cfg.ConfigDir)
 	if err != nil {
@@ -837,7 +839,8 @@ func libraryCmd(args []string) error {
 		if lib.LastScan != nil && lib.LastScan.Status == "running" {
 			return fmt.Errorf("library %q is already being scanned (run %d)", lib.Name, lib.LastScan.ID)
 		}
-		scanner := &library.Scanner{DB: a.db, Prober: &probe.FFprobe{Path: a.cfg.FFprobePath}, Log: a.log, ProbeConcurrency: a.cfg.ProbeConcurrency}
+		scanner := &library.Scanner{DB: a.db, Prober: &probe.FFprobe{Path: a.cfg.FFprobePath}, Log: a.log, ProbeConcurrency: a.cfg.ProbeConcurrency,
+			LockDir: a.cfg.ConfigDir}
 		run, err := library.NewManager(scanner, a.log).RunNow(ctx, lib.ID, library.Options{Trigger: "cli", SubPath: *path, Force: *force})
 		fmt.Printf("scan %d: %s, %d seen, %d added, %d changed, %d missing, %d failed\n", run.ID, run.Status, run.Seen, run.Added,
 			run.Changed, run.Missing, run.Failed)
