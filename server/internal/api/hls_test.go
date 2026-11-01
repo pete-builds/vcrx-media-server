@@ -246,7 +246,9 @@ func TestHLSEndToEnd(t *testing.T) {
 	// A seek starts a new stream on the keyframe before the position and
 	// replaces the old one, whose URLs then find nothing.
 	start, url2, r := f.seekHLS(t, sess, f.adminTok, "position_ms=12700")
-	if r.code != 200 || start != 12000 || url2 == url {
+	// The keyframe at 12 s, counted from the file's start (a few ms later on
+	// ffmpeg builds that start the fixture early).
+	if r.code != 200 || start < 12000 || start > 12050 || url2 == url {
 		t.Fatalf("seek to 12.7 s: %d %s", r.code, r.body)
 	}
 	if r := f.do("GET", url, f.adminTok, nil); r.code != 404 {

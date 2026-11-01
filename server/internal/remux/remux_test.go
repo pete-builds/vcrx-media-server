@@ -120,7 +120,17 @@ func TestKeyframeAndStreamStartTogether(t *testing.T) {
 	in := fixture(t, ff)
 	s := New(ff, fp, 2, nil)
 	ctx := context.Background()
+	// Keyframes are stored every 2 s; KeyframeAt answers from the file's start,
+	// which some ffmpeg builds put a few ms before 0 (audio priming).
+	start, err := strconv.ParseFloat(probe(t, fp, in, "format=start_time"), 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shift := int64(math.Round(-start * 1000))
 	for want, at := range map[int64]int64{0: 0, 12000: 12700, 10000: 10050, 28000: 29900} {
+		if want > 0 {
+			want += shift
+		}
 		k, err := s.KeyframeAt(ctx, in, at)
 		if err != nil || k != want {
 			t.Errorf("KeyframeAt(%d) = %d, %v; want %d", at, k, err, want)

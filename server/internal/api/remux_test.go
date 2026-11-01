@@ -122,7 +122,9 @@ func TestConvertedStreamEndToEnd(t *testing.T) {
 	}
 	r = f.do("GET", sess.Stream.SeekURL+"?position_ms=12700", f.adminTok, nil)
 	r.json(t, &seek)
-	if r.code != 200 || seek.StartMs != 12000 {
+	// The keyframe at 12 s, counted from the file's start: some ffmpeg builds
+	// start the fixture a few milliseconds early (audio priming).
+	if r.code != 200 || seek.StartMs < 12000 || seek.StartMs > 12050 {
 		t.Fatalf("seek: %d %s", r.code, r.body)
 	}
 	// Another user cannot use the session.
