@@ -2,12 +2,14 @@ package db
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -211,5 +213,109 @@ func TestBackupIsAReadableCopy(t *testing.T) {
 	var v string
 	if err := cp.QueryRow(`SELECT v FROM t`).Scan(&v); err != nil || v != "kept" {
 		t.Fatalf("copy: %q %v", v, err)
+	}
+}
+
+// A migration that fails on every start (a crash loop under restart:
+// unless-stopped) must not leave one full copy of the database per attempt
+// on the disk the live database shares; each attempt replaces the last copy
+// for that schema version. Copies for other versions are kept.
+func TestFailingMigrationKeepsOneBackupPerVersion(t *testing.T) {
+	dir := t.TempDir()
+	backups := filepath.Join(dir, "backups")
+	conn, err := Open(filepath.Join(dir, "vcrx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	ctx := context.Background()
+	if _, err := migrateTo(ctx, conn, "", quiet(), 2); err != nil {
+		t.Fatal(err)
+	}
+	// Migration 3 creates tmdb_state, so it fails from here on.
+	if _, err := conn.Exec(`CREATE TABLE tmdb_state (x INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(backups, "vcrx-pre-migrate-v1-20261001T010000Z.db")
+	if err := os.MkdirAll(backups, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if i > 0 {
+			time.Sleep(1100 * time.Millisecond) // backup names carry the second
+		}
+		if _, err := Migrate(ctx, conn, backups, quiet()); err == nil || !strings.Contains(err.Error(), "tmdb_state") {
+			t.Fatalf("attempt %d: err = %v, want the migration 3 failure", i+1, err)
+		}
+	}
+	v2, _ := filepath.Glob(filepath.Join(backups, "vcrx-pre-migrate-v2-*.db"))
+	if len(v2) != 1 {
+		t.Fatalf("pre-migrate-v2 copies after 3 failed starts = %d (%v), want 1", len(v2), v2)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("the v1 copy was removed: %v", err)
+	}
+	copyConn, err := Open(v2[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = copyConn.Close() }()
+	if v, err := CurrentVersion(ctx, copyConn); err != nil || v != 2 {
+		t.Fatalf("kept copy is at version %d, %v; want 2", v, err)
+	}
+}
+
+// A backup is only kept once SQLite has checked the copy: a damaged one must
+// not take the place of good copies as the nightlies rotate.
+func TestBackupChecksTheCopy(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := Open(filepath.Join(dir, "v.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.Exec(`CREATE TABLE t (v TEXT); CREATE INDEX t_v ON t (v);
+		WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+		INSERT INTO t SELECT printf('row %d %s', i, hex(randomblob(16))) FROM n`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	backups := filepath.Join(dir, "backups")
+	good, err := Backup(ctx, conn, backups, "nightly")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := integrityCheck(ctx, good); err != nil {
+		t.Fatalf("a healthy copy failed the check: %v", err)
+	}
+	// Control: the check can fail. Overwrite pages past the header of a copy.
+	bad := filepath.Join(dir, "bad.db")
+	raw, err := os.ReadFile(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) < 16*4096 {
+		t.Fatalf("copy is only %d bytes", len(raw))
+	}
+	for i := 8 * 4096; i < 12*4096; i++ {
+		raw[i] = 0xA5
+	}
+	if err := os.WriteFile(bad, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := integrityCheck(ctx, bad); err == nil {
+		t.Fatal("a damaged copy passed the integrity check")
+	}
+	// A copy that fails is removed and reported, never left as a backup.
+	defer func(f func(context.Context, string) error) { checkBackup = f }(checkBackup)
+	checkBackup = func(context.Context, string) error { return errors.New("damaged") }
+	if _, err := Backup(ctx, conn, filepath.Join(dir, "other"), "nightly"); err == nil || !strings.Contains(err.Error(), "integrity") {
+		t.Fatalf("err = %v, want an integrity failure", err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "other", "*.db")); len(left) != 0 {
+		t.Fatalf("a copy that failed the check was kept: %v", left)
 	}
 }
