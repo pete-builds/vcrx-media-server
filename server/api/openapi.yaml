@@ -2623,6 +2623,19 @@ paths:
         "200": { description: The stream, until the viewer stops or the pull ends, content: { video/mp4: {} } }
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /api/v1/live/channels/{channel_id}/hls/{run}/leave:
+    post:
+      operationId: liveLeave
+      summary: >-
+        Stop watching: takes the caller's device off the channel's pull, which stops at once when nobody else is watching
+        it. Players call it when they change channel or close, so a stream is not held for the minute it takes an
+        unwatched pull to stop by itself. Never stops anyone else's viewing.
+      parameters:
+        - { name: channel_id, in: path, required: true, schema: { type: integer } }
+        - { name: run, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Left }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/live/channels/{channel_id}/hls/{run}/{segment}:
     get:
       operationId: liveWatchSegment

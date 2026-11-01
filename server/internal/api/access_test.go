@@ -518,6 +518,9 @@ func (w *walkFixture) liveProbes() []probe {
 		// Endless while allowed, so asked for a run that has ended: allowed, the
 		// answer comes from past the grant check; restricted, from before it.
 		at("GET /api/v1/live/channels/{channel_id}/hls/{run}/stream.mp4", w.channel, "0000000000000000").past("That stream has ended"),
+		// Leaving the friend's own pull would end it for the probes after, so
+		// this too asks for a run that has ended.
+		at("POST /api/v1/live/channels/{channel_id}/hls/{run}/leave", w.channel, "0000000000000000").past("That stream has ended"),
 	}
 }
 
