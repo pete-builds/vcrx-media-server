@@ -126,7 +126,12 @@ func (s *Service) Get(ctx context.Context, pol policy.Policy, itemID int64, kind
 		err = renderResized(src, w, out, paint)
 	}
 	if err != nil {
-		_ = os.WriteFile(failMarker, []byte(err.Error()), 0o600)
+		// A request the client gave up on (a card scrolled past) says nothing
+		// about the file, so only a failure with the request still live is
+		// remembered. ffmpeg's own 30 s limit is a real failure and still counts.
+		if ctx.Err() == nil {
+			_ = os.WriteFile(failMarker, []byte(err.Error()), 0o600)
+		}
 		return "", err
 	}
 	return out, nil
