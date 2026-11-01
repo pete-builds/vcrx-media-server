@@ -64,6 +64,12 @@ func HLSAudio(codec string) bool {
 // operator says otherwise. Each takes one or more whole CPU cores.
 const DefaultMaxTranscodes = 2
 
+// DefaultMaxTranscodeHeight caps a transcoded picture at 1080p (it fits
+// inside 1920x1080) unless the operator says otherwise. Encoding 4K with
+// libx264 on a CPU is often slower than real time; copied video is never
+// scaled, so direct play and remux keep the source's size.
+const DefaultMaxTranscodeHeight = 1080
+
 type Service struct {
 	FFmpeg, FFprobe string
 	Log             *slog.Logger
@@ -80,6 +86,9 @@ type Service struct {
 	// ToneMap is true when ffmpeg has the zscale and tonemap filters, so HDR
 	// can be converted to SDR. Detect sets it.
 	ToneMap bool
+	// maxHeight caps every transcode's output inside a 16:9 box this tall,
+	// on top of the client's own limits; 0 is no cap.
+	maxHeight int
 }
 
 // New allows up to maxStreams concurrent converted streams that copy the
@@ -92,7 +101,32 @@ func New(ffmpeg, ffprobe string, maxStreams int, log *slog.Logger) *Service {
 		log = slog.Default()
 	}
 	return &Service{FFmpeg: ffmpeg, FFprobe: ffprobe, Log: log, sem: make(chan struct{}, maxStreams),
-		tsem: make(chan struct{}, DefaultMaxTranscodes), asem: make(chan struct{}, DefaultMaxAudio)}
+		tsem: make(chan struct{}, DefaultMaxTranscodes), asem: make(chan struct{}, DefaultMaxAudio),
+		maxHeight: DefaultMaxTranscodeHeight}
+}
+
+// SetMaxTranscodeHeight changes the cap on a transcode's output: the picture
+// fits inside a 16:9 box h pixels tall (1080 is 1920x1080), keeping its shape
+// and never scaled up. 0 removes the cap, leaving only the client's limits.
+func (s *Service) SetMaxTranscodeHeight(h int) {
+	s.maxHeight = max(0, h)
+}
+
+// capped returns v bounded by the server's transcode cap as well as the
+// client's limits, whichever is smaller on each side.
+func (s *Service) capped(v Video) Video {
+	if s.maxHeight <= 0 {
+		return v
+	}
+	tighter := func(limit, capVal int) int {
+		if limit == 0 || capVal < limit {
+			return capVal
+		}
+		return limit
+	}
+	v.MaxWidth = tighter(v.MaxWidth, s.maxHeight*16/9)
+	v.MaxHeight = tighter(v.MaxHeight, s.maxHeight)
+	return v
 }
 
 // SetMaxTranscodes changes how many video transcodes may run at once. Call it
@@ -291,6 +325,7 @@ func videoBitrate(height int, clientMax int64) int64 {
 
 // videoArgs are the filter and encoder arguments for a transcoded video.
 func (s *Service) videoArgs(v Video) []string {
+	v = s.capped(v)
 	var filters []string
 	w, h := Fit(v.SrcWidth, v.SrcHeight, v.MaxWidth, v.MaxHeight)
 	switch {

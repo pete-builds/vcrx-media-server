@@ -290,6 +290,7 @@ func serve() error {
 	// Video transcodes cost whole cores and have their own, smaller limit.
 	rmx := remux.New(cfg.FFmpegPath, cfg.FFprobePath, 4, log.With("component", "remux"))
 	rmx.SetMaxTranscodes(cfg.MaxTranscodes)
+	rmx.SetMaxTranscodeHeight(cfg.MaxTranscodeHeight)
 	pb := &playback.Service{DB: a.db, Catalog: cat, CanRemux: true, CanTranscode: canTranscode(ctx, rmx, cfg.MaxTranscodes, log)}
 	// Safari plays converted streams only as HLS, written to disk per session
 	// under the same slot limits.

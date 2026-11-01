@@ -84,6 +84,11 @@ type Config struct {
 	// MaxTranscodes caps video transcodes running at once; each takes one or
 	// more CPU cores. 0 turns video transcoding off.
 	MaxTranscodes int `yaml:"max_transcodes"`
+	// MaxTranscodeHeight caps transcoded video inside a 16:9 box this many
+	// pixels tall (1080, the default, is 1920x1080), keeping its shape and
+	// never scaling up. 0 is no cap. Copied video (direct play, remux) keeps
+	// the source's size.
+	MaxTranscodeHeight int `yaml:"max_transcode_height"`
 
 	LogLevel  string `yaml:"log_level"`
 	LogFormat string `yaml:"log_format"`
@@ -195,23 +200,24 @@ type Config struct {
 
 func defaults() Config {
 	return Config{
-		ServerName:        "VCRX",
-		Bind:              "0.0.0.0",
-		Port:              3750,
-		ConfigDir:         "/config",
-		CacheDir:          "/cache",
-		MediaRoots:        []string{"/media"},
-		FFprobePath:       "ffprobe",
-		FFmpegPath:        "ffmpeg",
-		ProbeConcurrency:  4,
-		MaxTranscodes:     2,
-		ScanOnStartup:     true,
-		LogLevel:          "info",
-		LogFormat:         "json",
-		SessionTTL:        90 * 24 * time.Hour,
-		TMDbLanguage:      "en-US",
-		TMDbCountry:       "US",
-		SubtitleLanguages: []string{"en"},
+		ServerName:         "VCRX",
+		Bind:               "0.0.0.0",
+		Port:               3750,
+		ConfigDir:          "/config",
+		CacheDir:           "/cache",
+		MediaRoots:         []string{"/media"},
+		FFprobePath:        "ffprobe",
+		FFmpegPath:         "ffmpeg",
+		ProbeConcurrency:   4,
+		MaxTranscodes:      2,
+		MaxTranscodeHeight: 1080,
+		ScanOnStartup:      true,
+		LogLevel:           "info",
+		LogFormat:          "json",
+		SessionTTL:         90 * 24 * time.Hour,
+		TMDbLanguage:       "en-US",
+		TMDbCountry:        "US",
+		SubtitleLanguages:  []string{"en"},
 
 		DetectMarkers:        true,
 		MarkerHours:          "01:00-06:00",
@@ -280,6 +286,7 @@ func Load() (Config, error) {
 	str("VCRX_FFMPEG", &c.FFmpegPath)
 	integer("VCRX_PROBE_CONCURRENCY", &c.ProbeConcurrency)
 	integer("VCRX_MAX_TRANSCODES", &c.MaxTranscodes)
+	integer("VCRX_MAX_TRANSCODE_HEIGHT", &c.MaxTranscodeHeight)
 	boolean("VCRX_SCAN_ON_STARTUP", &c.ScanOnStartup)
 	str("VCRX_LOG_LEVEL", &c.LogLevel)
 	str("VCRX_LOG_FORMAT", &c.LogFormat)
@@ -401,6 +408,9 @@ func (c *Config) validate() error {
 	}
 	if c.MaxTranscodes < 0 {
 		errs = append(errs, fmt.Errorf("max_transcodes %d must be 0 (off) or more", c.MaxTranscodes))
+	}
+	if c.MaxTranscodeHeight < 0 {
+		errs = append(errs, fmt.Errorf("max_transcode_height %d must be 0 (no cap) or more", c.MaxTranscodeHeight))
 	}
 	if c.SessionTTL < time.Hour {
 		errs = append(errs, errors.New("session TTL must be at least one day"))
