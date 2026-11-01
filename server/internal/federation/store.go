@@ -114,25 +114,8 @@ func TokenProblem(err error) string {
 // so nothing is lost to a concurrent change; one that fails is left as it
 // is, still usable, and reported.
 func (s *Store) SealLegacy(ctx context.Context) (int, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, base_url, token FROM peers WHERE token NOT LIKE ?`, sealedPrefix+"%")
+	todo, err := s.legacyTokens(ctx)
 	if err != nil {
-		return 0, err
-	}
-	type legacy struct {
-		id        int64
-		base, tok string
-	}
-	var todo []legacy
-	for rows.Next() {
-		var l legacy
-		if err := rows.Scan(&l.id, &l.base, &l.tok); err != nil {
-			_ = rows.Close()
-			return 0, err
-		}
-		todo = append(todo, l)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
 		return 0, err
 	}
 	n := 0
@@ -153,6 +136,29 @@ func (s *Store) SealLegacy(ctx context.Context) (int, error) {
 		}
 	}
 	return n, errors.Join(errs...)
+}
+
+type legacyToken struct {
+	id        int64
+	base, tok string
+}
+
+// legacyTokens are the rows whose token is not sealed yet.
+func (s *Store) legacyTokens(ctx context.Context) ([]legacyToken, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, base_url, token FROM peers WHERE token NOT LIKE ?`, sealedPrefix+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []legacyToken
+	for rows.Next() {
+		var l legacyToken
+		if err := rows.Scan(&l.id, &l.base, &l.tok); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 // Get returns one peer.

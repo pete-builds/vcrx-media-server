@@ -24,7 +24,7 @@ import (
 // does not open.
 
 // TokenKeyFile is the key's file name in the config folder.
-const TokenKeyFile = "peer-token.key"
+const TokenKeyFile = "peer-token.key" //nolint:gosec // a file name, not a credential
 
 // sealedPrefix marks a sealed token. A token as a peer issues it is
 // [A-Za-z0-9_-] only, so a stored value with this prefix is never one.
@@ -74,7 +74,7 @@ func (k *TokenKey) load(create bool) (cipher.AEAD, error) {
 	}
 	block, err := aes.NewCipher(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrKeyInvalid, err)
+		return nil, fmt.Errorf("%w: %w", ErrKeyInvalid, err)
 	}
 	aead, err := cipher.NewGCM(block)
 	if err != nil {
