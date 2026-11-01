@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -58,7 +59,7 @@ func TestWebAppServing(t *testing.T) {
 func TestCookieSessionAndCSRF(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	r := f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": "pete", "password": "adminpass1", "cookie": true})
+	r := f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": "pete", "password": "adminpass1", "cookie": true}, csrfHeader, "web")
 	if r.code != 200 {
 		t.Fatalf("login: %d %s", r.code, r.body)
 	}
@@ -104,5 +105,70 @@ func TestCookieSessionAndCSRF(t *testing.T) {
 	}
 	if w := call("GET", "/api/v1/me", ""); w.Code != 401 {
 		t.Fatalf("cookie after logout: %d, want 401", w.Code)
+	}
+}
+
+// Signing in with "cookie": true plants a session cookie, so like redeeming
+// an invite or switching profile it needs the client header: a page on
+// another site must not be able to sign this browser in. Bearer sign-ins
+// (the TV) are unaffected.
+func TestSignInCookieNeedsTheClientHeader(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	lan, _ := netip.ParsePrefix("192.168.0.0/16")
+	f.srv.AutoSignInUser, f.srv.TrustedNetworks = "pete", []netip.Prefix{lan}
+	f.h = f.srv.Handler()
+	home := []string{"RemoteAddr", "192.168.1.20:5555"}
+	login := map[string]any{"username": "pete", "password": "adminpass1", "cookie": true}
+	auto := map[string]any{"device": map[string]string{"id": "web-1"}, "cookie": true}
+	for _, c := range []struct {
+		path string
+		body map[string]any
+	}{{"/api/v1/auth/login", login}, {"/api/v1/auth/auto", auto}} {
+		r := f.do("POST", c.path, "", c.body, home...)
+		wantError(t, c.path+" with cookie:true and no header", r, 403, "csrf")
+		if r.hdr.Get("Set-Cookie") != "" {
+			t.Errorf("%s: a refused sign-in set a cookie", c.path)
+		}
+		r = f.do("POST", c.path, "", c.body, append(home, csrfHeader, "web")...)
+		if r.code != 200 || !strings.HasPrefix(r.hdr.Get("Set-Cookie"), cookieName+"=") {
+			t.Errorf("%s with the header: %d %s", c.path, r.code, r.body)
+		}
+	}
+	if r := f.do("POST", "/api/v1/auth/login", "", map[string]any{"username": "pete", "password": "adminpass1"}, home...); r.code != 200 {
+		t.Errorf("bearer login without the header: %d %s", r.code, r.body)
+	}
+	if r := f.do("POST", "/api/v1/auth/auto", "", map[string]any{"device": map[string]string{"id": "tv-1"}}, home...); r.code != 200 {
+		t.Errorf("bearer auto sign-in without the header: %d %s", r.code, r.body)
+	}
+}
+
+// Behind a TLS-terminating proxy the browser is on HTTPS, so the session
+// cookie must be Secure; the proxy's X-Forwarded-Proto is believed only from a
+// trusted proxy, as for invite links.
+func TestSessionCookieSecureBehindTrustedProxy(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	proxy := netip.PrefixFrom(netip.MustParseAddr("10.9.9.9"), 32)
+	f.srv.TrustedProxies = []netip.Prefix{proxy}
+	f.h = f.srv.Handler()
+	login := map[string]any{"username": "pete", "password": "adminpass1", "cookie": true}
+	for _, c := range []struct {
+		what   string
+		hdr    []string
+		secure bool
+	}{
+		{"trusted proxy, https", []string{"RemoteAddr", "10.9.9.9:4000", "X-Forwarded-For", "203.0.113.5", "X-Forwarded-Proto", "https"}, true},
+		{"trusted proxy, http", []string{"RemoteAddr", "10.9.9.9:4000", "X-Forwarded-For", "203.0.113.5"}, false},
+		{"untrusted peer claiming https", []string{"RemoteAddr", "192.168.1.20:5555", "X-Forwarded-Proto", "https"}, false},
+	} {
+		r := f.do("POST", "/api/v1/auth/login", "", login, append(c.hdr, csrfHeader, "web")...)
+		set := r.hdr.Get("Set-Cookie")
+		if r.code != 200 || !strings.HasPrefix(set, cookieName+"=") {
+			t.Fatalf("%s: %d %s", c.what, r.code, r.body)
+		}
+		if got := strings.Contains(set, "; Secure"); got != c.secure {
+			t.Errorf("%s: Secure = %v, want %v (%s)", c.what, got, c.secure, set)
+		}
 	}
 }

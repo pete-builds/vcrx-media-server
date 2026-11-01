@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -261,9 +262,10 @@ func serve() error {
 		// A bad library entry should not stop the server from serving the others.
 		log.Error("vcrx.yaml libraries", "err", err)
 	}
-	// A scan cannot survive a restart; close out any the last process left open.
-	if _, err := a.db.ExecContext(ctx, `UPDATE scan_runs SET status = 'aborted', error = 'server restarted during the scan', finished_at = ?
-		WHERE status = 'running'`, db.NowMs()); err != nil {
+	// A scan cannot survive a restart; close out any the last process left
+	// open. A run whose library lock is still held is a live scan in another
+	// process (vcrx library scan beside the server) and is left alone.
+	if _, err := library.AbortOrphanedRuns(ctx, a.db, cfg.ConfigDir, time.Now()); err != nil {
 		return err
 	}
 
@@ -274,7 +276,8 @@ func serve() error {
 	} else {
 		log.Info("ffprobe", "version", v)
 	}
-	scanner := &library.Scanner{DB: a.db, Prober: prober, Log: log.With("component", "scanner"), ProbeConcurrency: cfg.ProbeConcurrency}
+	scanner := &library.Scanner{DB: a.db, Prober: prober, Log: log.With("component", "scanner"), ProbeConcurrency: cfg.ProbeConcurrency,
+		LockDir: cfg.ConfigDir}
 	scans := library.NewManager(scanner, log.With("component", "scans"))
 	seasons, err := catalog.LoadSeasons(cfg.ConfigDir)
 	if err != nil {
@@ -518,6 +521,12 @@ func serve() error {
 	}
 
 	hs := srv.HTTPServer(cfg.Addr())
+	// Requests run on a context shutdown can cancel: a stream (and the ffmpeg
+	// it runs) never finishes by itself. It keeps ctx's values, not its end,
+	// so a signal does not cut off requests before their grace period.
+	reqCtx, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelRequests()
+	hs.BaseContext = func(net.Listener) context.Context { return reqCtx }
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
 	log.Info("listening", "addr", cfg.Addr())
@@ -529,9 +538,33 @@ func serve() error {
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
-	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	return shutdown(log, hs, cancelRequests, scans, requestGrace, scanGrace)
+}
+
+// The shutdown budget, inside compose's 15 s stop_grace_period: requests get
+// requestGrace to finish, then the scans get scanGrace of their own to stop
+// at a safe point and close their runs before the database closes.
+const (
+	requestGrace = 5 * time.Second
+	scanGrace    = 8 * time.Second
+)
+
+// shutdown stops serving in stages, each with its own deadline, so a stream
+// that would never finish cannot use up the time the scans need. Requests
+// still open after requestGrace (streams) are cancelled and their
+// connections closed.
+func shutdown(log *slog.Logger, hs *http.Server, cancelRequests context.CancelFunc,
+	scans interface{ Shutdown(context.Context) error }, requestGrace, scanGrace time.Duration) error {
+	rctx, cancel := context.WithTimeout(context.Background(), requestGrace)
+	herr := hs.Shutdown(rctx)
+	cancel()
+	if herr != nil {
+		log.Info("stopping requests still open after the grace period, such as streams", "err", herr)
+		cancelRequests()
+		herr = hs.Close()
+	}
+	sctx, cancel := context.WithTimeout(context.Background(), scanGrace)
 	defer cancel()
-	herr := hs.Shutdown(sctx)
 	if err := scans.Shutdown(sctx); err != nil {
 		log.Warn("scans did not stop cleanly", "err", err)
 	}
@@ -619,10 +652,12 @@ func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, a
 				log.Warn("purge expired sessions", "err", err)
 			}
 		}
-		// Ten minutes after start, then daily: a consistent snapshot of the
-		// database (watch history, resume points, matches), keeping a week.
-		if i%1440 == 10 {
-			nightlyBackup(ctx, log, conn, backupDir)
+		// Ten minutes after start, then hourly, take the day's snapshot of the
+		// database (watch history, resume points, matches) if there is none
+		// yet, keeping a week. Going by the date rather than uptime means
+		// restarts neither stack copies from one day nor skip days.
+		if i%60 == 10 {
+			maybeNightlyBackup(ctx, log, conn, backupDir, time.Now())
 		}
 		select {
 		case <-ctx.Done():
@@ -632,7 +667,22 @@ func housekeeping(ctx context.Context, log *slog.Logger, pb *playback.Service, a
 	}
 }
 
-func nightlyBackup(ctx context.Context, log *slog.Logger, conn *sql.DB, dir string) {
+// nightlyDue reports whether dir lacks a nightly backup from now's UTC date
+// (backup names carry a UTC timestamp, so they sort and compare by date).
+func nightlyDue(dir string, now time.Time) bool {
+	matches, err := filepath.Glob(filepath.Join(dir, "vcrx-nightly-*.db"))
+	if err != nil || len(matches) == 0 {
+		return true
+	}
+	sort.Strings(matches)
+	newest := strings.TrimPrefix(filepath.Base(matches[len(matches)-1]), "vcrx-nightly-")
+	return newest < now.UTC().Format("20060102")
+}
+
+func maybeNightlyBackup(ctx context.Context, log *slog.Logger, conn *sql.DB, dir string, now time.Time) {
+	if !nightlyDue(dir, now) {
+		return
+	}
 	path, err := db.Backup(ctx, conn, dir, "nightly")
 	if err != nil {
 		log.Warn("nightly database backup failed", "err", err)
@@ -837,7 +887,8 @@ func libraryCmd(args []string) error {
 		if lib.LastScan != nil && lib.LastScan.Status == "running" {
 			return fmt.Errorf("library %q is already being scanned (run %d)", lib.Name, lib.LastScan.ID)
 		}
-		scanner := &library.Scanner{DB: a.db, Prober: &probe.FFprobe{Path: a.cfg.FFprobePath}, Log: a.log, ProbeConcurrency: a.cfg.ProbeConcurrency}
+		scanner := &library.Scanner{DB: a.db, Prober: &probe.FFprobe{Path: a.cfg.FFprobePath}, Log: a.log, ProbeConcurrency: a.cfg.ProbeConcurrency,
+			LockDir: a.cfg.ConfigDir}
 		run, err := library.NewManager(scanner, a.log).RunNow(ctx, lib.ID, library.Options{Trigger: "cli", SubPath: *path, Force: *force})
 		fmt.Printf("scan %d: %s, %d seen, %d added, %d changed, %d missing, %d failed\n", run.ID, run.Status, run.Seen, run.Added,
 			run.Changed, run.Missing, run.Failed)

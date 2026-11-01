@@ -25,16 +25,17 @@ const csrfHeader = "X-VCRX-Client"
 
 func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	// VCRX serves plain HTTP on the LAN, where a Secure cookie would never come
-	// back; Secure follows the connection instead.
+	// back; Secure follows how the browser reached it, including through a
+	// trusted proxy that terminates TLS.
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // see above
 		Name: cookieName, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode,
-		Secure: r.TLS != nil, MaxAge: int((400 * 24 * time.Hour).Seconds()),
+		Secure: s.isHTTPS(r), MaxAge: int((400 * 24 * time.Hour).Seconds()),
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the connection, as in setSessionCookie
-		Name: cookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: -1,
+		Name: cookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.isHTTPS(r), MaxAge: -1,
 	})
 }
 
