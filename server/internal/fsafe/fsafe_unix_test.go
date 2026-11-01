@@ -40,3 +40,35 @@ func TestOpenUnderRefusesFIFO(t *testing.T) {
 		t.Fatal("OpenUnder blocked on a FIFO")
 	}
 }
+
+// A folder swapped for a symlink out of the root between OpenUnder's checks and
+// its open must not lead to the file outside.
+func TestOpenUnderRefusesASwapAfterTheCheck(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Film"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Film", "poster.jpg"), []byte("inside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "poster.jpg"), []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	afterResolve = func() {
+		if err := os.Rename(filepath.Join(root, "Film"), filepath.Join(root, "Film.old")); err != nil {
+			t.Error(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(root, "Film")); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { afterResolve = nil })
+	f, _, err := OpenUnder(root, "Film/poster.jpg")
+	if err == nil {
+		b := make([]byte, 16)
+		n, _ := f.Read(b)
+		_ = f.Close()
+		t.Fatalf("opened %q through a folder swapped for a symlink out of the root", b[:n])
+	}
+}
