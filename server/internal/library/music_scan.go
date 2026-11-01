@@ -149,16 +149,20 @@ func (s *Scanner) scanMusic(ctx context.Context, lib Library, opt Options, run *
 	for _, f := range all {
 		folder, _ := albumFolderOf(f.rel)
 		for _, dir := range []string{folder, parentRel(folder)} {
-			if _, ok := mw.folders[dir]; !ok {
+			if _, ok := mw.folders[dir]; !ok && !mw.w.underFailed(dir) {
 				// A folder outside a targeted scan: its listing still decides
 				// whether it is a show and what its cover is.
-				_ = mw.folder(dir)
+				if err := mw.folder(dir); err != nil {
+					mw.w.log.Warn("folder unreadable, its albums will be left as they were", "path", dir, "err", err)
+					mw.w.failed = append(mw.w.failed, dir)
+				}
 			}
 		}
 	}
 	mw.readTextFiles(log)
 
 	albums, artists := groupMusic(all, mw.folders)
+	albums = readableAlbums(albums, mw.w)
 	if err := s.writeMusic(ctx, lib, albums, artists, run, nowMs); err != nil {
 		return "", err
 	}
@@ -189,6 +193,23 @@ func musicSkipDir(name string) bool {
 }
 
 // folder lists one folder (not its subfolders) and files what it holds.
+// readableAlbums drops albums whose folder the walk could not read. Their
+// title, show details, cover and checksums all come from that folder's
+// listing, so writing them from a failed read would blank the stored ones;
+// skipped, the album and its tracks stay exactly as they were, which is what
+// the run's warning says.
+func readableAlbums(albums []*albumPlan, w *walker) []*albumPlan {
+	kept := albums[:0]
+	for _, al := range albums {
+		if w.underFailed(al.folder) {
+			w.log.Info("album left as it was: its folder could not be read", "folder", al.folder)
+			continue
+		}
+		kept = append(kept, al)
+	}
+	return kept
+}
+
 func (mw *musicWalk) folder(rel string) error {
 	l, err := mw.w.read(rel)
 	if err != nil {
