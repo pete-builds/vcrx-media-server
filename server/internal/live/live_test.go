@@ -44,7 +44,7 @@ func TestSyncKeepsTheAdminsChoices(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := &Store{DB: newDB(t)}
-	src, err := s.EnsureSource(ctx, "Free", "https://playlists.example/free.m3u")
+	src, err := s.EnsureSource(ctx, "Free", "https://playlists.example/free.m3u", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestWithoutTheGrantNothingIsListed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := &Store{DB: newDB(t)}
-	src, _ := s.EnsureSource(ctx, "Free", "/config/free.m3u")
+	src, _ := s.EnsureSource(ctx, "Free", "/config/free.m3u", "")
 	if err := s.Sync(ctx, src, []Entry{{Name: "News", URL: "https://s.example/n.m3u8", Logo: "https://img.example/n.png"}}); err != nil {
 		t.Fatal(err)
 	}

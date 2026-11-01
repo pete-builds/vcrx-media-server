@@ -406,10 +406,11 @@ func serve() error {
 	liveStore := &live.Store{DB: a.db}
 	var sources []live.SourceSpec
 	for _, src := range cfg.LiveTV.Sources {
-		sources = append(sources, live.SourceSpec{Name: src.Name, Location: src.Location})
+		sources = append(sources, live.SourceSpec{Name: src.Name, Location: src.Location, Guide: src.GuideLocation})
 	}
-	refresher := &live.Refresher{Store: liveStore, Sources: sources, Interval: cfg.LiveRefreshInterval(), LogoDir: cfg.LogoCacheDir(),
-		Log: log.With("component", "live"), Logos: live.PublicOnlyClient(10 * time.Second)}
+	refresher := &live.Refresher{Store: liveStore, Sources: sources, Interval: cfg.LiveRefreshInterval(), GuideInterval: cfg.LiveGuideInterval(),
+		LogoDir: cfg.LogoCacheDir(),
+		Log:     log.With("component", "live"), Logos: live.PublicOnlyClient(10 * time.Second)}
 	if err := refresher.Start(ctx); err != nil {
 		return err
 	}

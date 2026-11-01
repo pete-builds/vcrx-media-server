@@ -173,9 +173,4 @@ func streamURL(s string) bool {
 	return len(s) <= maxFieldBytes && (strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://"))
 }
 
-func clip(s string) string {
-	if len(s) <= maxFieldBytes {
-		return s
-	}
-	return s[:maxFieldBytes]
-}
+func clip(s string) string { return clipTo(s, maxFieldBytes) }

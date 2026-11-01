@@ -38,6 +38,8 @@ type LiveTVSpec struct {
 	Sources []LiveSourceSpec `yaml:"sources"`
 	// RefreshHours is how often every playlist is read again (12 by default).
 	RefreshHours int `yaml:"refresh_hours"`
+	// GuideRefreshHours is how often every guide is read again (6 by default).
+	GuideRefreshHours int `yaml:"guide_refresh_hours"`
 }
 
 // LiveSourceSpec is one M3U playlist: m3u is an http(s) URL or an absolute
@@ -48,8 +50,15 @@ type LiveSourceSpec struct {
 	Name       string `yaml:"name"`
 	M3U        string `yaml:"m3u"`
 	M3UURLFile string `yaml:"m3u_url_file"`
-	// Location is m3u, or the URL read from m3u_url_file.
-	Location string `yaml:"-"`
+	// XMLTV is the playlist's guide, optional: an http(s) URL or an absolute
+	// path, gzipped or not; xmltv_url_file holds a URL with credentials. A
+	// playlist's own x-tvg-url is never followed: someone else wrote it.
+	XMLTV        string `yaml:"xmltv"`
+	XMLTVURLFile string `yaml:"xmltv_url_file"`
+	// Location is m3u, or the URL read from m3u_url_file; GuideLocation is
+	// the same for the guide.
+	Location      string `yaml:"-"`
+	GuideLocation string `yaml:"-"`
 }
 
 type Config struct {
@@ -345,6 +354,15 @@ func Load() (Config, error) {
 				src.Location = strings.TrimSpace(string(b))
 			}
 		}
+		src.GuideLocation = strings.TrimSpace(src.XMLTV)
+		if src.XMLTVURLFile != "" && src.GuideLocation == "" {
+			b, err := os.ReadFile(src.XMLTVURLFile) //nolint:gosec // the operator chooses this path
+			if err != nil {
+				errs = append(errs, fmt.Errorf("live_tv source %q: xmltv_url_file: %w", src.Name, err))
+			} else {
+				src.GuideLocation = strings.TrimSpace(string(b))
+			}
+		}
 	}
 
 	ttlDays := int(c.SessionTTL / (24 * time.Hour))
@@ -412,6 +430,9 @@ func (c *Config) validate() error {
 	if h := c.LiveTV.RefreshHours; h < 0 || h > 168 {
 		errs = append(errs, fmt.Errorf("live_tv.refresh_hours %d must be 1 to 168, or 0 for the default", h))
 	}
+	if h := c.LiveTV.GuideRefreshHours; h < 0 || h > 168 {
+		errs = append(errs, fmt.Errorf("live_tv.guide_refresh_hours %d must be 1 to 168, or 0 for the default", h))
+	}
 	seen := map[string]bool{}
 	for _, s := range c.LiveTV.Sources {
 		switch {
@@ -426,6 +447,11 @@ func (c *Config) validate() error {
 		case s.Location != "" && !strings.HasPrefix(s.Location, "http://") && !strings.HasPrefix(s.Location, "https://") && !filepath.IsAbs(s.Location):
 			// Say which key, never the value: it may be a URL with credentials.
 			errs = append(errs, fmt.Errorf("live_tv source %q: the playlist must be an http(s) URL or an absolute file path", s.Name))
+		case s.XMLTV != "" && s.XMLTVURLFile != "":
+			errs = append(errs, fmt.Errorf("live_tv source %q: give xmltv or xmltv_url_file, not both", s.Name))
+		case s.GuideLocation != "" && !strings.HasPrefix(s.GuideLocation, "http://") && !strings.HasPrefix(s.GuideLocation, "https://") &&
+			!filepath.IsAbs(s.GuideLocation):
+			errs = append(errs, fmt.Errorf("live_tv source %q: the guide must be an http(s) URL or an absolute file path", s.Name))
 		}
 		seen[s.Name] = true
 	}
@@ -438,6 +464,14 @@ func (c Config) LiveRefreshInterval() time.Duration {
 		return time.Duration(c.LiveTV.RefreshHours) * time.Hour
 	}
 	return 12 * time.Hour
+}
+
+// LiveGuideInterval is how often Live TV guides are read again.
+func (c Config) LiveGuideInterval() time.Duration {
+	if c.LiveTV.GuideRefreshHours > 0 {
+		return time.Duration(c.LiveTV.GuideRefreshHours) * time.Hour
+	}
+	return 6 * time.Hour
 }
 
 // LogoCacheDir holds Live TV channel logos.

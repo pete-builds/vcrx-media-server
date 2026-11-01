@@ -55,14 +55,20 @@ server_name: VCRX
 # file; a URL with an account's password in it goes in a file of its own
 # (m3u_url_file), never here. Playlists are read at startup and every
 # refresh_hours (12). Viewers need the Live TV grant (Settings > Users);
-# admins always have it.
+# admins always have it. xmltv is the playlist's guide, optional, a URL or a
+# file, gzipped or not (xmltv_url_file for a URL with a key in it), read every
+# guide_refresh_hours (6) and matched to channels by tvg-id, else by name. A
+# playlist's own x-tvg-url is never followed: set the guide here.
 #live_tv:
 #  refresh_hours: 12
+#  guide_refresh_hours: 6
 #  sources:
 #    - name: My playlist
 #      m3u: /config/channels.m3u
+#      xmltv: /config/guide.xml.gz
 #    - name: My provider
 #      m3u_url_file: /config/provider-url.txt
+#      xmltv_url_file: /config/provider-guide-url.txt
 
 # Radarr and Sonarr webhooks find the folder by name in a library. If they see
 # the NAS at another path and folder names differ, map their prefix to VCRX's.

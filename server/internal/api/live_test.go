@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/live"
 )
@@ -22,7 +23,7 @@ func withLive(t *testing.T, f *fixture) int64 {
 	ctx := context.Background()
 	store := &live.Store{DB: f.db}
 	logos := t.TempDir()
-	src, err := store.EnsureSource(ctx, "Walk", "https://playlists.example/walk.m3u?token=s3cret")
+	src, err := store.EnsureSource(ctx, "Walk", "https://playlists.example/walk.m3u?token=s3cret", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +38,12 @@ func withLive(t *testing.T, f *fixture) int64 {
 	}
 	var id int64
 	if err := f.db.QueryRow(`UPDATE channels SET logo_file = 'news.png' WHERE name = 'Walk News' RETURNING id`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	// On now, for the guide and the channel list's now.
+	now := time.Now()
+	if _, err := f.db.Exec(`INSERT INTO programs (channel_id, start_ms, stop_ms, title) VALUES (?, ?, ?, 'Walk Bulletin')`,
+		id, now.Add(-10*time.Minute).UnixMilli(), now.Add(50*time.Minute).UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
 	f.srv.Live = &Live{Store: store, LogoDir: logos}
@@ -116,6 +123,46 @@ func TestLiveChannelsFollowTheGrant(t *testing.T) {
 	// The friend may not use the admin routes.
 	if r := f.do("GET", "/api/v1/admin/live/channels", f.friendTok, nil); r.code != 403 {
 		t.Errorf("friend on the admin list: %d", r.code)
+	}
+}
+
+func TestLiveGuide(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	withLive(t, f)
+	friend := f.userID("friend")
+	if r := f.do("GET", "/api/v1/live/guide", f.friendTok, nil); r.code != 200 || strings.Contains(string(r.body), "Walk") {
+		t.Fatalf("ungranted guide: %d %s", r.code, r.body)
+	}
+	if r := f.do("PUT", fmt.Sprintf("/api/v1/admin/users/%d/policy", friend), f.adminTok, map[string]any{"allow_transcode": true, "allow_live_tv": true}); r.code != 204 {
+		t.Fatalf("grant: %d %s", r.code, r.body)
+	}
+	r := f.do("GET", "/api/v1/live/guide", f.friendTok, nil)
+	var g struct {
+		From, To int64
+		Channels []struct {
+			Name     string
+			Programs []struct{ Title string }
+		}
+	}
+	r.json(t, &g)
+	if r.code != 200 || g.To-g.From != int64(3*time.Hour/time.Millisecond) || len(g.Channels) != 2 ||
+		len(g.Channels[0].Programs) != 1 || g.Channels[0].Programs[0].Title != "Walk Bulletin" || len(g.Channels[1].Programs) != 0 {
+		t.Fatalf("guide: %d %s", r.code, r.body)
+	}
+	// The channel list carries what is on now.
+	if r := f.do("GET", "/api/v1/live/channels", f.friendTok, nil); !strings.Contains(string(r.body), `"now":{`) || !strings.Contains(string(r.body), "Walk Bulletin") {
+		t.Errorf("channels without now: %s", r.body)
+	}
+	// An hour from now, the bulletin has ended.
+	later := time.Now().Add(time.Hour).UnixMilli()
+	if r := f.do("GET", fmt.Sprintf("/api/v1/live/guide?from=%d", later), f.friendTok, nil); strings.Contains(string(r.body), "Walk Bulletin") {
+		t.Errorf("guide an hour on: %s", r.body)
+	}
+	for _, q := range []string{"from=soon", "to=later", fmt.Sprintf("from=%d&to=%d", later, later), fmt.Sprintf("from=%d&to=%d", later, later+int64(25*time.Hour/time.Millisecond))} {
+		if r := f.do("GET", "/api/v1/live/guide?"+q, f.friendTok, nil); r.code != 400 {
+			t.Errorf("guide?%s: %d, want 400", q, r.code)
+		}
 	}
 }
 

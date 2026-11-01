@@ -2538,6 +2538,37 @@ paths:
       responses:
         "200": { description: The logo, content: { image/png: {}, image/jpeg: {}, image/webp: {}, image/gif: {} } }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/live/guide:
+    get:
+      operationId: liveGuide
+      summary: >-
+        The guide grid: each channel the caller may watch, in channel order, with the programmes that overlap from to
+        to. From the XMLTV guide an admin gives a playlist (xmltv in vcrx.yaml), kept from a day ago to 14 days ahead.
+        Empty without the Live TV grant.
+      parameters:
+        - { name: from, in: query, schema: { type: integer }, description: Unix milliseconds; now by default. }
+        - { name: to, in: query, schema: { type: integer }, description: Unix milliseconds; three hours after from by default, at most a day. }
+      responses:
+        "200":
+          description: The grid.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, channels]
+                properties:
+                  from: { type: integer }
+                  to: { type: integer }
+                  channels:
+                    type: array
+                    items:
+                      allOf:
+                        - { $ref: "#/components/schemas/Channel" }
+                        - type: object
+                          required: [programs]
+                          properties:
+                            programs: { type: array, items: { $ref: "#/components/schemas/Program" } }
+        "400": { $ref: "#/components/responses/Error" }
   /api/v1/admin/live/sources:
     get:
       operationId: adminLiveSources
@@ -2556,8 +2587,8 @@ paths:
     post:
       operationId: adminRefreshLiveSource
       summary: >-
-        Read one playlist again now (up to two minutes). A playlist that cannot be read answers 200 all the same, with
-        the reason in last_error and its channels as they were.
+        Read one playlist again now, then its guide (up to two minutes). A playlist or guide that cannot be read answers
+        200 all the same, with the reason in last_error or guide_error and its channels and programmes as they were.
       parameters:
         - { name: source_id, in: path, required: true, schema: { type: integer } }
       responses:
@@ -2630,6 +2661,19 @@ components:
         enabled: { type: boolean, description: Admin list only. }
         gone: { type: boolean, description: Admin list only. The playlist no longer lists it. }
         playlist_number: { type: [string, "null"], description: Admin list only. }
+        now: { $ref: "#/components/schemas/Program", description: "GET /live/channels only: on now, from the guide." }
+        next: { $ref: "#/components/schemas/Program", description: "GET /live/channels only: the programme after now, or the first one ahead." }
+    Program:
+      type: object
+      required: [start, stop, title, categories]
+      properties:
+        start: { type: integer, description: Unix milliseconds. }
+        stop: { type: integer, description: Unix milliseconds. }
+        title: { type: string }
+        sub_title: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        categories: { type: array, items: { type: string } }
+        episode: { type: [string, "null"], description: S01E02, or the guide's on-screen form. }
     LiveSource:
       type: object
       required: [id, name, channel_count]
@@ -2639,6 +2683,10 @@ components:
         refreshed_at: { type: [integer, "null"], description: Last successful read, Unix milliseconds. }
         last_error: { type: [string, "null"], description: Why the last read failed, without the playlist's URL. }
         channel_count: { type: integer }
+        has_guide: { type: boolean, description: An xmltv guide is set for this playlist in vcrx.yaml. }
+        guide_refreshed_at: { type: [integer, "null"], description: Last successful guide read, Unix milliseconds. }
+        guide_error: { type: [string, "null"], description: Why the last guide read failed, without its URL. }
+        program_count: { type: integer }
     Loan:
       type: object
       description: A lent tape.
