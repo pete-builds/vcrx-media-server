@@ -70,6 +70,10 @@ jobs:
           docker run --rm vcrx-media-server:ci version
           docker run --rm --entrypoint ffprobe vcrx-media-server:ci -version | head -1
           docker compose -f deploy/compose.yaml config -q
+          # The container keeps its memory and process limits, and VCRX_CPUS reaches it.
+          docker compose -f deploy/compose.yaml config --format json |
+            jq -e '.services.vcrx | (.mem_limit | tonumber) >= 1073741824 and .pids_limit > 0' > /dev/null
+          VCRX_CPUS=1.5 docker compose -f deploy/compose.yaml config --format json | jq -e '.services.vcrx.cpus == 1.5' > /dev/null
         env:
           VCRX_MOVIES_DIR: /tmp
           VCRX_TV_DIR: /tmp
