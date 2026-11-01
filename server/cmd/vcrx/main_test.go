@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 )
@@ -84,5 +87,111 @@ func TestWatchExportLines(t *testing.T) {
 	}
 	if err := watchExport(ctx, conn, &out, "Nope", 0); err == nil || !strings.Contains(err.Error(), "no library named") {
 		t.Fatalf("unknown library: %v", err)
+	}
+}
+
+// The nightly backup goes by the calendar, not by uptime: a server restarted
+// several times a day (deploys) must not fill the week of nightlies with
+// copies from one day, and one up for weeks still gets one a day.
+func TestNightlyDueByDate(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 11, 1, 5, 0, 0, 0, time.UTC)
+	if !nightlyDue(dir, now) {
+		t.Fatal("no backups yet: not due")
+	}
+	for _, n := range []string{"vcrx-nightly-20261031T230000Z.db", "vcrx-pre-migrate-v18-20261101T040000Z.db"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !nightlyDue(dir, now) {
+		t.Fatal("last nightly was yesterday (a pre-migrate copy from today does not count): not due")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vcrx-nightly-20261101T001000Z.db"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if nightlyDue(dir, now) {
+		t.Fatal("already one for today: due again")
+	}
+	if !nightlyDue(dir, now.Add(20*time.Hour)) {
+		t.Fatal("next day: not due")
+	}
+}
+
+// Taking it twice on one day, as a restart would, leaves one copy.
+func TestNightlyBackupOncePerDay(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := db.Open(filepath.Join(dir, "vcrx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.Background()
+	if _, err := db.Migrate(ctx, conn, "", log); err != nil {
+		t.Fatal(err)
+	}
+	backups := filepath.Join(dir, "backups")
+	for i := 0; i < 2; i++ {
+		if i > 0 {
+			time.Sleep(1100 * time.Millisecond) // backup names carry the second
+		}
+		maybeNightlyBackup(ctx, log, conn, backups, time.Now())
+	}
+	got, _ := filepath.Glob(filepath.Join(backups, "vcrx-nightly-*.db"))
+	if len(got) != 1 {
+		t.Fatalf("nightlies after two runs on one day = %v, want 1", got)
+	}
+}
+
+type fakeScans struct{ live bool }
+
+func (f *fakeScans) Shutdown(ctx context.Context) error {
+	f.live = ctx.Err() == nil
+	return nil
+}
+
+// A stream never finishes by itself, so shutdown must not spend the whole
+// budget waiting for it: after the request grace its context (which ffmpeg
+// runs on) is cancelled, and the scans still get a deadline of their own.
+func TestShutdownStopsStreamsAndLeavesTheScansTime(t *testing.T) {
+	reqCtx, cancelRequests := context.WithCancel(context.Background())
+	defer cancelRequests()
+	started, stopped := make(chan struct{}), make(chan struct{})
+	hs := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(started)
+			<-r.Context().Done() // a stream: runs until its client or the server ends it
+			close(stopped)
+		}),
+		BaseContext: func(net.Listener) context.Context { return reqCtx },
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = hs.Serve(ln) }()
+	go func() {
+		if resp, err := http.Get("http://" + ln.Addr().String() + "/stream.mp4"); err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	<-started
+	scans := &fakeScans{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	begin := time.Now()
+	if err := shutdown(log, hs, cancelRequests, scans, 200*time.Millisecond, time.Second); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the open stream's context was never cancelled")
+	}
+	if took := time.Since(begin); took > 2*time.Second {
+		t.Errorf("shutdown took %s", took)
+	}
+	if !scans.live {
+		t.Error("the scans were handed an expired context")
 	}
 }

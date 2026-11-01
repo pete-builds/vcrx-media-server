@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"slices"
@@ -592,7 +593,7 @@ func (wr *writer) staleArt(item, season, show *itemRow, sc sidecars) map[int64]m
 			if a.source != "local" || found[kind] == a.path {
 				continue
 			}
-			if !fileExists(a.path) {
+			if fileGone(a.path) {
 				if out[it.id] == nil {
 					out[it.id] = map[string]bool{}
 				}
@@ -608,12 +609,29 @@ func (wr *writer) staleArt(item, season, show *itemRow, sc sidecars) map[int64]m
 	return out
 }
 
+// statFile is os.Stat; tests replace it to simulate a share that fails a stat.
+var statFile = os.Stat
+
 func fileExists(p string) bool {
 	if p == "" {
 		return false
 	}
-	fi, err := os.Stat(p)
+	fi, err := statFile(p)
 	return err == nil && fi.Mode().IsRegular()
+}
+
+// fileGone reports whether p is known to be gone: it does not exist, or is no
+// longer a regular file. Any other stat error (EIO, ESTALE, EACCES on a flaky
+// share) says nothing either way, so the file is not treated as gone.
+func fileGone(p string) bool {
+	if p == "" {
+		return true
+	}
+	fi, err := statFile(p)
+	if err != nil {
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	return !fi.Mode().IsRegular()
 }
 
 // fields are the filename-derived values an item is created with.

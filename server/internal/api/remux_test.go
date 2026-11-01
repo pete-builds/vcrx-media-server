@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -122,7 +124,9 @@ func TestConvertedStreamEndToEnd(t *testing.T) {
 	}
 	r = f.do("GET", sess.Stream.SeekURL+"?position_ms=12700", f.adminTok, nil)
 	r.json(t, &seek)
-	if r.code != 200 || seek.StartMs != 12000 {
+	// The keyframe at 12 s, counted from the file's start: some ffmpeg builds
+	// start the fixture a few milliseconds early (audio priming).
+	if r.code != 200 || seek.StartMs < 12000 || seek.StartMs > 12050 {
 		t.Fatalf("seek: %d %s", r.code, r.body)
 	}
 	// Another user cannot use the session.
@@ -416,5 +420,135 @@ func TestCancelledStreamDoesNotWaitForASlowReader(t *testing.T) {
 	case <-returned:
 	case <-time.After(3 * time.Second):
 		t.Fatal("the stream kept writing to a reader that had stopped, after it was cancelled")
+	}
+}
+
+// A session has one converted stream at a time: a new request (a seek, a
+// retry, a second tab) replaces the session's last one, so a single client
+// cannot hold every conversion slot and leave everyone else with 503.
+func TestConvertedStreamOnePerSession(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs /bin/sh")
+	}
+	// An "ffmpeg" that runs until it is stopped, so each stream holds its slot.
+	ff := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(ff, []byte("#!/bin/sh\nexec sleep 60\n"), 0o700); err != nil { //nolint:gosec // a test stand-in for ffmpeg
+		t.Fatal(err)
+	}
+	f := newFixture(t)
+	f.srv.Playback.CanRemux = true
+	f.srv.Remux = remux.New(ff, "ffprobe", 2, nil)
+	srv := httptest.NewServer(f.h)
+	defer srv.Close()
+	session := func() (id, url string) {
+		var s struct {
+			SessionID string `json:"session_id"`
+			Stream    struct{ URL string }
+		}
+		r := f.do("POST", "/api/v1/playback/sessions", f.adminTok, map[string]any{"item_id": f.movieID, "version_id": f.v1080, "capabilities": browserCaps(true)})
+		r.json(t, &s)
+		if s.Stream.URL == "" {
+			t.Fatalf("start: %s", r.body)
+		}
+		return s.SessionID, s.Stream.URL
+	}
+	// open starts a stream and reports its status once the handler answers:
+	// a 503 at once, a 200 only when the stream is cut off.
+	open := func(url string) <-chan int {
+		done := make(chan int, 1)
+		go func() {
+			req, _ := http.NewRequest("GET", srv.URL+url+"?start_ms=0", nil)
+			req.Header.Set("Authorization", "Bearer "+f.adminTok)
+			res, err := srv.Client().Do(req)
+			if err != nil {
+				done <- -1
+				return
+			}
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+			done <- res.StatusCode
+		}()
+		return done
+	}
+	answered := func(c <-chan int, within time.Duration) (int, bool) {
+		select {
+		case code := <-c:
+			return code, true
+		case <-time.After(within):
+			return 0, false
+		}
+	}
+	aID, aURL := session()
+	bID, bURL := session()
+	a1 := open(aURL)
+	time.Sleep(300 * time.Millisecond)
+	a2 := open(aURL)
+	// Cut off: the handler aborts the response, so the client sees it end.
+	if _, ok := answered(a1, 3*time.Second); !ok {
+		t.Fatal("the session's first stream kept running after a second one started")
+	}
+	time.Sleep(300 * time.Millisecond)
+	// Two slots: session A holds one, so session B gets the other.
+	b1 := open(bURL)
+	if code, ok := answered(b1, time.Second); ok {
+		t.Fatalf("another session's stream got %d; one client held every slot", code)
+	}
+	for _, id := range []string{aID, bID} {
+		f.do("POST", "/api/v1/playback/sessions/"+id+"/events", f.adminTok, map[string]any{"type": "stop", "position_ms": 0})
+	}
+	for _, c := range []<-chan int{a2, b1} {
+		if _, ok := answered(c, 5*time.Second); !ok {
+			t.Fatal("a stream outlived its session's stop")
+		}
+	}
+}
+
+// An admin terminating a session at the moment a stream request has checked it
+// but not yet registered must still cut that stream: the request answers 410
+// instead of playing on unseen by the terminate. Not parallel: the hook is
+// package-wide.
+func TestTerminateBetweenCheckAndRegisterCutsTheStream(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs /bin/sh")
+	}
+	ff := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(ff, []byte("#!/bin/sh\nexec sleep 60\n"), 0o700); err != nil { //nolint:gosec // a test stand-in for ffmpeg
+		t.Fatal(err)
+	}
+	f := newFixture(t)
+	f.srv.Playback.CanRemux = true
+	f.srv.Remux = remux.New(ff, "ffprobe", 2, nil)
+	srv := httptest.NewServer(f.h)
+	defer srv.Close()
+	var s struct {
+		SessionID string `json:"session_id"`
+		Stream    struct{ URL string }
+	}
+	r := f.do("POST", "/api/v1/playback/sessions", f.adminTok, map[string]any{"item_id": f.movieID, "version_id": f.v1080, "capabilities": browserCaps(true)})
+	r.json(t, &s)
+	if s.Stream.URL == "" {
+		t.Fatalf("start: %s", r.body)
+	}
+	beforeStreamRegister = func(session string) {
+		if session != s.SessionID {
+			return
+		}
+		if r := f.do("POST", "/api/v1/admin/activity/sessions/"+session+"/terminate", f.adminTok, map[string]any{"message": "test"}); r.code != 200 {
+			t.Errorf("terminate: %d %s", r.code, r.body)
+		}
+	}
+	t.Cleanup(func() { beforeStreamRegister = nil })
+	client := srv.Client()
+	client.Timeout = 3 * time.Second
+	req, _ := http.NewRequest("GET", srv.URL+s.Stream.URL+"?start_ms=0", nil)
+	req.Header.Set("Authorization", "Bearer "+f.adminTok)
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("the stream kept playing after its session was terminated: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusGone {
+		t.Fatalf("stream after terminate: %d, want 410", res.StatusCode)
 	}
 }

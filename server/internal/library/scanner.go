@@ -14,10 +14,12 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/fsafe"
 	"github.com/pete-builds/vcrx-media-server/server/internal/probe"
+	"github.com/pete-builds/vcrx-media-server/server/internal/scanlock"
 )
 
 var (
@@ -97,6 +99,13 @@ type Scanner struct {
 	// collections rebuild from it, so labels follow new metadata at once.
 	OnFinished func(lib Library, run Run)
 	Now        func() time.Time
+	// LockDir, when set, holds a lock file per library that a scan keeps for
+	// its whole run, so a scan in another process (the CLI beside the server)
+	// is refused and server start can tell a live run from a dead one.
+	LockDir string
+
+	locksMu sync.Mutex
+	locks   map[int64]func() // run id to its lock's release
 }
 
 func (s *Scanner) now() time.Time {
@@ -153,6 +162,25 @@ func (s *Scanner) begin(ctx context.Context, lib Library, opt Options) (Run, err
 	}
 	now := s.now().UnixMilli()
 	run := Run{LibraryID: lib.ID, Trigger: opt.Trigger, Status: StatusRunning, PathFilter: filepath.ToSlash(opt.SubPath), StartedAt: now}
+	release := func() {}
+	if s.LockDir != "" {
+		r, held, err := scanlock.Library(s.LockDir, lib.ID)
+		switch {
+		case held:
+			return run, ErrScanRunning
+		case err != nil:
+			// No lock file (a read-only config folder): the run row still guards.
+			s.log().Warn("scan lock unavailable", "library", lib.Name, "err", err)
+		default:
+			release = r
+		}
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			release()
+		}
+	}()
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return run, err
@@ -174,11 +202,33 @@ func (s *Scanner) begin(ctx context.Context, lib Library, opt Options) (Run, err
 	if run.ID, err = res.LastInsertId(); err != nil {
 		return run, err
 	}
-	return run, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return run, err
+	}
+	s.locksMu.Lock()
+	if s.locks == nil {
+		s.locks = map[int64]func(){}
+	}
+	s.locks[run.ID] = release
+	s.locksMu.Unlock()
+	ok = true
+	return run, nil
+}
+
+// unlock releases a run's library lock once the run is closed.
+func (s *Scanner) unlock(runID int64) {
+	s.locksMu.Lock()
+	release := s.locks[runID]
+	delete(s.locks, runID)
+	s.locksMu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 // execute does the work for a run begin created and closes its row.
 func (s *Scanner) execute(ctx context.Context, lib Library, opt Options, run Run) (Run, error) {
+	defer s.unlock(run.ID)
 	lib, opt, _ = normalize(lib, opt)
 	start := s.now()
 	var before int64
@@ -223,6 +273,15 @@ func (s *Scanner) execute(ctx context.Context, lib Library, opt Options, run Run
 
 func abortf(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrAborted, fmt.Sprintf(format, args...))
+}
+
+// alreadyMissing completes the half rule's message when earlier scans had
+// already marked some of the files missing.
+func alreadyMissing(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d of them already missing from earlier scans)", n)
 }
 
 // checkRoot fails unless the root is an absolute, readable folder. A missing
@@ -370,9 +429,19 @@ func (s *Scanner) scan(ctx context.Context, lib Library, opt Options, run *Run) 
 	for _, v := range w.videos {
 		seen[v.abs] = true
 	}
-	present, gone := 0, 0
+	// The half rule counts files already missing and still not back as well as
+	// the ones this scan would mark, so a share that loses folders a scan at a
+	// time aborts at the same point as one that loses them all at once.
+	present, gone, stillMissing, indexed := 0, 0, 0, 0
 	for _, v := range st.versions {
-		if !inScope(v.rel, sub, isFile) || v.missingSince != 0 {
+		if !inScope(v.rel, sub, isFile) {
+			continue
+		}
+		indexed++
+		if v.missingSince != 0 {
+			if !seen[v.path] {
+				stillMissing++
+			}
 			continue
 		}
 		present++
@@ -388,8 +457,9 @@ func (s *Scanner) scan(ctx context.Context, lib Library, opt Options, run *Run) 
 			}
 			return "", abortf("%s holds no video files but %d are indexed under it; the share may be unmounted or emptied. Nothing was changed; rescan with force to accept", where, present)
 		}
-		if sub == "" && present > 0 && gone*2 > present {
-			return "", abortf("%d of %d indexed files (more than half) are no longer under %s. Nothing was changed; rescan with force to accept", gone, present, lib.RootPath)
+		if sub == "" && gone > 0 && (gone+stillMissing)*2 > indexed {
+			return "", abortf("%d of %d indexed files (more than half) are no longer under %s%s. Nothing was changed; rescan with force to accept",
+				gone+stillMissing, indexed, lib.RootPath, alreadyMissing(stillMissing))
 		}
 	}
 
@@ -419,7 +489,7 @@ func (s *Scanner) scan(ctx context.Context, lib Library, opt Options, run *Run) 
 	}
 	rep.Log(log)
 	if len(w.failed) > 0 {
-		warning = fmt.Sprintf("completed with warnings: %d folders could not be read (first: %s); their files were left as they were", len(w.failed), w.failed[0])
+		warning = fmt.Sprintf("completed with warnings: %d folders or files could not be read (first: %s); their files were left as they were", len(w.failed), w.failed[0])
 	}
 	return warning, nil
 }

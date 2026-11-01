@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -279,6 +280,89 @@ func TestMusicScanReadsTagsAndGroups(t *testing.T) {
 // Rescans probe only what changed; a file that vanishes is marked missing,
 // never deleted on the first miss, and comes back when the file does; an
 // emptied root changes nothing.
+// The half rule counts tracks already missing, so a music share that loses
+// folders a scan at a time aborts once more than half is gone, as for video.
+func TestMusicMassMissingAbortsAcrossScans(t *testing.T) {
+	f := newMusicFixture(t)
+	f.scan(t, Options{Trigger: "cli"})
+	total := f.n(t, `SELECT COUNT(*) FROM music_tracks`)
+	aborted := false
+	for _, dir := range []string{"Cedar Static", "Compilations", "Glass Harbor/Signal Fires (2019)", "Glass Harbor"} {
+		if err := os.RemoveAll(filepath.Join(f.root, filepath.FromSlash(dir))); err != nil {
+			t.Fatal(err)
+		}
+		run, err := f.sc.Scan(context.Background(), f.lib, Options{Trigger: "schedule"})
+		if errors.Is(err, ErrAborted) {
+			if !strings.Contains(run.Error, "more than half") {
+				t.Fatalf("abort after removing %s: %+v", dir, run)
+			}
+			aborted = true
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := f.n(t, `SELECT COUNT(*) FROM music_tracks WHERE missing_since IS NOT NULL`); n*2 > total {
+			t.Fatalf("after removing %s, %d of %d tracks are missing and the scan did not abort", dir, n, total)
+		}
+	}
+	if !aborted {
+		t.Fatal("losing the whole music share over four scans never aborted")
+	}
+}
+
+// As for video, a track the walk lists but cannot stat is left as it was.
+func TestMusicUnstattableFileIsNotMissing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permissions are not enforced")
+	}
+	f := newMusicFixture(t)
+	f.scan(t, Options{Trigger: "cli"})
+	dir := filepath.Join(f.root, "Cedar Static", "Low Orbit")
+	if err := os.Chmod(dir, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	run := f.scan(t, Options{Trigger: "schedule"})
+	if run.Missing != 0 || !strings.Contains(run.Error, "could not be read") {
+		t.Fatalf("run = %+v; want nothing missing and a warning", run)
+	}
+}
+
+// Album folders that cannot be read during a scan are left as they were:
+// the run says so, and the album rows (venue, info file, cover) and the
+// tape-trading checksums must not be rewritten from the missing listing.
+func TestMusicUnreadableAlbumKeepsItsRows(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permissions are not enforced")
+	}
+	f := newMusicFixture(t)
+	f.scan(t, Options{Trigger: "cli"})
+	albums := func() string {
+		return f.str(t, `SELECT group_concat(title || '|' || live || '|' || IFNULL(venue, '') || '|' || IFNULL(info_path, '') || '|' ||
+			IFNULL(cover_path, '') || '|' || (SELECT COUNT(*) FROM music_checksums c WHERE c.album_id = a.id), ';')
+			FROM (SELECT * FROM music_albums ORDER BY id) a`)
+	}
+	before := albums()
+	if !strings.Contains(before, "The Lantern Room") || !strings.Contains(before, "cover.jpg") {
+		t.Fatalf("fixture rows lack the venue or cover: %s", before)
+	}
+	for _, d := range []string{"Glass Harbor/gh2024-06-14.sbd.miller.flac16", "Glass Harbor/Signal Fires (2019)"} {
+		dir := filepath.Join(f.root, filepath.FromSlash(d))
+		if err := os.Chmod(dir, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	}
+	run := f.scan(t, Options{Trigger: "schedule"})
+	if !strings.Contains(run.Error, "could not be read") || run.Missing != 0 {
+		t.Fatalf("run = %+v; want a warning and nothing missing", run)
+	}
+	if after := albums(); after != before {
+		t.Fatalf("unreadable albums were rewritten:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
 func TestMusicScanIncrementalAndMissing(t *testing.T) {
 	f := newMusicFixture(t)
 	f.scan(t, Options{Trigger: "cli"})

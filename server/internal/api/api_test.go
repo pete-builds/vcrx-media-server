@@ -1451,3 +1451,23 @@ func TestItemDetailFacts(t *testing.T) {
 		t.Errorf("season: lists must be empty, never null, and no date: %+v", s)
 	}
 }
+
+// Every response says nosniff, not only the web app's and some media routes':
+// API JSON, errors, artwork and sidecar subtitles alike.
+func TestEveryResponseIsNosniff(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	for _, c := range []struct{ path, token string }{
+		{"/healthz", ""},
+		{"/api/v1/server", ""},
+		{"/api/v1/me", f.adminTok},
+		{"/api/v1/no-such-route", f.adminTok},
+		{"/api/v1/me", ""}, // 401
+		{fmt.Sprintf("/api/v1/items/%d", f.movieID), f.adminTok},
+	} {
+		r := f.do("GET", c.path, c.token, nil)
+		if got := r.hdr.Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("GET %s (%d): X-Content-Type-Options = %q", c.path, r.code, got)
+		}
+	}
+}

@@ -93,9 +93,22 @@ func (d *Dispatcher) Handle(ctx context.Context, p Payload) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	deleted := strings.HasSuffix(p.EventType, "Delete")
 	lib, sub, ok := d.locate(libs, kind, folder)
+	if !ok && deleted {
+		// A deleted folder cannot be found by its name any more; with one
+		// library of the kind there is no doubt which it was in.
+		lib, ok = onlyLibrary(libs, kind)
+	}
 	if !ok {
 		return Result{Action: "ignored", Reason: fmt.Sprintf("no %s library holds %q", kind, path.Base(filepath.ToSlash(folder)))}, nil
+	}
+	if deleted {
+		// A targeted scan needs its folder to exist and to still hold a video,
+		// and a delete can take away either. Scanning the parent (for a movie
+		// or a series, the library root) marks what went missing, and a full
+		// scan is still guarded by the half rule.
+		sub = parentOf(sub)
 	}
 	res := Result{LibraryID: lib.ID, Path: sub}
 	id, err := d.Scan(ctx, lib.ID, sub)
@@ -144,6 +157,30 @@ func (d *Dispatcher) locate(libs []Library, kind, folder string) (Library, strin
 		}
 	}
 	return Library{}, "", false
+}
+
+// onlyLibrary is the one library of kind, when there is exactly one.
+func onlyLibrary(libs []Library, kind string) (Library, bool) {
+	var found []Library
+	for _, l := range libs {
+		if l.Kind == kind {
+			found = append(found, l)
+		}
+	}
+	if len(found) != 1 {
+		return Library{}, false
+	}
+	return found[0], true
+}
+
+// parentOf is the slash-separated parent of a library-relative path, or ""
+// (the library root) for a top-level folder.
+func parentOf(sub string) string {
+	p := path.Dir(sub)
+	if p == "." || p == "/" {
+		return ""
+	}
+	return p
 }
 
 func (d *Dispatcher) retry(ctx context.Context, libraryID int64, sub string) {

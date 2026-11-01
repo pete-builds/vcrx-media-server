@@ -43,15 +43,25 @@ func (j scopeJSON) scope() (invites.Scope, error) {
 // origin is this server as the client reached it, for links a phone opens.
 // The Host has passed checkHost, so it is an address or an allowed name.
 func (s *Server) origin(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	} else if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		if a, err := netip.ParseAddr(host); err == nil && s.trusted(a.Unmap()) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-			scheme = "https"
-		}
+	if s.isHTTPS(r) {
+		return "https://" + r.Host
 	}
-	return scheme + "://" + r.Host
+	return "http://" + r.Host
+}
+
+// isHTTPS reports whether the client reached this server over HTTPS: directly,
+// or through a trusted proxy that says so in X-Forwarded-Proto. Anyone else's
+// X-Forwarded-Proto is ignored.
+func (s *Server) isHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	a, err := netip.ParseAddr(host)
+	return err == nil && s.trusted(a.Unmap()) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // limited answers 429 when key is locked out.
