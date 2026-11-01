@@ -76,7 +76,8 @@ object ServerAddress {
                 (u[0] == 172 && u[1] in 16..31) ||
                 (u[0] == 192 && u[1] == 168) ||
                 u[0] == 127 ||
-                (u[0] == 169 && u[1] == 254) // CONTROL: Tailscale's 100.64.0.0/10 left out
+                (u[0] == 169 && u[1] == 254) ||
+                (u[0] == 100 && u[1] in 64..127)
         } else if (u.take(10).all { it == 0 } && u[10] == 0xff && u[11] == 0xff) {
             isPrivateAddress(b.copyOfRange(12, 16)) // ::ffff:a.b.c.d, an IPv4 address
         } else {
