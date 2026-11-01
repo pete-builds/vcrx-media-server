@@ -148,7 +148,7 @@ fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
                         focus.restoreHero = true
                         focus.restoreItemId = null
                         focus.restoreRowId = null
-                    })
+                    }, returningToMoreInfo = focus.restoreHero)
                 }
                 LazyColumn(
                     Modifier.weight(1f),
