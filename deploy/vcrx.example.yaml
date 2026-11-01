@@ -50,6 +50,20 @@ server_name: VCRX
 # pre-roll in its playback settings sees one at random before each movie.
 #preroll_dir: /media/Pre-Roll
 
+# Live TV: channels from M3U playlists you have the right to watch. VCRX ships
+# no playlist and suggests none. m3u is an http(s) URL or an absolute path to a
+# file; a URL with an account's password in it goes in a file of its own
+# (m3u_url_file), never here. Playlists are read at startup and every
+# refresh_hours (12). Viewers need the Live TV grant (Settings > Users);
+# admins always have it.
+#live_tv:
+#  refresh_hours: 12
+#  sources:
+#    - name: My playlist
+#      m3u: /config/channels.m3u
+#    - name: My provider
+#      m3u_url_file: /config/provider-url.txt
+
 # Radarr and Sonarr webhooks find the folder by name in a library. If they see
 # the NAS at another path and folder names differ, map their prefix to VCRX's.
 #arr_path_map:

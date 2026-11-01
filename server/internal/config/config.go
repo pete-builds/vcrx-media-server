@@ -33,6 +33,25 @@ type LibrarySpec struct {
 	Overlays []overlay.Spec `yaml:"overlays"`
 }
 
+// LiveTVSpec is the live_tv section of vcrx.yaml.
+type LiveTVSpec struct {
+	Sources []LiveSourceSpec `yaml:"sources"`
+	// RefreshHours is how often every playlist is read again (12 by default).
+	RefreshHours int `yaml:"refresh_hours"`
+}
+
+// LiveSourceSpec is one M3U playlist: m3u is an http(s) URL or an absolute
+// path to a playlist file. A URL that carries an account's credentials goes
+// in a file of its own instead (m3u_url_file), the way secrets do, so
+// vcrx.yaml never holds it.
+type LiveSourceSpec struct {
+	Name       string `yaml:"name"`
+	M3U        string `yaml:"m3u"`
+	M3UURLFile string `yaml:"m3u_url_file"`
+	// Location is m3u, or the URL read from m3u_url_file.
+	Location string `yaml:"-"`
+}
+
 type Config struct {
 	ServerName string `yaml:"server_name"`
 	Bind       string `yaml:"bind"`
@@ -149,6 +168,10 @@ type Config struct {
 	SubtitleAutoFetch bool `yaml:"subtitle_auto_fetch"`
 
 	Libraries []LibrarySpec `yaml:"libraries"`
+
+	// LiveTV is Live TV's playlists (milestone 11). VCRX ships and suggests
+	// none: it plays what the admin lists here.
+	LiveTV LiveTVSpec `yaml:"live_tv"`
 
 	// CollectionsDir holds the smart collection YAML files. Empty means
 	// $VCRX_CONFIG_DIR/collections. VCRX_COLLECTIONS_DIR overrides it.
@@ -311,6 +334,19 @@ func Load() (Config, error) {
 	list("VCRX_SUBTITLE_LANGUAGES", &c.SubtitleLanguages)
 	boolean("VCRX_SUBTITLE_AUTO_FETCH", &c.SubtitleAutoFetch)
 
+	for i := range c.LiveTV.Sources {
+		src := &c.LiveTV.Sources[i]
+		src.Location = strings.TrimSpace(src.M3U)
+		if src.M3UURLFile != "" && src.Location == "" {
+			b, err := os.ReadFile(src.M3UURLFile) //nolint:gosec // the operator chooses this path
+			if err != nil {
+				errs = append(errs, fmt.Errorf("live_tv source %q: m3u_url_file: %w", src.Name, err))
+			} else {
+				src.Location = strings.TrimSpace(string(b))
+			}
+		}
+	}
+
 	ttlDays := int(c.SessionTTL / (24 * time.Hour))
 	integer("VCRX_SESSION_TTL_DAYS", &ttlDays)
 	c.SessionTTL = time.Duration(ttlDays) * 24 * time.Hour
@@ -373,8 +409,39 @@ func (c *Config) validate() error {
 			}
 		}
 	}
+	if h := c.LiveTV.RefreshHours; h < 0 || h > 168 {
+		errs = append(errs, fmt.Errorf("live_tv.refresh_hours %d must be 1 to 168, or 0 for the default", h))
+	}
+	seen := map[string]bool{}
+	for _, s := range c.LiveTV.Sources {
+		switch {
+		case strings.TrimSpace(s.Name) == "":
+			errs = append(errs, errors.New("every live_tv source needs a name"))
+		case seen[s.Name]:
+			errs = append(errs, fmt.Errorf("live_tv source %q is listed twice", s.Name))
+		case s.M3U != "" && s.M3UURLFile != "":
+			errs = append(errs, fmt.Errorf("live_tv source %q: give m3u or m3u_url_file, not both", s.Name))
+		case s.M3U == "" && s.M3UURLFile == "":
+			errs = append(errs, fmt.Errorf("live_tv source %q needs m3u or m3u_url_file", s.Name))
+		case s.Location != "" && !strings.HasPrefix(s.Location, "http://") && !strings.HasPrefix(s.Location, "https://") && !filepath.IsAbs(s.Location):
+			// Say which key, never the value: it may be a URL with credentials.
+			errs = append(errs, fmt.Errorf("live_tv source %q: the playlist must be an http(s) URL or an absolute file path", s.Name))
+		}
+		seen[s.Name] = true
+	}
 	return errors.Join(errs...)
 }
+
+// LiveRefreshInterval is how often Live TV playlists are read again.
+func (c Config) LiveRefreshInterval() time.Duration {
+	if c.LiveTV.RefreshHours > 0 {
+		return time.Duration(c.LiveTV.RefreshHours) * time.Hour
+	}
+	return 12 * time.Hour
+}
+
+// LogoCacheDir holds Live TV channel logos.
+func (c Config) LogoCacheDir() string { return filepath.Join(c.CacheDir, "channel-logos") }
 
 // YouTubeTrailers reports whether YouTube trailers are on: asked for, and a
 // TMDb key to look them up with.
