@@ -59,7 +59,7 @@ func TestWatchSharesOnePullPerChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pl, err := s.Playlist(ctx, 7, run)
+	pl, err := s.Playlist(ctx, 7, run, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestWatchSharesOnePullPerChannel(t *testing.T) {
 		t.Fatalf("a second viewer got run %q (%v), want the same pull %q", again, err, run)
 	}
 	for _, name := range []string{"init.mp4", "seg00000.m4s"} {
-		p, err := s.Segment(7, run, name)
+		p, err := s.Segment(7, run, "", name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,16 +85,16 @@ func TestWatchSharesOnePullPerChannel(t *testing.T) {
 		run  string
 		name string
 	}{{7, run, "../../etc/passwd"}, {7, run, livePlaylist}, {7, "0000000000000000", "init.mp4"}, {8, run, "init.mp4"}} {
-		if _, err := s.Segment(bad.ch, bad.run, bad.name); !errors.Is(err, ErrNoStream) {
+		if _, err := s.Segment(bad.ch, bad.run, "", bad.name); !errors.Is(err, ErrNoStream) {
 			t.Errorf("Segment(%d, %s, %s) = %v", bad.ch, bad.run, bad.name, err)
 		}
 	}
-	dir := filepath.Dir(func() string { p, _ := s.Segment(7, run, "init.mp4"); return p }())
+	dir := filepath.Dir(func() string { p, _ := s.Segment(7, run, "", "init.mp4"); return p }())
 	s.Stop(7)
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Errorf("Stop left %s: %v", dir, err)
 	}
-	if _, err := s.Playlist(ctx, 7, run); !errors.Is(err, ErrNoStream) {
+	if _, err := s.Playlist(ctx, 7, run, ""); !errors.Is(err, ErrNoStream) {
 		t.Errorf("playlist after Stop: %v", err)
 	}
 }
@@ -112,7 +112,7 @@ func TestFollowWritesOneFragmentedMP4(t *testing.T) {
 	var out bytes.Buffer
 	flushes := 0
 	// The test stream is a file, so the pull ends after it; Follow ends with it.
-	err = s.Follow(ctx, 7, run, &out, func() { flushes++ }, func() bool { return true })
+	err = s.Follow(ctx, 7, run, "", &out, func() { flushes++ }, func() bool { return true })
 	if !errors.Is(err, ErrNoStream) {
 		t.Fatalf("Follow ended with %v, want ErrNoStream when the pull ended", err)
 	}
@@ -126,8 +126,63 @@ func TestFollowWritesOneFragmentedMP4(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Reset()
-	if err := s.Follow(ctx, 8, run, &out, func() {}, func() bool { return false }); !errors.Is(err, ErrNoStream) {
+	if err := s.Follow(ctx, 8, run, "", &out, func() {}, func() bool { return false }); !errors.Is(err, ErrNoStream) {
 		t.Errorf("revoked: %v", err)
+	}
+}
+
+func TestThePullStopsWhenTheLastViewerLeaves(t *testing.T) {
+	t.Parallel()
+	ff, url := testStream(t)
+	s := newStreams(t, ff)
+	ctx := context.Background()
+	req := WatchRequest{Channel: 7, Source: 1, URL: url, Playlist: "/config/a.m3u", Viewer: "tv"}
+	run, err := s.Watch(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Viewer = "phone"
+	if again, err := s.Watch(ctx, req); err != nil || again != run {
+		t.Fatalf("second viewer: %q %v", again, err)
+	}
+	if err := s.Leave(7, "0000000000000000", "tv"); !errors.Is(err, ErrNoStream) {
+		t.Errorf("leaving a run that is not running: %v", err)
+	}
+	if err := s.Leave(7, run, "tv"); err != nil || s.Running() != 1 {
+		t.Fatalf("the TV left (%v): %d pulls, want the phone's still running", err, s.Running())
+	}
+	if err := s.Leave(7, run, "phone"); err != nil || s.Running() != 0 {
+		t.Fatalf("the last viewer left (%v): %d pulls, want none", err, s.Running())
+	}
+	// Surfing past the stream cap: each channel left frees its slot at once.
+	s.MaxStreams = 1
+	for ch := int64(10); ch < 14; ch++ {
+		run, err := s.Watch(ctx, WatchRequest{Channel: ch, Source: 1, URL: url, Playlist: "/config/a.m3u", Viewer: "tv"})
+		if err != nil {
+			t.Fatalf("channel %d with max_streams 1: %v", ch, err)
+		}
+		if err := s.Leave(ch, run, "tv"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestTheSweepDropsAViewerWhoStoppedAsking(t *testing.T) {
+	t.Parallel()
+	ff, url := testStream(t)
+	s := newStreams(t, ff)
+	s.Idle = time.Hour
+	ctx := context.Background()
+	if _, err := s.Watch(ctx, WatchRequest{Channel: 7, Source: 1, URL: url, Playlist: "/config/a.m3u", Viewer: "tv"}); err != nil {
+		t.Fatal(err)
+	}
+	// The TV lost power an hour and a minute ago.
+	s.mu.Lock()
+	s.jobs[7].viewers["tv"] = time.Now().Add(-61 * time.Minute)
+	s.mu.Unlock()
+	s.sweep()
+	if s.Running() != 0 {
+		t.Errorf("%d pulls after the only viewer went quiet", s.Running())
 	}
 }
 

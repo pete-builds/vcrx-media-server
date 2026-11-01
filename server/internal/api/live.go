@@ -35,6 +35,7 @@ func (s *Server) liveRoutes() []route {
 		{"GET", "/api/v1/live/channels/{channel_id}/hls/{run}/index.m3u8", signedIn, s.liveWatchPlaylist},
 		{"GET", "/api/v1/live/channels/{channel_id}/hls/{run}/stream.mp4", signedIn, s.liveWatchStream},
 		{"GET", "/api/v1/live/channels/{channel_id}/hls/{run}/{segment}", signedIn, s.liveWatchSegment},
+		{"POST", "/api/v1/live/channels/{channel_id}/hls/{run}/leave", signedIn, s.liveLeave},
 		{"GET", "/api/v1/admin/live/sources", adminOnly, s.adminLiveSources},
 		{"POST", "/api/v1/admin/live/sources/{source_id}/refresh", adminOnly, s.adminLiveRefresh},
 		{"GET", "/api/v1/admin/live/channels", adminOnly, s.adminLiveChannels},
@@ -258,6 +259,25 @@ func (s *Server) liveTarget(w http.ResponseWriter, r *http.Request) (live.WatchT
 	return t, true
 }
 
+// viewer is who is watching: one per signed-in device, so the same account on
+// a TV and a phone are two viewers of a pull.
+func viewer(r *http.Request) string { return strconv.FormatInt(info(r).Session.ID, 10) }
+
+// liveLeave takes the caller off a channel's pull. The pull stops when its
+// last viewer leaves, so changing channel frees a stream at once instead of
+// holding it until the minute without requests runs out.
+func (s *Server) liveLeave(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.liveTarget(w, r)
+	if !ok {
+		return
+	}
+	if err := s.Live.Streams.Leave(t.Channel, r.PathValue("run"), viewer(r)); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "That stream has ended. Ask to watch the channel again.")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // liveWatch starts the channel's pull, or joins the one running, and
 // answers with the playlist to play.
 func (s *Server) liveWatch(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +289,8 @@ func (s *Server) liveWatch(w http.ResponseWriter, r *http.Request) {
 	if s.Live.Refresher != nil {
 		max = s.Live.Refresher.SourceMax(t.Source)
 	}
-	run, err := s.Live.Streams.Watch(r.Context(), live.WatchRequest{Channel: t.Channel, Source: t.Source, SourceMax: max, URL: t.URL, Playlist: t.Playlist})
+	run, err := s.Live.Streams.Watch(r.Context(), live.WatchRequest{Channel: t.Channel, Source: t.Source, SourceMax: max, URL: t.URL,
+		Playlist: t.Playlist, Viewer: viewer(r)})
 	switch {
 	case errors.Is(err, live.ErrBusy):
 		writeError(w, http.StatusConflict, "streams_busy", "Every live stream is in use. Try again when someone stops watching a channel.")
@@ -292,7 +313,7 @@ func (s *Server) liveWatchPlaylist(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	b, err := s.Live.Streams.Playlist(r.Context(), t.Channel, r.PathValue("run"))
+	b, err := s.Live.Streams.Playlist(r.Context(), t.Channel, r.PathValue("run"), viewer(r))
 	switch {
 	case errors.Is(err, live.ErrNoStream):
 		writeError(w, http.StatusNotFound, "not_found", "That stream has ended. Ask to watch the channel again.")
@@ -330,7 +351,7 @@ func (s *Server) liveWatchStream(w http.ResponseWriter, r *http.Request) {
 			f.Flush()
 		}
 	}
-	err := s.Live.Streams.Follow(r.Context(), t.Channel, r.PathValue("run"), hw, flush, allowed)
+	err := s.Live.Streams.Follow(r.Context(), t.Channel, r.PathValue("run"), viewer(r), hw, flush, allowed)
 	if hw.started {
 		return // mid-stream, an end is just the end
 	}
@@ -365,7 +386,7 @@ func (s *Server) liveWatchSegment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	path, err := s.Live.Streams.Segment(t.Channel, r.PathValue("run"), r.PathValue("segment"))
+	path, err := s.Live.Streams.Segment(t.Channel, r.PathValue("run"), viewer(r), r.PathValue("segment"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "No such segment.")
 		return

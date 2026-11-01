@@ -77,7 +77,9 @@ type watchJob struct {
 	done            chan struct{}
 	err             error
 	stderr          strings.Builder
-	last            time.Time // guarded by Streams.mu
+	// viewers is each viewer's last request, by session; guarded by
+	// Streams.mu. A pull with none left stops.
+	viewers map[string]time.Time
 }
 
 // WatchRequest is one viewer asking for a channel.
@@ -91,6 +93,9 @@ type WatchRequest struct {
 	// wrote, or a playlist served from the LAN, may name streams on the LAN;
 	// one from the internet may name only public addresses.
 	Playlist string
+	// Viewer is who asks, one per signed-in device: the pull stops when the
+	// last viewer leaves or stops asking.
+	Viewer string
 }
 
 // Watch joins the channel's pull, starting one if none is running, and
@@ -102,7 +107,7 @@ func (s *Streams) Watch(ctx context.Context, w WatchRequest) (string, error) {
 		return "", errors.New("the server is shutting down")
 	}
 	if j := s.jobs[w.Channel]; j != nil && !isDone(j) {
-		j.last = time.Now()
+		j.viewers[w.Viewer] = time.Now()
 		s.mu.Unlock()
 		return j.run, nil
 	}
@@ -116,7 +121,8 @@ func (s *Streams) Watch(ctx context.Context, w WatchRequest) (string, error) {
 
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
-	j := &watchJob{channel: w.Channel, source: w.Source, run: hex.EncodeToString(b), done: make(chan struct{}), last: time.Now()}
+	j := &watchJob{channel: w.Channel, source: w.Source, run: hex.EncodeToString(b), done: make(chan struct{}),
+		viewers: map[string]time.Time{w.Viewer: time.Now()}}
 	j.dir = filepath.Join(s.Root, fmt.Sprintf("ch%d-%s", w.Channel, j.run))
 	if err := os.MkdirAll(j.dir, 0o700); err != nil {
 		return "", fmt.Errorf("live stream directory: %w", err)
@@ -152,6 +158,7 @@ func (s *Streams) Watch(ctx context.Context, w WatchRequest) (string, error) {
 	prev := s.jobs[w.Channel]
 	if prev != nil && !isDone(prev) {
 		// Two viewers raced to start the same channel: keep the first pull.
+		prev.viewers[w.Viewer] = time.Now()
 		s.mu.Unlock()
 		s.finish(j)
 		return prev.run, nil
@@ -272,27 +279,49 @@ func publicAddr(a netip.Addr) bool {
 	return a.IsGlobalUnicast() && !a.IsPrivate() && !a.IsLoopback() && !a.IsLinkLocalUnicast() && !cgnat.Contains(a)
 }
 
-// lookup finds a channel's running pull by run id and counts the request.
-func (s *Streams) lookup(channel int64, run string) (*watchJob, error) {
+// lookup finds a channel's running pull by run id and counts the request as
+// the viewer's.
+func (s *Streams) lookup(channel int64, run, viewer string) (*watchJob, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j := s.jobs[channel]
 	if j == nil || j.run != run {
 		return nil, ErrNoStream
 	}
-	j.last = time.Now()
+	j.viewers[viewer] = time.Now()
 	return j, nil
+}
+
+// Leave takes a viewer off a pull, and stops the pull if nobody is left.
+// Only the viewer's own place is taken: everyone else keeps watching.
+func (s *Streams) Leave(channel int64, run, viewer string) error {
+	s.mu.Lock()
+	j := s.jobs[channel]
+	if j == nil || j.run != run {
+		s.mu.Unlock()
+		return ErrNoStream
+	}
+	delete(j.viewers, viewer)
+	last := len(j.viewers) == 0
+	if last {
+		delete(s.jobs, channel)
+	}
+	s.mu.Unlock()
+	if last {
+		s.finish(j)
+	}
+	return nil
 }
 
 // Playlist returns the channel's live playlist once it lists three segments,
 // waiting up to Ready for ffmpeg to write them.
-func (s *Streams) Playlist(ctx context.Context, channel int64, run string) ([]byte, error) {
-	return s.waitPlaylist(ctx, channel, run, liveMinSegments)
+func (s *Streams) Playlist(ctx context.Context, channel int64, run, viewer string) ([]byte, error) {
+	return s.waitPlaylist(ctx, channel, run, viewer, liveMinSegments)
 }
 
 // waitPlaylist returns the playlist once it lists min segments.
-func (s *Streams) waitPlaylist(ctx context.Context, channel int64, run string, min int) ([]byte, error) {
-	j, err := s.lookup(channel, run)
+func (s *Streams) waitPlaylist(ctx context.Context, channel int64, run, viewer string, min int) ([]byte, error) {
+	j, err := s.lookup(channel, run, viewer)
 	if err != nil {
 		return nil, err
 	}
@@ -327,11 +356,11 @@ func (s *Streams) waitPlaylist(ctx context.Context, channel int64, run string, m
 
 // Segment returns the path of one of the pull's files by a name its playlist
 // uses; any other name is ErrNoStream, so a request never reaches another file.
-func (s *Streams) Segment(channel int64, run, name string) (string, error) {
+func (s *Streams) Segment(channel int64, run, viewer, name string) (string, error) {
 	if !liveSegment.MatchString(name) {
 		return "", ErrNoStream
 	}
-	j, err := s.lookup(channel, run)
+	j, err := s.lookup(channel, run, viewer)
 	if err != nil {
 		return "", err
 	}
@@ -393,7 +422,13 @@ func (s *Streams) sweep() {
 	s.mu.Lock()
 	var stale []*watchJob
 	for ch, j := range s.jobs {
-		if isDone(j) || time.Since(j.last) > idle {
+		// A viewer whose player stopped asking (the TV lost power) leaves.
+		for v, seen := range j.viewers {
+			if time.Since(seen) > idle {
+				delete(j.viewers, v)
+			}
+		}
+		if isDone(j) || len(j.viewers) == 0 {
 			delete(s.jobs, ch)
 			stale = append(stale, j)
 		}

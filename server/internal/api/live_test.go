@@ -177,6 +177,10 @@ func TestLiveWatch(t *testing.T) {
 	if r := f.do("GET", "/api/v1/me", f.friendTok, nil); !strings.Contains(string(r.body), `"live_tv":true`) {
 		t.Errorf("me: %s", r.body)
 	}
+	// The admin leaves: the friend is still watching, so the pull stays.
+	if r := f.do("POST", base+"leave", f.adminTok, nil); r.code != 204 || f.srv.Live.Streams.Running() != 1 {
+		t.Errorf("admin left: %d, %d pulls, want the friend's still running", r.code, f.srv.Live.Streams.Running())
+	}
 	// The admin turns the channel off: the stream stops for everyone.
 	if r := f.do("PUT", fmt.Sprintf("/api/v1/admin/live/channels/%d", news), f.adminTok, map[string]any{"enabled": false}); r.code != 204 {
 		t.Fatalf("disable: %d", r.code)

@@ -25,10 +25,10 @@ const followCheckEvery = 3
 // next segment has slid out of the playlist jumps to the live edge. Follow
 // returns when ctx ends, the pull ends, or allowed reports false, which it
 // asks every few segments so a grant taken away ends the stream.
-func (s *Streams) Follow(ctx context.Context, channel int64, run string, w io.Writer, flush func(), allowed func() bool) error {
+func (s *Streams) Follow(ctx context.Context, channel int64, run, viewer string, w io.Writer, flush func(), allowed func() bool) error {
 	// One segment is enough to start: unlike an HLS player, a progressive
 	// stream has no live edge to keep three segments back from.
-	pl, err := s.waitPlaylist(ctx, channel, run, 1)
+	pl, err := s.waitPlaylist(ctx, channel, run, viewer, 1)
 	if err != nil {
 		return err
 	}
@@ -36,7 +36,7 @@ func (s *Streams) Follow(ctx context.Context, channel int64, run string, w io.Wr
 	if next < 0 {
 		next = 0
 	}
-	init, err := s.Segment(channel, run, "init.mp4")
+	init, err := s.Segment(channel, run, viewer, "init.mp4")
 	if err != nil {
 		return err
 	}
@@ -47,7 +47,7 @@ func (s *Streams) Follow(ctx context.Context, channel int64, run string, w io.Wr
 	written := 0
 	for {
 		name := fmt.Sprintf("seg%05d.m4s", next)
-		path, err := s.Segment(channel, run, name) // also keeps the pull alive
+		path, err := s.Segment(channel, run, viewer, name) // also keeps the viewer on the pull
 		if err != nil {
 			return err
 		}
@@ -78,8 +78,13 @@ func (s *Streams) Follow(ctx context.Context, channel int64, run string, w io.Wr
 		}
 		s.mu.Lock()
 		j := s.jobs[channel]
+		watching := false
+		if j != nil {
+			_, watching = j.viewers[viewer]
+		}
 		s.mu.Unlock()
-		if j == nil || j.run != run || isDone(j) {
+		if j == nil || j.run != run || isDone(j) || !watching {
+			// The pull ended, or this viewer left it.
 			return ErrNoStream
 		}
 	}
