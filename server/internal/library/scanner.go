@@ -225,6 +225,15 @@ func abortf(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrAborted, fmt.Sprintf(format, args...))
 }
 
+// alreadyMissing completes the half rule's message when earlier scans had
+// already marked some of the files missing.
+func alreadyMissing(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d of them already missing from earlier scans)", n)
+}
+
 // checkRoot fails unless the root is an absolute, readable folder. A missing
 // NAS mount must stop the scan here, before anything can be marked missing.
 func checkRoot(root string) error {
@@ -370,9 +379,19 @@ func (s *Scanner) scan(ctx context.Context, lib Library, opt Options, run *Run) 
 	for _, v := range w.videos {
 		seen[v.abs] = true
 	}
-	present, gone := 0, 0
+	// The half rule counts files already missing and still not back as well as
+	// the ones this scan would mark, so a share that loses folders a scan at a
+	// time aborts at the same point as one that loses them all at once.
+	present, gone, stillMissing, indexed := 0, 0, 0, 0
 	for _, v := range st.versions {
-		if !inScope(v.rel, sub, isFile) || v.missingSince != 0 {
+		if !inScope(v.rel, sub, isFile) {
+			continue
+		}
+		indexed++
+		if v.missingSince != 0 {
+			if !seen[v.path] {
+				stillMissing++
+			}
 			continue
 		}
 		present++
@@ -388,8 +407,9 @@ func (s *Scanner) scan(ctx context.Context, lib Library, opt Options, run *Run) 
 			}
 			return "", abortf("%s holds no video files but %d are indexed under it; the share may be unmounted or emptied. Nothing was changed; rescan with force to accept", where, present)
 		}
-		if sub == "" && present > 0 && gone*2 > present {
-			return "", abortf("%d of %d indexed files (more than half) are no longer under %s. Nothing was changed; rescan with force to accept", gone, present, lib.RootPath)
+		if sub == "" && gone > 0 && (gone+stillMissing)*2 > indexed {
+			return "", abortf("%d of %d indexed files (more than half) are no longer under %s%s. Nothing was changed; rescan with force to accept",
+				gone+stillMissing, indexed, lib.RootPath, alreadyMissing(stillMissing))
 		}
 	}
 

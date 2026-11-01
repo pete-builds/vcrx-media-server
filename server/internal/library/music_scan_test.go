@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -279,6 +280,37 @@ func TestMusicScanReadsTagsAndGroups(t *testing.T) {
 // Rescans probe only what changed; a file that vanishes is marked missing,
 // never deleted on the first miss, and comes back when the file does; an
 // emptied root changes nothing.
+// The half rule counts tracks already missing, so a music share that loses
+// folders a scan at a time aborts once more than half is gone, as for video.
+func TestMusicMassMissingAbortsAcrossScans(t *testing.T) {
+	f := newMusicFixture(t)
+	f.scan(t, Options{Trigger: "cli"})
+	total := f.n(t, `SELECT COUNT(*) FROM music_tracks`)
+	aborted := false
+	for _, dir := range []string{"Cedar Static", "Compilations", "Glass Harbor/Signal Fires (2019)", "Glass Harbor"} {
+		if err := os.RemoveAll(filepath.Join(f.root, filepath.FromSlash(dir))); err != nil {
+			t.Fatal(err)
+		}
+		run, err := f.sc.Scan(context.Background(), f.lib, Options{Trigger: "schedule"})
+		if errors.Is(err, ErrAborted) {
+			if !strings.Contains(run.Error, "more than half") {
+				t.Fatalf("abort after removing %s: %+v", dir, run)
+			}
+			aborted = true
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := f.n(t, `SELECT COUNT(*) FROM music_tracks WHERE missing_since IS NOT NULL`); n*2 > total {
+			t.Fatalf("after removing %s, %d of %d tracks are missing and the scan did not abort", dir, n, total)
+		}
+	}
+	if !aborted {
+		t.Fatal("losing the whole music share over four scans never aborted")
+	}
+}
+
 func TestMusicScanIncrementalAndMissing(t *testing.T) {
 	f := newMusicFixture(t)
 	f.scan(t, Options{Trigger: "cli"})

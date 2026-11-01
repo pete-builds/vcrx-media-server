@@ -82,7 +82,7 @@ vcrx watch export [-library NAME] [-unplayed-days N]
 vcrx healthcheck              what the container HEALTHCHECK runs
 ```
 
-`vcrx library scan -name Movies -path "Some Folder"` rescans one folder. A scan refuses to mark files missing when the library root is unreachable or suddenly empty, or when more than half the library would vanish at once; `-force` overrides the last two after you have checked the mount.
+`vcrx library scan -name Movies -path "Some Folder"` rescans one folder. A scan refuses to mark files missing when the library root is unreachable or suddenly empty, or when more than half the library would be missing, counting files earlier scans already marked missing (so a share that loses folders a scan at a time is caught too); `-force` overrides the last two after you have checked the mount.
 
 ### Configuration
 
