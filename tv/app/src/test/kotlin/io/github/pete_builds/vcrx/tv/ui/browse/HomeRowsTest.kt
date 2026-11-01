@@ -65,6 +65,18 @@ class HomeRowsTest {
     }
 
     @Test
+    fun backFromMoreInfoFocusesMoreInfo() {
+        // It used to land on the rail: nothing on Home claimed focus for the hero's More info.
+        assertEquals(HomeRows.HeroFocus.MoreInfo, HomeRows.heroFocus(hasHero = true, toContent = false, restoreItemId = null, restoreHero = true))
+        // The rail handing over still lands on Play.
+        assertEquals(HomeRows.HeroFocus.First, HomeRows.heroFocus(hasHero = true, toContent = true, restoreItemId = null, restoreHero = false))
+        // A card taking focus back keeps it.
+        assertEquals(null, HomeRows.heroFocus(hasHero = true, toContent = true, restoreItemId = 4, restoreHero = false))
+        assertEquals(null, HomeRows.heroFocus(hasHero = true, toContent = false, restoreItemId = null, restoreHero = false))
+        assertEquals(null, HomeRows.heroFocus(hasHero = false, toContent = true, restoreItemId = null, restoreHero = true))
+    }
+
+    @Test
     fun layoutDecodes() {
         val layout = ApiJson.decodeFromString(
             HomeLayout.serializer(),

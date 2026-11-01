@@ -1,11 +1,16 @@
 package io.github.pete_builds.vcrx.tv.ui.details
 
 import android.os.SystemClock
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -13,20 +18,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -52,6 +62,8 @@ import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
+import io.github.pete_builds.vcrx.tv.ui.components.Reveal
+import io.github.pete_builds.vcrx.tv.ui.components.RevealOnly
 import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
 import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
@@ -135,6 +147,7 @@ class DetailsViewModel(private val graph: AppGraph, private val itemId: Long) : 
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DetailsScreen(itemId: Long) {
     val vm = graphViewModel(key = "details:$itemId") { DetailsViewModel(it, itemId) }
@@ -143,19 +156,38 @@ fun DetailsScreen(itemId: Long) {
         vm.refreshIfStale()
         onPauseOrDispose { }
     }
-    LoadStateContent(vm.state, onRetry = { vm.load() }) { item -> Details(item, vm) }
+    // The page scrolls only to show what is cut off, so the poster and title
+    // stay on screen while Play has focus; Details hands the TV's own scrolling
+    // back to the rows inside it.
+    val rowScroll = LocalBringIntoViewSpec.current
+    LoadStateContent(vm.state, onRetry = { vm.load() }) { item ->
+        CompositionLocalProvider(LocalBringIntoViewSpec provides RevealOnly) { Details(item, vm, rowScroll) }
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun Details(item: Item, vm: DetailsViewModel) {
+private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSpec) {
     val primaryFocus = remember { FocusRequester() }
     var pickVersion by remember { mutableStateOf(false) }
     val isContainer = item.kind == "show" || item.kind == "season"
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     ThemeMusic(item)
 
-    LazyColumn(contentPadding = PaddingValues(48.dp), verticalArrangement = Arrangement.spacedBy(32.dp)) {
+    // The rows inside the page keep the TV's own sideways scrolling.
+    val keepRowScroll: @Composable (@Composable () -> Unit) -> Unit = { content ->
+        CompositionLocalProvider(LocalBringIntoViewSpec provides rowScroll, content = content)
+    }
+    LazyColumn(state = list, contentPadding = PaddingValues(48.dp), verticalArrangement = Arrangement.spacedBy(32.dp)) {
         item(key = "header") {
-            Row(horizontalArrangement = Arrangement.spacedBy(40.dp)) {
+            Row(
+                // Coming back up from the cast: the whole header, not just its buttons.
+                Modifier.onFocusChanged { state ->
+                    if (state.hasFocus && headerFits(list)) scope.launch { list.animateScrollToItem(0) }
+                },
+                horizontalArrangement = Arrangement.spacedBy(40.dp),
+            ) {
                 val episode = item.kind == "episode"
                 Box(Modifier.width(if (episode) 384.dp else 240.dp).aspectRatio(if (episode) 16f / 9f else 2f / 3f)) {
                     if (episode) {
@@ -178,9 +210,11 @@ private fun Details(item: Item, vm: DetailsViewModel) {
                     if (item.directors.isNotEmpty()) {
                         Label("Directed by ${item.directors.joinToString(", ")}", style = MaterialTheme.typography.labelSmall)
                     }
-                    Row(
+                    // Wraps: Resume, Play from start, Mark watched and Trailer do not fit on one line.
+                    FlowRow(
                         Modifier.padding(top = 12.dp).focusRestorer(primaryFocus).focusGroup(),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         if (isContainer) ShowButtons(item, vm, primaryFocus) else PlayButtons(item, vm, primaryFocus)
                         TrailerButton(item)
@@ -204,7 +238,7 @@ private fun Details(item: Item, vm: DetailsViewModel) {
             }
         }
         if (item.extras.isNotEmpty()) {
-            item(key = "extras") { ExtrasRow(item) }
+            item(key = "extras") { keepRowScroll { ExtrasRow(item) } }
         }
         // The panel sits above the cast row: the D-pad cannot stop on text, so
         // moving down to the cast scrolls the panel into view on the way.
@@ -213,14 +247,14 @@ private fun Details(item: Item, vm: DetailsViewModel) {
             if (facts.about.isNotEmpty() || facts.media.isNotEmpty()) {
                 item(key = "facts") { FactsPanel(facts) }
             }
-            if (item.cast.isNotEmpty()) item(key = "cast") { CastRow(item) }
+            if (item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
         }
         if (isContainer && item.kind == "show" && vm.seasons.isNotEmpty()) {
-            item(key = "seasons") { SeasonRow(vm) }
+            item(key = "seasons") { keepRowScroll { SeasonRow(vm) } }
         }
         if (isContainer) {
             item(key = "episodes") { EpisodeList(vm) }
-            if (item.kind == "show" && item.cast.isNotEmpty()) item(key = "cast") { CastRow(item) }
+            if (item.kind == "show" && item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
         }
     }
 
@@ -405,6 +439,16 @@ private fun VersionPicker(versions: List<Version>, selected: Long, onPick: (Long
         }
     }
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
+}
+
+/**
+ * Whether the header fits on screen whole, so scrolling back to the top shows
+ * all of it; one taller than the screen would push its buttons off the bottom.
+ */
+private fun headerFits(list: LazyListState): Boolean {
+    val info = list.layoutInfo
+    val header = info.visibleItemsInfo.firstOrNull { it.key == "header" } ?: return false
+    return Reveal.fitsAtTop(header.size, info.beforeContentPadding, info.viewportSize.height)
 }
 
 private fun metaLine(item: Item): String = listOfNotNull(

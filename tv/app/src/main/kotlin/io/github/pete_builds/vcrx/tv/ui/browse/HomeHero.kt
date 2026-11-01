@@ -45,9 +45,18 @@ val HERO_HEIGHT = 250.dp
  * black, its name, details and plot, and Play and More info. It shows the
  * day's featured title ([featured] true) until focus moves into the rows, then
  * whichever card has focus, so the rows need no titles under their posters.
+ * [onMoreInfo] runs before More info opens Details, so Home can give that
+ * button focus back through [moreInfo] on return.
  */
 @Composable
-fun HomeHero(item: Item, featured: Boolean, firstButton: FocusRequester, modifier: Modifier = Modifier) {
+fun HomeHero(
+    item: Item,
+    featured: Boolean,
+    firstButton: FocusRequester,
+    moreInfo: FocusRequester,
+    onMoreInfo: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val api = LocalContext.current.graph.api
     val actions = LocalAppActions.current
     Box(modifier.fillMaxWidth().height(HERO_HEIGHT)) {
@@ -90,9 +99,12 @@ fun HomeHero(item: Item, featured: Boolean, firstButton: FocusRequester, modifie
                 }
                 BrandButton(
                     "More info",
-                    onClick = { actions.openDetails(item.id) },
+                    onClick = {
+                        onMoreInfo()
+                        actions.openDetails(item.id)
+                    },
                     primary = play == null,
-                    modifier = if (play == null) Modifier.focusRequester(firstButton) else Modifier,
+                    modifier = Modifier.focusRequester(moreInfo).let { if (play == null) it.focusRequester(firstButton) else it },
                 )
             }
         }
