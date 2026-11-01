@@ -50,7 +50,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.Wordmark
 import io.github.pete_builds.vcrx.tv.ui.connect.ErrorLine
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.White
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -186,7 +186,7 @@ fun PairScreen() {
             Column(Modifier.width(560.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Wordmark(height = 48.dp)
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Pair with a phone".uppercase(), style = MaterialTheme.typography.headlineSmall, color = Orange)
+                    Text("Pair with a phone", style = MaterialTheme.typography.headlineSmall, color = White)
                     Label(vm.serverLabel, style = MaterialTheme.typography.labelSmall, color = Gray)
                 }
                 when (s) {

@@ -20,7 +20,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.White
 
 /** What every screen that loads data can be showing. */
 sealed interface LoadState<out T> {
@@ -97,7 +97,7 @@ fun MessageView(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.widthIn(max = 640.dp),
         ) {
-            Text(title.uppercase(), style = MaterialTheme.typography.headlineSmall, color = Orange, textAlign = TextAlign.Center)
+            Text(title, style = MaterialTheme.typography.headlineSmall, color = White, textAlign = TextAlign.Center)
             if (detail != null) {
                 Text(detail, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
             }

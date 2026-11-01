@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.annotation.OptIn
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,8 +50,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.BrandButton
 import io.github.pete_builds.vcrx.tv.ui.components.BrandDialog
 import io.github.pete_builds.vcrx.tv.ui.components.FrameCard
 import io.github.pete_builds.vcrx.tv.ui.components.Label
-import io.github.pete_builds.vcrx.tv.ui.theme.CornerRadius
-import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
+import io.github.pete_builds.vcrx.tv.ui.components.SectionTitle
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
 
 // Trailers, extras and theme music on the details screen. A local trailer or
@@ -103,13 +100,13 @@ fun ExtrasRow(item: Item) {
     if (item.extras.isEmpty()) return
     val actions = LocalAppActions.current
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Label("Extras", style = MaterialTheme.typography.labelLarge)
-        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionTitle("Extras")
+        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(item.extras, key = { it.id }) { extra ->
-                FrameCard(onClick = { actions.playExtra(item.id, extra.id, "${item.title}  ${extra.title}") }, modifier = Modifier.width(300.dp)) {
+                FrameCard(onClick = { actions.playExtra(item.id, extra.id, "${item.title}  ${extra.title}") }, quiet = true, modifier = Modifier.width(300.dp)) {
                     Column(
-                        Modifier.fillMaxWidth().background(Graphite, RoundedCornerShape(CornerRadius)).padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Label(extraLine(extra), style = MaterialTheme.typography.labelSmall, color = Gray)
                         Text(extra.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)

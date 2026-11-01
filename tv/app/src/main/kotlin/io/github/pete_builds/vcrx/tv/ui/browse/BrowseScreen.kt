@@ -1,11 +1,14 @@
 package io.github.pete_builds.vcrx.tv.ui.browse
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,7 +31,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
@@ -44,8 +50,12 @@ import io.github.pete_builds.vcrx.tv.ui.components.BrandRow
 import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
+import io.github.pete_builds.vcrx.tv.ui.components.Mark
 import io.github.pete_builds.vcrx.tv.ui.components.Wordmark
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
+import io.github.pete_builds.vcrx.tv.ui.theme.Black
+import io.github.pete_builds.vcrx.tv.ui.theme.Gray
+import io.github.pete_builds.vcrx.tv.ui.theme.Motion
 import io.github.pete_builds.vcrx.tv.ui.music.MusicSection
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -132,6 +142,10 @@ fun Lifecycle.inFrontNow(): Boolean = currentState.isAtLeast(Lifecycle.State.RES
 
 private data class RailEntry(val key: String, val label: String, val icon: ImageVector)
 
+/** The rail's width at rest (icons only) and with focus in it (icons and labels). */
+private val RAIL_CLOSED = 100.dp
+private val RAIL_OPEN = 232.dp
+
 @Composable
 fun BrowseScreen() {
     val vm = graphViewModel { BrowseViewModel(it) }
@@ -160,35 +174,17 @@ fun BrowseScreen() {
     BackHandler(enabled = !railHasFocus) { runCatching { railRequester.requestFocus() } }
     BackHandler(enabled = railHasFocus && vm.section != HOME) { vm.section = HOME }
 
-    Row(Modifier.fillMaxSize().onFocusChanged { anyFocus = it.hasFocus }) {
-        Column(
-            Modifier
-                .width(248.dp)
-                .fillMaxHeight()
-                .padding(start = 24.dp, top = 16.dp, end = 16.dp)
-                .onFocusChanged { railHasFocus = it.hasFocus }
-                .focusRestorer(railRequester)
-                .focusGroup(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Wordmark(height = 30.dp, modifier = Modifier.padding(start = 10.dp, top = 8.dp))
-            Spacer(Modifier.height(20.dp))
-            entries.forEach { entry ->
-                val selected = entry.key == vm.section
-                BrandRow(
-                    onClick = {
-                        vm.section = entry.key
-                        vm.focus.toContent = true
-                    },
-                    selected = selected,
-                    icon = entry.icon,
-                    modifier = if (selected) Modifier.focusRequester(railRequester) else Modifier,
-                ) {
-                    Label(entry.label, style = MaterialTheme.typography.labelLarge)
-                }
-            }
-        }
-        Box(Modifier.weight(1f).fillMaxHeight().focusRestorer().focusGroup()) {
+    // The rail rests as a slim column of icons, so the content gets the screen.
+    // With focus in it, it widens over the content (never pushing it, which would
+    // lay out every row again) on a black wash, and the labels show.
+    val railWidth by animateDpAsState(
+        if (railHasFocus) RAIL_OPEN else RAIL_CLOSED,
+        tween(Motion.NORMAL, easing = Motion.Ease),
+        label = "rail width",
+    )
+    val railWash by animateFloatAsState(if (railHasFocus) 0.94f else 0f, tween(Motion.NORMAL, easing = Motion.Ease), label = "rail wash")
+    Box(Modifier.fillMaxSize().onFocusChanged { anyFocus = it.hasFocus }) {
+        Box(Modifier.fillMaxSize().padding(start = RAIL_CLOSED).focusRestorer().focusGroup()) {
             val section = vm.section
             when {
                 section == HOME -> HomeSection(vm.focus, onRetry = vm::loadLibraries)
@@ -203,6 +199,42 @@ fun BrowseScreen() {
                         library != null -> LibrarySection(library, vm.focus)
                         vm.libraries is LoadState.Loading -> LoadingView()
                         else -> LaunchedEffect(section) { vm.section = HOME }
+                    }
+                }
+            }
+        }
+        Column(
+            Modifier
+                .width(railWidth)
+                .fillMaxHeight()
+                .background(Brush.horizontalGradient(0.7f to Black.copy(alpha = railWash), 1f to Black.copy(alpha = railWash * 0.6f)))
+                .padding(start = 20.dp, top = 24.dp, end = 8.dp)
+                .onFocusChanged { railHasFocus = it.hasFocus }
+                .focusRestorer(railRequester)
+                .focusGroup(),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Box(Modifier.height(28.dp).padding(start = 12.dp)) {
+                if (railHasFocus) Wordmark(height = 24.dp) else Mark(height = 24.dp)
+            }
+            Spacer(Modifier.height(24.dp))
+            entries.forEach { entry ->
+                val selected = entry.key == vm.section
+                BrandRow(
+                    onClick = {
+                        vm.section = entry.key
+                        vm.focus.toContent = true
+                    },
+                    selected = selected,
+                    icon = entry.icon,
+                    restColor = Gray,
+                    modifier = if (selected) Modifier.focusRequester(railRequester) else Modifier,
+                ) {
+                    // Closed, the icon says it; TalkBack still reads the label from the row.
+                    if (railHasFocus) {
+                        Label(entry.label, style = MaterialTheme.typography.labelLarge)
+                    } else {
+                        Box(Modifier.semantics { contentDescription = entry.label })
                     }
                 }
             }

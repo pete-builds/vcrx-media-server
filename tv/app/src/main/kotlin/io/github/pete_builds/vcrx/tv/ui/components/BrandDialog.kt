@@ -18,15 +18,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
-import androidx.tv.material3.MaterialTheme
-import androidx.compose.foundation.shape.RoundedCornerShape
-import io.github.pete_builds.vcrx.tv.ui.theme.Black
-import io.github.pete_builds.vcrx.tv.ui.theme.CornerRadius
-import io.github.pete_builds.vcrx.tv.ui.theme.Gray
+import io.github.pete_builds.vcrx.tv.ui.theme.Shapes
+import io.github.pete_builds.vcrx.tv.ui.theme.Surfaces
 
 /**
- * A picker panel: black with a 1dp gray edge. The platform dim is off, so a track
- * picker opened during playback leaves the picture visible around it.
+ * A picker panel: a raised dark surface with panel corners and a faint edge. The
+ * platform dim is off, so a track picker opened during playback leaves the
+ * picture visible around it.
  */
 @Composable
 fun BrandDialog(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
@@ -37,13 +35,13 @@ fun BrandDialog(title: String, onDismiss: () -> Unit, content: @Composable Colum
             Modifier
                 .width(560.dp)
                 .heightIn(max = 520.dp)
-                .background(Black, RoundedCornerShape(CornerRadius))
-                .border(1.dp, Gray, RoundedCornerShape(CornerRadius))
+                .background(Surfaces.Raised, Shapes.Panel)
+                .border(1.dp, Surfaces.Wash, Shapes.Panel)
                 .padding(24.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Label(title, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(bottom = 12.dp))
+            SectionTitle(title, modifier = Modifier.padding(start = 9.dp, bottom = 12.dp))
             content()
         }
     }

@@ -35,6 +35,8 @@ import io.github.pete_builds.vcrx.tv.ui.theme.CornerRadius
 import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
 import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Shapes
+import io.github.pete_builds.vcrx.tv.ui.theme.White
 
 enum class CardShape(val aspect: Float, val requestWidth: Int) {
     Poster(2f / 3f, 300),
@@ -144,24 +146,29 @@ private fun WatchBadge(item: Item) {
     val watch = item.watch ?: return
     Box(Modifier.fillMaxSize()) {
         if (watch.played && item.kind != "show" && item.kind != "season") {
+            // Watched is a quiet tick on a dark disc, as on the web: the artwork stays the point.
             Box(
-                Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp).background(Orange, RoundedCornerShape(12.dp)),
+                Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp).background(Black.copy(alpha = 0.72f), Shapes.Circle),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Check, contentDescription = "Watched", tint = Black, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Check, contentDescription = "Watched", tint = Orange, modifier = Modifier.size(16.dp))
             }
         }
         val unplayed = watch.unplayedCount
         if (unplayed != null && unplayed > 0 && (item.kind == "show" || item.kind == "season")) {
-            Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Orange, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+            Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Orange, Shapes.Pill).padding(horizontal = 7.dp, vertical = 1.dp)) {
                 Text(unplayed.toString(), style = MaterialTheme.typography.labelMedium, color = Black)
             }
         }
         val duration = watch.durationMs ?: item.runtimeMs
         if (!watch.played && watch.positionMs > 0 && duration != null && duration > 0) {
+            // How far in: a slim rounded track floating inside the artwork's bottom edge.
             val fraction = (watch.positionMs.toFloat() / duration).coerceIn(0.02f, 1f)
-            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(5.dp).background(Black)) {
-                Box(Modifier.fillMaxWidth(fraction).height(5.dp).background(Orange))
+            Box(
+                Modifier.align(Alignment.BottomStart).padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth().height(4.dp)
+                    .background(White.copy(alpha = 0.3f), Shapes.Pill),
+            ) {
+                Box(Modifier.fillMaxWidth(fraction).height(4.dp).background(Orange, Shapes.Pill))
             }
         }
     }

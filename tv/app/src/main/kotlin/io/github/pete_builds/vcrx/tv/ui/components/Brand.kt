@@ -6,17 +6,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,10 +40,13 @@ import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import io.github.pete_builds.vcrx.tv.R
 import io.github.pete_builds.vcrx.tv.ui.theme.Black
-import io.github.pete_builds.vcrx.tv.ui.theme.CornerRadius
+import io.github.pete_builds.vcrx.tv.ui.theme.Focus
 import io.github.pete_builds.vcrx.tv.ui.theme.FocusStroke
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
+import io.github.pete_builds.vcrx.tv.ui.theme.LabelSpacing
 import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Shapes
+import io.github.pete_builds.vcrx.tv.ui.theme.Surfaces
 import io.github.pete_builds.vcrx.tv.ui.theme.White
 
 /**
@@ -74,7 +76,10 @@ private fun BrandImage(id: Int, height: Dp, modifier: Modifier) {
     )
 }
 
-/** Rajdhani, uppercase, widely tracked: buttons, row titles, metadata and codes. */
+/**
+ * Inter, sentence case: buttons, metadata and codes. [caps] widens and uppercases
+ * it, for the one small eyebrow over a title ("Featured movie").
+ */
 @Composable
 fun Label(
     text: String,
@@ -82,17 +87,26 @@ fun Label(
     style: TextStyle = MaterialTheme.typography.labelLarge,
     color: Color = Color.Unspecified,
     maxLines: Int = 1,
+    caps: Boolean = false,
 ) {
-    Text(text.uppercase(), modifier = modifier, style = style, color = color, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
+    val shown = if (caps) text.uppercase() else text
+    val styled = if (caps) style.copy(letterSpacing = LabelSpacing) else style
+    Text(shown, modifier = modifier, style = styled, color = color, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
+}
+
+/** A row or section heading: Seasons, Cast, Continue Watching. */
+@Composable
+fun SectionTitle(text: String, modifier: Modifier = Modifier, style: TextStyle = MaterialTheme.typography.titleLarge) {
+    Text(text, modifier = modifier, style = style, color = White, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 private val noGlow = Glow.None
-private val buttonShape = RoundedCornerShape(6.dp)
 
 /**
- * The one button style. Primary actions rest in orange (outline and label), others
- * in gray and white. Focused, every button fills orange with black text, grows a
- * little and gains a white edge, so focus reads at a glance from the couch.
+ * The button. Three shapes, one focus: the main action is a pill, the rest
+ * softly rounded, and every button the remote is on fills orange with black
+ * text and grows a little, so focus reads at a glance from the couch. At rest
+ * they are a translucent wash; the main action's label rests orange.
  */
 @Composable
 fun BrandButton(
@@ -103,40 +117,115 @@ fun BrandButton(
     icon: ImageVector? = null,
     enabled: Boolean = true,
 ) {
-    val rest = if (primary) Orange else Gray
+    val shape = if (primary) Shapes.Pill else Shapes.Control
     Button(
         onClick = onClick,
         modifier = modifier,
         enabled = enabled,
-        shape = ButtonDefaults.shape(buttonShape, buttonShape, buttonShape, buttonShape, buttonShape),
-        colors = ButtonDefaults.colors(
-            containerColor = Black,
-            contentColor = if (primary) Orange else White,
-            focusedContainerColor = Orange,
-            focusedContentColor = Black,
-            pressedContainerColor = Orange,
-            pressedContentColor = Black,
-            disabledContainerColor = Black,
-            disabledContentColor = Gray,
-        ),
+        shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
+        colors = brandButtonColors(primary),
         border = ButtonDefaults.border(
-            border = Border(BorderStroke(if (primary) 2.dp else 1.dp, rest), shape = buttonShape),
-            focusedBorder = Border(BorderStroke(2.dp, White), shape = buttonShape),
-            pressedBorder = Border(BorderStroke(2.dp, White), shape = buttonShape),
-            disabledBorder = Border(BorderStroke(1.dp, Gray), shape = buttonShape),
-            focusedDisabledBorder = Border(BorderStroke(1.dp, Gray), shape = buttonShape),
+            border = Border.None,
+            focusedBorder = Border.None,
+            pressedBorder = Border.None,
+            disabledBorder = Border.None,
+            focusedDisabledBorder = Border(BorderStroke(2.dp, Gray), shape = shape),
         ),
         glow = ButtonDefaults.glow(noGlow, noGlow, noGlow),
-        scale = ButtonDefaults.scale(focusedScale = 1.06f),
+        scale = ButtonDefaults.scale(focusedScale = Focus.ButtonScale),
         tonalElevation = 0.dp,
-        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp),
+        contentPadding = PaddingValues(start = if (icon != null) 18.dp else 22.dp, end = 22.dp, top = 10.dp, bottom = 10.dp),
     ) {
         if (icon != null) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp).padding(end = 6.dp))
+            Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
         }
         Label(text, style = MaterialTheme.typography.labelLarge)
     }
 }
+
+/**
+ * An action that is only an icon, in a circle: Mark watched beside Play. The
+ * name is for TalkBack; focus fills it orange like every button.
+ */
+@Composable
+fun BrandIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    on: Boolean = false,
+) {
+    val shape = Shapes.Circle
+    Button(
+        onClick = onClick,
+        modifier = modifier.size(44.dp),
+        shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
+        colors = ButtonDefaults.colors(
+            containerColor = Surfaces.WashStrong,
+            contentColor = if (on) Orange else White,
+            focusedContainerColor = Orange,
+            focusedContentColor = Black,
+            pressedContainerColor = Orange,
+            pressedContentColor = Black,
+        ),
+        border = ButtonDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
+        glow = ButtonDefaults.glow(noGlow, noGlow, noGlow),
+        scale = ButtonDefaults.scale(focusedScale = Focus.ButtonScale),
+        tonalElevation = 0.dp,
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = contentDescription, modifier = Modifier.size(22.dp))
+        }
+    }
+}
+
+/**
+ * A pill to pick one of a few: a season, a filter. The chosen one rests white
+ * with black text; focus fills orange.
+ */
+@Composable
+fun BrandChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = Shapes.Pill
+    Button(
+        onClick = onClick,
+        modifier = modifier,
+        shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
+        colors = ButtonDefaults.colors(
+            containerColor = if (selected) White else Surfaces.Wash,
+            contentColor = if (selected) Black else Gray,
+            focusedContainerColor = Orange,
+            focusedContentColor = Black,
+            pressedContainerColor = Orange,
+            pressedContentColor = Black,
+        ),
+        border = ButtonDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
+        glow = ButtonDefaults.glow(noGlow, noGlow, noGlow),
+        scale = ButtonDefaults.scale(focusedScale = Focus.ButtonScale),
+        tonalElevation = 0.dp,
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+    ) {
+        Label(text, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@Composable
+private fun brandButtonColors(primary: Boolean) = ButtonDefaults.colors(
+    containerColor = if (primary) Surfaces.WashStrong else Surfaces.Wash,
+    contentColor = if (primary) Orange else White,
+    focusedContainerColor = Orange,
+    focusedContentColor = Black,
+    pressedContainerColor = Orange,
+    pressedContentColor = Black,
+    disabledContainerColor = Surfaces.Wash,
+    disabledContentColor = Gray,
+)
 
 /**
  * A focusable card for artwork: rounded corners, and when focused a 3dp orange
@@ -146,19 +235,22 @@ fun BrandButton(
 fun FrameCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** For text cards (cast, episodes): no fill at rest, a faint one when focused. */
+    quiet: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(CornerRadius)
+    val shape = if (quiet) Shapes.Control else Shapes.Card
+    val focusedFill = if (quiet) Surfaces.Wash else Color.Transparent
     Surface(
         onClick = onClick,
         modifier = modifier,
         shape = ClickableSurfaceDefaults.shape(shape, shape, shape, shape, shape),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = Black,
+            containerColor = Color.Transparent,
             contentColor = White,
-            focusedContainerColor = Black,
+            focusedContainerColor = focusedFill,
             focusedContentColor = White,
-            pressedContainerColor = Black,
+            pressedContainerColor = focusedFill,
             pressedContentColor = White,
         ),
         border = ClickableSurfaceDefaults.border(
@@ -167,7 +259,7 @@ fun FrameCard(
             pressedBorder = Border(BorderStroke(FocusStroke, Orange), shape = shape),
         ),
         glow = ClickableSurfaceDefaults.glow(noGlow, noGlow, noGlow),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.06f),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = if (quiet) Focus.RowScale else Focus.CardScale),
         tonalElevation = 0.dp,
         content = content,
     )
@@ -175,7 +267,8 @@ fun FrameCard(
 
 /**
  * A full-width row for menus, lists and dialogs. Focus fills it orange with black
- * text; a selected row carries an orange bar at its leading edge.
+ * text; a selected row reads white with a short orange mark at its leading edge.
+ * [restColor] is the label colour of rows that are neither: the rail rests gray.
  */
 @Composable
 fun BrandRow(
@@ -183,16 +276,17 @@ fun BrandRow(
     modifier: Modifier = Modifier,
     selected: Boolean = false,
     icon: ImageVector? = null,
+    restColor: Color = White,
     content: @Composable () -> Unit,
 ) {
-    val shape = RoundedCornerShape(6.dp)
+    val shape = Shapes.Control
     Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
         shape = ClickableSurfaceDefaults.shape(shape, shape, shape, shape, shape),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = Black,
-            contentColor = if (selected) Orange else White,
+            containerColor = Color.Transparent,
+            contentColor = if (selected) White else restColor,
             focusedContainerColor = Orange,
             focusedContentColor = Black,
             pressedContainerColor = Orange,
@@ -204,14 +298,16 @@ fun BrandRow(
         tonalElevation = 0.dp,
     ) {
         Row(
-            Modifier.padding(end = 16.dp).height(IntrinsicSize.Min),
+            Modifier.padding(start = 6.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val marker = if (selected) Modifier.background(LocalContentColor.current) else Modifier
-            Box(Modifier.width(4.dp).fillMaxHeight().then(marker))
+            // The mark is orange at rest and takes the label's black when focus fills the row orange.
+            val mark = if (LocalContentColor.current == Black) Black else Orange
+            val marker = if (selected) Modifier.background(mark, Shapes.Pill) else Modifier
+            Box(Modifier.width(3.dp).height(18.dp).then(marker))
             if (icon != null) Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
-            Box(Modifier.padding(vertical = 12.dp)) { content() }
+            Box(Modifier.padding(vertical = 11.dp)) { content() }
         }
     }
 }

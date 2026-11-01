@@ -1,6 +1,8 @@
 package io.github.pete_builds.vcrx.tv.ui.details
 
 import android.os.SystemClock
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
@@ -14,18 +16,22 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,6 +43,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -44,19 +55,22 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewModelScope
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import coil3.compose.AsyncImage
 import io.github.pete_builds.vcrx.tv.AppGraph
+import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.Item
 import io.github.pete_builds.vcrx.tv.net.Version
 import io.github.pete_builds.vcrx.tv.settings.ResumeMode
 import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
 import io.github.pete_builds.vcrx.tv.ui.components.Artwork
-import io.github.pete_builds.vcrx.tv.ui.components.CardShape
-import io.github.pete_builds.vcrx.tv.ui.theme.CornerRadius
-import io.github.pete_builds.vcrx.tv.ui.components.EmptyView
 import io.github.pete_builds.vcrx.tv.ui.components.BrandButton
+import io.github.pete_builds.vcrx.tv.ui.components.BrandChip
 import io.github.pete_builds.vcrx.tv.ui.components.BrandDialog
+import io.github.pete_builds.vcrx.tv.ui.components.BrandIconButton
 import io.github.pete_builds.vcrx.tv.ui.components.BrandRow
+import io.github.pete_builds.vcrx.tv.ui.components.CardShape
+import io.github.pete_builds.vcrx.tv.ui.components.EmptyView
 import io.github.pete_builds.vcrx.tv.ui.components.FrameCard
 import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.components.LoadState
@@ -64,11 +78,13 @@ import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
 import io.github.pete_builds.vcrx.tv.ui.components.Reveal
 import io.github.pete_builds.vcrx.tv.ui.components.RevealOnly
+import io.github.pete_builds.vcrx.tv.ui.components.SectionTitle
 import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
-import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
+import io.github.pete_builds.vcrx.tv.ui.theme.Black
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Motion
+import io.github.pete_builds.vcrx.tv.ui.theme.White
 import kotlinx.coroutines.launch
 
 class DetailsViewModel(private val graph: AppGraph, private val itemId: Long) : ViewModel() {
@@ -179,82 +195,87 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
     val keepRowScroll: @Composable (@Composable () -> Unit) -> Unit = { content ->
         CompositionLocalProvider(LocalBringIntoViewSpec provides rowScroll, content = content)
     }
-    LazyColumn(state = list, contentPadding = PaddingValues(48.dp), verticalArrangement = Arrangement.spacedBy(32.dp)) {
-        item(key = "header") {
-            Row(
-                // Coming back up from the cast: the whole header, not just its buttons.
-                Modifier.onFocusChanged { state ->
-                    if (state.hasFocus && headerFits(list)) scope.launch { list.animateScrollToItem(0) }
-                },
-                horizontalArrangement = Arrangement.spacedBy(40.dp),
-            ) {
-                val episode = item.kind == "episode"
-                Box(Modifier.width(if (episode) 384.dp else 240.dp).aspectRatio(if (episode) 16f / 9f else 2f / 3f)) {
-                    if (episode) {
-                        Artwork(item.id, if (item.hasThumb) "thumb" else "backdrop", item.hasThumb || item.hasBackdrop, item.title, 768)
-                    } else {
-                        Artwork(item.id, "poster", item.hasPoster, item.title, 480)
-                    }
-                }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Label(metaLine(item), style = MaterialTheme.typography.labelMedium, color = Gray)
-                    if (episode && item.showTitle != null) {
-                        Label("${item.showTitle}  ${episodeCode(item).orEmpty()}", style = MaterialTheme.typography.labelLarge)
-                    }
-                    Text(item.title.uppercase(), style = MaterialTheme.typography.displaySmall, color = Orange, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    item.tagline?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
-                    item.overview?.takeIf { it.isNotBlank() }?.let {
-                        Text(it, style = MaterialTheme.typography.bodyLarge, maxLines = 6, overflow = TextOverflow.Ellipsis)
-                    }
-                    if (item.genres.isNotEmpty()) Label(item.genres.joinToString("  "), style = MaterialTheme.typography.labelSmall)
-                    if (item.directors.isNotEmpty()) {
-                        Label("Directed by ${item.directors.joinToString(", ")}", style = MaterialTheme.typography.labelSmall)
-                    }
-                    // Wraps: Resume, Play from start, Mark watched and Trailer do not fit on one line.
-                    FlowRow(
-                        Modifier.padding(top = 12.dp).focusRestorer(primaryFocus).focusGroup(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        if (isContainer) ShowButtons(item, vm, primaryFocus) else PlayButtons(item, vm, primaryFocus)
-                        TrailerButton(item)
-                    }
-                    // On its own row: four buttons do not fit beside the poster.
-                    if (!isContainer && item.versions.size > 1) {
-                        val chosen = item.versions.firstOrNull { it.id == vm.versionId } ?: item.versions.first()
-                        BrandButton("Version: ${versionLabel(chosen)}", onClick = { pickVersion = true })
-                    }
-                    // A film series: open its other titles.
-                    if (item.collections.isNotEmpty()) {
-                        val actions = LocalAppActions.current
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            item.collections.forEach { c ->
-                                BrandButton("Part of ${c.name}", onClick = { actions.openCollection(c.id, c.name) })
-                            }
+    // Past the header, the backdrop dims so the rows below read on black.
+    val scrolled by remember { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 120 } }
+    Box(Modifier.fillMaxSize()) {
+        Backdrop(item, dimmed = scrolled)
+        LazyColumn(state = list, contentPadding = PaddingValues(48.dp), verticalArrangement = Arrangement.spacedBy(36.dp)) {
+            item(key = "header") {
+                Row(
+                    // Coming back up from the cast: the whole header, not just its buttons.
+                    Modifier.padding(top = 24.dp).onFocusChanged { state ->
+                        if (state.hasFocus && headerFits(list)) scope.launch { list.animateScrollToItem(0) }
+                    },
+                    horizontalArrangement = Arrangement.spacedBy(40.dp),
+                ) {
+                    val episode = item.kind == "episode"
+                    Box(Modifier.width(if (episode) 352.dp else 200.dp).aspectRatio(if (episode) 16f / 9f else 2f / 3f)) {
+                        if (episode) {
+                            Artwork(item.id, if (item.hasThumb) "thumb" else "backdrop", item.hasThumb || item.hasBackdrop, item.title, 768)
+                        } else {
+                            Artwork(item.id, "poster", item.hasPoster, item.title, 480)
                         }
                     }
-                    vm.actionError?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Label(metaLine(item), style = MaterialTheme.typography.labelMedium, color = Gray)
+                        if (episode && item.showTitle != null) {
+                            Label("${item.showTitle}  ${episodeCode(item).orEmpty()}", style = MaterialTheme.typography.labelLarge)
+                        }
+                        Text(item.title, style = MaterialTheme.typography.displaySmall, color = White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        item.tagline?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = Gray) }
+                        item.overview?.takeIf { it.isNotBlank() }?.let {
+                            Text(it, style = MaterialTheme.typography.bodyLarge, maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 760.dp))
+                        }
+                        if (item.genres.isNotEmpty()) Label(item.genres.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = Gray)
+                        if (item.directors.isNotEmpty()) {
+                            Label("Directed by ${item.directors.joinToString(", ")}", style = MaterialTheme.typography.labelSmall, color = Gray)
+                        }
+                        // Wraps: Resume, Play from start, Mark watched and Trailer do not fit on one line.
+                        FlowRow(
+                            Modifier.padding(top = 12.dp).focusRestorer(primaryFocus).focusGroup(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            if (isContainer) ShowButtons(item, vm, primaryFocus) else PlayButtons(item, vm, primaryFocus)
+                            TrailerButton(item)
+                        }
+                        // On its own row: four buttons do not fit beside the poster.
+                        if (!isContainer && item.versions.size > 1) {
+                            val chosen = item.versions.firstOrNull { it.id == vm.versionId } ?: item.versions.first()
+                            BrandButton("Version: ${versionLabel(chosen)}", onClick = { pickVersion = true })
+                        }
+                        // A film series: open its other titles.
+                        if (item.collections.isNotEmpty()) {
+                            val actions = LocalAppActions.current
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                item.collections.forEach { c ->
+                                    BrandButton("Part of ${c.name}", onClick = { actions.openCollection(c.id, c.name) })
+                                }
+                            }
+                        }
+                        vm.actionError?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+                    }
                 }
             }
-        }
-        if (item.extras.isNotEmpty()) {
-            item(key = "extras") { keepRowScroll { ExtrasRow(item) } }
-        }
-        // The panel sits above the cast row: the D-pad cannot stop on text, so
-        // moving down to the cast scrolls the panel into view on the way.
-        if (!isContainer) {
-            val facts = detailFacts(item, item.versions.firstOrNull { it.id == vm.versionId } ?: item.versions.firstOrNull())
-            if (facts.about.isNotEmpty() || facts.media.isNotEmpty()) {
-                item(key = "facts") { FactsPanel(facts) }
+            if (item.extras.isNotEmpty()) {
+                item(key = "extras") { keepRowScroll { ExtrasRow(item) } }
             }
-            if (item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
-        }
-        if (isContainer && item.kind == "show" && vm.seasons.isNotEmpty()) {
-            item(key = "seasons") { keepRowScroll { SeasonRow(vm) } }
-        }
-        if (isContainer) {
-            item(key = "episodes") { EpisodeList(vm) }
-            if (item.kind == "show" && item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
+            // The panel sits above the cast row: the D-pad cannot stop on text, so
+            // moving down to the cast scrolls the panel into view on the way.
+            if (!isContainer) {
+                val facts = detailFacts(item, item.versions.firstOrNull { it.id == vm.versionId } ?: item.versions.firstOrNull())
+                if (facts.about.isNotEmpty() || facts.media.isNotEmpty()) {
+                    item(key = "facts") { FactsPanel(facts) }
+                }
+                if (item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
+            }
+            if (isContainer && item.kind == "show" && vm.seasons.isNotEmpty()) {
+                item(key = "seasons") { keepRowScroll { SeasonRow(vm) } }
+            }
+            if (isContainer) {
+                item(key = "episodes") { EpisodeList(vm) }
+                if (item.kind == "show" && item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
+            }
         }
     }
 
@@ -298,7 +319,7 @@ private fun PlayButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusReq
             modifier = Modifier.focusRequester(primaryFocus),
         )
     }
-    BrandButton(if (watch?.played == true) "Mark unwatched" else "Mark watched", onClick = { vm.toggleWatched(item) })
+    WatchedButton(watch?.played == true) { vm.toggleWatched(item) }
 }
 
 @Composable
@@ -314,7 +335,7 @@ private fun ShowButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusReq
             primary = true,
             modifier = Modifier.focusRequester(primaryFocus),
         )
-        BrandButton(if (item.watch?.played == true) "Mark unwatched" else "Mark watched", onClick = { vm.toggleWatched(item) })
+        WatchedButton(item.watch?.played == true) { vm.toggleWatched(item) }
     } else {
         BrandButton(
             if (item.watch?.played == true) "Mark unwatched" else "Mark watched",
@@ -329,7 +350,7 @@ private fun ShowButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusReq
 @Composable
 private fun FactsPanel(facts: Facts) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Label("Details", style = MaterialTheme.typography.labelLarge)
+        SectionTitle("Details")
         Row(horizontalArrangement = Arrangement.spacedBy(48.dp)) {
             FactColumn(facts.about, Modifier.weight(1f))
             FactColumn(facts.media, Modifier.weight(1f))
@@ -353,13 +374,13 @@ private fun FactColumn(facts: List<Fact>, modifier: Modifier) {
 @Composable
 private fun CastRow(item: Item) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Label("Cast", style = MaterialTheme.typography.labelLarge)
-        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionTitle("Cast")
+        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(item.cast, key = { it.name }) { member ->
-                FrameCard(onClick = {}, modifier = Modifier.width(220.dp)) {
+                FrameCard(onClick = {}, quiet = true, modifier = Modifier.width(210.dp)) {
                     Column(
-                        Modifier.fillMaxWidth().background(Graphite, RoundedCornerShape(CornerRadius)).padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Text(member.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Label(member.role.orEmpty(), style = MaterialTheme.typography.labelSmall, color = Gray, maxLines = 2)
@@ -373,14 +394,10 @@ private fun CastRow(item: Item) {
 @Composable
 private fun SeasonRow(vm: DetailsViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Label("Seasons", style = MaterialTheme.typography.labelLarge)
-        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionTitle("Seasons")
+        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(vm.seasons, key = { it.id }) { season ->
-                BrandButton(
-                    season.title,
-                    onClick = { vm.selectSeason(season.id) },
-                    primary = season.id == vm.seasonId,
-                )
+                BrandChip(season.title, selected = season.id == vm.seasonId, onClick = { vm.selectSeason(season.id) })
             }
         }
     }
@@ -391,25 +408,29 @@ private fun EpisodeList(vm: DetailsViewModel) {
     val actions = LocalAppActions.current
     val state = vm.episodes ?: return
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Label("Episodes", style = MaterialTheme.typography.labelLarge)
+        SectionTitle("Episodes")
         when (state) {
             LoadState.Loading -> LoadingView(Modifier.padding(24.dp))
             is LoadState.Failed -> Text(state.error.message ?: "Could not load episodes.", style = MaterialTheme.typography.bodyLarge)
             is LoadState.Ready -> if (state.value.isEmpty()) {
                 EmptyView("No episodes", "This season has no episodes on the server.")
             } else {
-                Column(Modifier.focusRestorer().focusGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.focusRestorer().focusGroup(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     state.value.forEach { episode ->
-                        FrameCard(onClick = { actions.openDetails(episode.id) }, modifier = Modifier.fillMaxWidth()) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FrameCard(onClick = { actions.openDetails(episode.id) }, quiet = true, modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                Modifier.padding(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 Box(Modifier.width(240.dp).aspectRatio(CardShape.Wide.aspect)) {
                                     Artwork(episode.id, if (episode.hasThumb) "thumb" else "backdrop", episode.hasThumb || episode.hasBackdrop, episode.title, 480)
                                 }
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Label(episodeLine(episode), style = MaterialTheme.typography.labelMedium)
+                                    Label(episodeLine(episode), style = MaterialTheme.typography.labelMedium, color = Gray)
                                     Text(episode.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     episode.overview?.takeIf { it.isNotBlank() }?.let {
-                                        Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        Text(it, style = MaterialTheme.typography.bodyMedium, color = Gray, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                             }
@@ -439,6 +460,38 @@ private fun VersionPicker(versions: List<Version>, selected: Long, onPick: (Long
         }
     }
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
+}
+
+/** Mark watched beside Play: a tick in a circle, orange once watched. */
+@Composable
+private fun WatchedButton(played: Boolean, onClick: () -> Unit) {
+    BrandIconButton(
+        Icons.Filled.Check,
+        contentDescription = if (played) "Mark unwatched" else "Mark watched",
+        onClick = onClick,
+        on = played,
+    )
+}
+
+/**
+ * The title's backdrop across the screen behind the page, under a wash from the
+ * left and the bottom so the text reads on any picture. An episode or season
+ * borrows its show's. It dims once the page scrolls past the header.
+ */
+@Composable
+private fun Backdrop(item: Item, dimmed: Boolean) {
+    val api = LocalContext.current.graph.api
+    val borrows = item.kind == "episode" || item.kind == "season"
+    val artId = if (borrows) item.showId ?: item.id else item.id
+    val url = if (item.hasBackdrop || borrows) api.artworkUrl(artId, "backdrop", 1280) else null
+    val alpha by animateFloatAsState(if (dimmed) 0.25f else 1f, tween(Motion.SLOW, easing = Motion.Ease), label = "backdrop")
+    Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }) {
+        if (url != null) {
+            AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
+        }
+        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Black.copy(alpha = 0.94f), 0.5f to Black.copy(alpha = 0.72f), 1f to Black.copy(alpha = 0.25f))))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 0.85f to Black)))
+    }
 }
 
 /**
