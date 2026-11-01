@@ -231,7 +231,7 @@ New imports can show up in seconds instead of at the next scan. Set `VCRX_ARR_WE
 - Password: the token (the username can be anything), or put `?token=<token>` on the URL
 - Triggers: On Import, On Upgrade, On Rename, and the delete triggers
 
-VCRX scans just that movie's or series' folder. It finds the folder by its name inside a library of the right kind; if Radarr or Sonarr see the NAS at a different path and the names differ, map the prefix with `arr_path_map` in `vcrx.yaml`. Webhooks are accepted only from the LAN. A Test from Radarr or Sonarr answers 200.
+VCRX scans just that movie's or series' folder; for a delete (a movie, a series or a file removed) it scans the folder's parent instead, usually the whole library, because the folder itself may be gone. It finds the folder by its name inside a library of the right kind; if Radarr or Sonarr see the NAS at a different path and the names differ, map the prefix with `arr_path_map` in `vcrx.yaml`. Webhooks are accepted only from the LAN. A Test from Radarr or Sonarr answers 200.
 
 ### Activity and notifications
 
