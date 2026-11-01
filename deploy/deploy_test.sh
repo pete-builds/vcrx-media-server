@@ -27,6 +27,9 @@ mkdir -p "$stub"
 cat > "$stub/docker" << 'S'
 #!/usr/bin/env bash
 echo "docker $* VCRX_VERSION=${VCRX_VERSION:-}" >> "$STUB_LOG"
+# The restarted server reports what was built, unless the test says it is stale.
+[ "${1:-} ${2:-}" = "compose build" ] && echo "${VCRX_VERSION:-}" > "$STUB_LOG.version"
+exit 0
 S
 cat > "$stub/curl" << 'S'
 #!/usr/bin/env bash
@@ -34,7 +37,7 @@ for a in "$@"; do
   case "$a" in
     */auth/login) [ "${FAIL:-}" = login ] && exit 22; echo '{"token":"t"}'; exit 0 ;;
     */activity/now) [ "${FAIL:-}" = activity ] && exit 22; echo "{\"stream_count\":$PLAYING}"; exit 0 ;;
-    */api/v1/server) echo '{"name":"VCRX","version":"x"}'; exit 0 ;;
+    */api/v1/server) echo "{\"name\":\"VCRX\",\"version\":\"${SERVED:-$(cat "$STUB_LOG.version")}\"}"; exit 0 ;;
   esac
 done
 exit 0
@@ -68,6 +71,12 @@ head=$(git rev-parse --short HEAD)
 [ "$(git log --oneline | wc -l | tr -d ' ')" = 2 ] || fail "did not fast-forward"
 grep -q "compose build VCRX_VERSION=$head" "$work/docker.log" || fail "build not labelled $head: $(cat "$work/docker.log")"
 grep -q "smoke ran" "$work/out" || fail "smoke test not run"
+
+# A server that comes back on another version (the old container still up)
+# fails the deploy rather than reporting success.
+git reset -q --hard HEAD~1
+if SERVED=old PLAYING=0 bash deploy/deploy.sh > "$work/out" 2>&1; then fail "deployed though the server reports another version"; fi
+grep -q "reports version old" "$work/out" || fail "stale version not named: $(cat "$work/out")"
 
 # A local change stops it before anything else.
 echo dirty >> file
