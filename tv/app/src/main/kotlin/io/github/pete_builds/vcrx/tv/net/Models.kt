@@ -348,6 +348,12 @@ data class PlaybackSession(
     @SerialName("webvtt_subtitles") val webVttSubtitles: List<SubtitleSource> = emptyList(),
     @SerialName("resume_position_ms") val resumePositionMs: Long = 0,
     @SerialName("heartbeat_interval_ms") val heartbeatIntervalMs: Long = 10_000,
+    /**
+     * The viewer's subtitle delay for this file in ms; positive shows subtitles later.
+     * The [webVttSubtitles] URLs are already shifted by it; direct play applies it to
+     * [subtitles] and the file's own tracks itself (player/SubtitleDelay.kt).
+     */
+    @SerialName("subtitle_offset_ms") val subtitleOffsetMs: Long = 0,
     /** Intro and credits, for Skip Intro and Skip Credits (player/SkipMarkers.kt). */
     val markers: List<Marker> = emptyList(),
     /** This user's choice: button, auto or off. Set with [ServerApi.setPlaybackSettings]. */

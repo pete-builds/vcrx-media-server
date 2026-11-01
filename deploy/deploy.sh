@@ -1,28 +1,48 @@
 #!/usr/bin/env bash
 # Deploys VCRX on the host that runs it, from the clone this script lives in:
 #
-#   ~/docker/vcrx/deploy/deploy.sh            # refuses while someone is watching
-#   ~/docker/vcrx/deploy/deploy.sh --force    # restart anyway
+#   ~/docker/vcrx/deploy/deploy.sh                    # build main here
+#   ~/docker/vcrx/deploy/deploy.sh --release v0.2.0   # run that released image
+#   ~/docker/vcrx/deploy/deploy.sh --force ...        # restart even mid-stream
 #
 # 1. Refuses a dirty or diverged checkout, then fast-forwards to origin/main.
 # 2. Refuses while a stream is playing (checked as the flexbot admin, whose
 #    password stays in deploy/.flexbot-password on this host), and refuses
 #    when that check cannot run.
-# 3. Builds with the commit as the version (an old VCRX_VERSION in .env would
-#    otherwise label every build with a stale commit), restarts, waits for
-#    /healthz, checks the server reports that version, and runs
-#    scripts/smoke-api.sh.
+# 3. Without --release, builds with the commit as the version (an old
+#    VCRX_VERSION in .env would otherwise label every build with a stale
+#    commit). With --release vX.Y.Z, pulls ghcr.io's image for that version,
+#    built and attested in CI, and records it as VCRX_IMAGE in .env so a
+#    restart keeps it; rolling back is --release with the previous version.
+# 4. Restarts, waits for /healthz, checks the server reports the version just
+#    deployed, and runs scripts/smoke-api.sh.
 set -euo pipefail
 
+die() { echo "deploy: $*" >&2; exit 1; }
+
 force=0
-[ "${1:-}" = "--force" ] && force=1
+release=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --force) force=1 ;;
+    --release)
+      [ $# -ge 2 ] || die "--release needs a version, like v0.2.0"
+      release="$2"
+      shift
+      ;;
+    *) die "unknown argument $1 (use --force and/or --release vX.Y.Z)" ;;
+  esac
+  shift
+done
+if [ -n "$release" ]; then
+  [[ "$release" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "--release takes a version like v0.2.0, not $release"
+fi
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(dirname "$here")"
 cd "$repo"
 url="${VCRX_URL:-http://127.0.0.1:${VCRX_PORT:-3750}}"
 pwfile="$here/.flexbot-password"
-
-die() { echo "deploy: $*" >&2; exit 1; }
+registry="${VCRX_REGISTRY:-ghcr.io/pete-builds/vcrx-media-server}"
 
 [ -z "$(git status --porcelain --untracked-files=no)" ] || die "the checkout has local changes; commit or remove them first"
 git fetch -q origin
@@ -49,10 +69,29 @@ after=$(git rev-parse --short HEAD)
 echo "deploy: $before -> $after"
 
 cd "$here"
-version="$(git describe --always --dirty)"
-VCRX_VERSION="$version" docker compose build > "${TMPDIR:-/tmp}/vcrx-build.log" 2>&1 ||
-  { tail -30 "${TMPDIR:-/tmp}/vcrx-build.log"; die "build failed"; }
-docker compose up -d
+# VCRX_IMAGE in .env is what a plain `docker compose up` runs, so it always
+# names the image deployed last: the release's, or none for a local build.
+set_image() {
+  touch .env
+  # .env holds API keys: the working copy is private like the file itself.
+  (umask 077 && grep -v '^VCRX_IMAGE=' .env > .env.tmp) || true
+  [ -z "$1" ] || echo "VCRX_IMAGE=$1" >> .env.tmp
+  cat .env.tmp > .env && rm -f .env.tmp
+}
+if [ -n "$release" ]; then
+  version="$release"
+  image="$registry:${release#v}"
+  VCRX_IMAGE="$image" docker compose pull vcrx > "${TMPDIR:-/tmp}/vcrx-build.log" 2>&1 ||
+    { tail -30 "${TMPDIR:-/tmp}/vcrx-build.log"; die "could not pull $image"; }
+  set_image "$image"
+  VCRX_IMAGE="$image" docker compose up -d --no-build
+else
+  version="$(git describe --always --dirty)"
+  VCRX_IMAGE=vcrx-media-server:local VCRX_VERSION="$version" docker compose build > "${TMPDIR:-/tmp}/vcrx-build.log" 2>&1 ||
+    { tail -30 "${TMPDIR:-/tmp}/vcrx-build.log"; die "build failed"; }
+  set_image ""
+  VCRX_IMAGE=vcrx-media-server:local docker compose up -d
+fi
 
 for _ in $(seq 1 60); do
   curl -fsS "$url/healthz" > /dev/null 2>&1 && break
