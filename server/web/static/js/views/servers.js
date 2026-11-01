@@ -13,7 +13,8 @@ import { scopeForm } from "./devices.js";
 
 const BANDWIDTH = [[0, "No bandwidth cap"], [2000, "At most 2 Mbit/s"], [5000, "At most 5 Mbit/s"], [10000, "At most 10 Mbit/s"],
   [20000, "At most 20 Mbit/s"], [40000, "At most 40 Mbit/s"]];
-const STATES = { online: "Online", offline: "Offline", bad_answer: "Answering badly", unlinked: "Ended the link", unknown: "Not checked yet" };
+const STATES = { online: "Online", offline: "Offline", bad_answer: "Answering badly", unlinked: "Ended the link", unknown: "Not checked yet",
+  token_unreadable: "Link token unreadable" };
 const DEVICE_STATES = { pending: "Not linked yet", active: "Linked", revoked: "Revoked", expired: "Expired" };
 
 function peerRow(p, redraw) {

@@ -262,7 +262,9 @@ func (s *Server) adminUnlinkPeer(w http.ResponseWriter, r *http.Request) {
 	s.peerSessions.dropPeer(id)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer cancel()
-	told := s.PeerClient.GetJSON(ctx, federation.Request{Base: p.BaseURL, Token: p.Token, Method: http.MethodDelete,
+	// A link whose token cannot be read is forgotten here only: there is
+	// nothing to tell the friend's server with.
+	told := p.Token != "" && s.PeerClient.GetJSON(ctx, federation.Request{Base: p.BaseURL, Token: p.Token, Method: http.MethodDelete,
 		Path: "/api/v1/federation/link"}, 16<<10, nil) == nil
 	s.Log.Info("unlinked a friend's server", "peer", id, "name", p.Name, "streams_stopped", cut, "peer_told", told,
 		"by", info(r).Session.User.Username)
