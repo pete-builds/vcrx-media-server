@@ -31,6 +31,13 @@ sha256() {
 command -v docker > /dev/null 2>&1 || die "docker is not on PATH"
 docker buildx version > /dev/null 2>&1 || die "docker buildx is required (BuildKit secrets and local output)"
 
+# Android refuses downgrades, so the version code grows with the commit count.
+# A shallow clone, or no git, would count from 1 and build an APK the TV will
+# not install over the one it has: stop before building anything.
+[ "$(git -C "$tv_dir" rev-parse --is-shallow-repository 2> /dev/null)" = false ] ||
+  die "cannot count commits for the version code (a shallow clone, or not a git checkout); run git fetch --unshallow"
+version_code="$(git -C "$tv_dir" rev-list --count HEAD)"
+
 make_keystore() {
   echo "build-apk: creating signing key $keystore"
   mkdir -p "$signing_dir"
@@ -64,10 +71,6 @@ if [ ! -f "$keystore" ] || [ ! -f "$pass_file" ]; then
   [ -f "$keystore" ] && die "$keystore exists without $pass_file; restore the password file from your backup"
   make_keystore
 fi
-
-# Android refuses downgrades, so the version code grows with the commit count.
-version_code="$(git -C "$tv_dir" rev-list --count HEAD 2> /dev/null || echo 1)"
-[ "$version_code" -ge 1 ] 2> /dev/null || version_code=1
 
 mkdir -p "$out_dir"
 docker buildx build \
