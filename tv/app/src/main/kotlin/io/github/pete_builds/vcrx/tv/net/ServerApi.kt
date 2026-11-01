@@ -25,6 +25,7 @@ class ServerApi(
     private val client: OkHttpClient,
     private val baseUrl: () -> String?,
     private val json: Json,
+    private val currentToken: () -> String?,
     private val onUnauthorized: (ApiException.Unauthorized) -> Unit,
 ) {
     /** Checks that [baseUrl] is a VCRX server, before it is saved. Sends no token. */
@@ -197,7 +198,7 @@ class ServerApi(
             202 -> SubtitleAnswer.Preparing(answer.retryAfter)
             else -> {
                 val error = httpError(answer.status, answer.body.toString(Charsets.UTF_8), json)
-                if (error is ApiException.Unauthorized) onUnauthorized(error)
+                if (error is ApiException.Unauthorized) unauthorized(error, answer.authorization)
                 throw error
             }
         }
@@ -215,7 +216,7 @@ class ServerApi(
                 client.newCall(request).await().use { response ->
                     if (!response.isSuccessful) {
                         val error = httpError(response.code, response.body.string(), json)
-                        if (error is ApiException.Unauthorized) onUnauthorized(error)
+                        if (error is ApiException.Unauthorized) unauthorized(error, response.request.header("Authorization"))
                         throw error
                     }
                     val source = response.body.source()
@@ -254,17 +255,31 @@ class ServerApi(
     internal fun <B> post(path: String, body: B, serializer: KSerializer<B>): Request =
         Request.Builder().url(url(path)).post(json.encodeToString(serializer, body).toRequestBody(JSON)).build()
 
-    private class Exchange(val status: Int, val body: ByteArray, val retryAfter: Int?)
+    private class Exchange(val status: Int, val body: ByteArray, val retryAfter: Int?, val authorization: String?)
 
     /** Runs the call and returns the raw answer, for the routes that are not JSON. */
     private suspend fun exchange(request: Request): Exchange = try {
         withContext(Dispatchers.IO) {
             client.newCall(request).await().use { response ->
-                Exchange(response.code, response.body.bytes(), response.header("Retry-After")?.trim()?.toIntOrNull())
+                Exchange(
+                    response.code,
+                    response.body.bytes(),
+                    response.header("Retry-After")?.trim()?.toIntOrNull(),
+                    response.request.header("Authorization"),
+                )
             }
         }
     } catch (e: IOException) {
         throw ApiException.Unreachable(e)
+    }
+
+    /**
+     * Signs out only when the 401 answered the token the app holds now. A request
+     * still in flight when the viewer switched profile carries the old session's
+     * token, which the server ended with the switch; its 401 must not end the new one.
+     */
+    private fun unauthorized(error: ApiException.Unauthorized, authorization: String?) {
+        if (SessionToken.answersCurrent(authorization, currentToken())) onUnauthorized(error)
     }
 
     /**
@@ -276,16 +291,18 @@ class ServerApi(
      * buffer is still on the socket.
      */
     internal suspend fun <T> send(request: Request, serializer: KSerializer<T>?, authRoute: Boolean = true): T {
-        val (status, body) = try {
+        val (status, body, authorization) = try {
             withContext(Dispatchers.IO) {
-                client.newCall(request).await().use { response -> response.code to response.body.string() }
+                client.newCall(request).await().use { response ->
+                    Triple(response.code, response.body.string(), response.request.header("Authorization"))
+                }
             }
         } catch (e: IOException) {
             throw ApiException.Unreachable(e)
         }
         if (status !in 200..299) {
             val error = httpError(status, body, json)
-            if (error is ApiException.Unauthorized && authRoute) onUnauthorized(error)
+            if (error is ApiException.Unauthorized && authRoute) unauthorized(error, authorization)
             throw error
         }
         @Suppress("UNCHECKED_CAST")
@@ -327,4 +344,15 @@ private suspend fun Call.await(): Response = suspendCancellableCoroutine { conti
             }
         },
     )
+}
+
+/** Which session a 401 was about, from the Authorization header the request went out with. */
+internal object SessionToken {
+    /**
+     * True when [authorization] carried [current], or when neither exists (a request
+     * sent signed out, answered while still signed out). False for a token that was
+     * replaced or cleared after the request left.
+     */
+    fun answersCurrent(authorization: String?, current: String?): Boolean =
+        authorization == current?.let { "Bearer $it" }
 }

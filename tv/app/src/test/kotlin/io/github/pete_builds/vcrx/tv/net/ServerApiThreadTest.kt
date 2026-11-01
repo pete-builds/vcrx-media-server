@@ -51,7 +51,7 @@ class ServerApiThreadTest {
                     .build()
             }
             .build()
-        val api = ServerApi(client, { "http://192.168.1.20:3750" }, ApiJson) { }
+        val api = ServerApi(client, { "http://192.168.1.20:3750" }, ApiJson, { null }) { }
         val caller = Executors.newSingleThreadExecutor { Thread(it, "caller-main") }
         val rows = try {
             runBlocking(caller.asCoroutineDispatcher()) { api.home() }
