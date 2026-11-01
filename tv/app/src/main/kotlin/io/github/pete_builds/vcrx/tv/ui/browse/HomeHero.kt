@@ -35,6 +35,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import io.github.pete_builds.vcrx.tv.ui.details.formatRuntime
 import io.github.pete_builds.vcrx.tv.ui.theme.Black
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
+import io.github.pete_builds.vcrx.tv.ui.theme.Orange
 import io.github.pete_builds.vcrx.tv.ui.theme.White
 
 /** How tall the hero stands; the rows scroll beneath it. */
@@ -76,7 +77,7 @@ fun HomeHero(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (featured) {
-                Label(if (item.kind == "show") "Featured show" else "Featured movie", style = MaterialTheme.typography.labelMedium, color = Gray)
+                Label(if (item.kind == "show") "Featured show" else "Featured movie", style = MaterialTheme.typography.labelSmall, color = Orange, caps = true)
             }
             item.showTitle?.takeIf { item.kind == "episode" }?.let {
                 Label("$it  ${episodeCode(item).orEmpty()}", style = MaterialTheme.typography.labelMedium, color = Gray)

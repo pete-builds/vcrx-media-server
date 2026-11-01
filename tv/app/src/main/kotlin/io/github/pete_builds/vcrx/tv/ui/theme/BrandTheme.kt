@@ -34,7 +34,7 @@ val Gray = Color(0xFFA3A3A3)
 /** Placeholder artwork and progress tracks: a neutral step up from the black ground. */
 val Graphite = Color(0xFF1A1A1A)
 
-val CornerRadius = 8.dp
+val CornerRadius = Radius.Card
 val FocusStroke = 3.dp
 
 val Rajdhani = FontFamily(
@@ -83,8 +83,10 @@ private fun display(size: Int, weight: FontWeight, line: Int) =
 private fun inter(size: Int, weight: FontWeight, line: Int) =
     TextStyle(fontFamily = Inter, fontWeight = weight, fontSize = size.sp, lineHeight = line.sp)
 
-private fun label(size: Int) =
-    TextStyle(fontFamily = Rajdhani, fontWeight = FontWeight.SemiBold, fontSize = size.sp, letterSpacing = LabelSpacing)
+// Labels are Inter in sentence case: Rajdhani is for display titles only, and
+// all caps is kept for the one small eyebrow (Label caps = true).
+private fun label(size: Int, line: Int) =
+    TextStyle(fontFamily = Inter, fontWeight = FontWeight.Medium, fontSize = size.sp, lineHeight = line.sp)
 
 private val typography = Typography(
     displayLarge = display(57, FontWeight.Bold, 64),
@@ -99,9 +101,9 @@ private val typography = Typography(
     bodyLarge = inter(16, FontWeight.Normal, 24),
     bodyMedium = inter(14, FontWeight.Normal, 20),
     bodySmall = inter(12, FontWeight.Normal, 16),
-    labelLarge = label(16),
-    labelMedium = label(14),
-    labelSmall = label(12),
+    labelLarge = label(16, 22),
+    labelMedium = label(14, 20),
+    labelSmall = label(13, 18),
 )
 
 private val selection = TextSelectionColors(handleColor = Orange, backgroundColor = Orange.copy(alpha = 0.4f))

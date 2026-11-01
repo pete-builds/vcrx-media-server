@@ -34,7 +34,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.White
 import kotlinx.coroutines.launch
 
 class CollectionViewModel(private val graph: AppGraph, private val collectionId: Long) : ViewModel() {
@@ -67,7 +67,7 @@ fun CollectionScreen(collectionId: Long, name: String) {
     Column(Modifier.fillMaxSize().padding(top = 36.dp)) {
         Column(Modifier.padding(horizontal = 48.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Label("Collection", style = MaterialTheme.typography.labelMedium, color = Gray)
-            Text(name.uppercase(), style = MaterialTheme.typography.headlineMedium, color = Orange)
+            Text(name, style = MaterialTheme.typography.headlineMedium, color = White)
         }
         LoadStateContent(vm.state, onRetry = vm::load) { data ->
             if (data.items.isEmpty()) {

@@ -38,7 +38,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.TvTextField
 import io.github.pete_builds.vcrx.tv.ui.components.Wordmark
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.White
 import kotlinx.coroutines.launch
 
 class LoginViewModel(private val graph: AppGraph) : ViewModel() {
@@ -154,7 +154,7 @@ fun LoginScreen() {
         Column(Modifier.width(560.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Wordmark(height = 56.dp)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Sign in".uppercase(), style = MaterialTheme.typography.headlineSmall, color = Orange)
+                Text("Sign in", style = MaterialTheme.typography.headlineSmall, color = White)
                 Label(vm.serverLabel, style = MaterialTheme.typography.labelSmall, color = Gray)
             }
             TvTextField(
