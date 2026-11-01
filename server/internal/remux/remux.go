@@ -142,37 +142,72 @@ func listed(out string) map[string]bool {
 	return names
 }
 
+// keyframeWindows are how far before a seek position KeyframeAt reads packets,
+// widening only when a window holds no keyframe: most files have one every few
+// seconds, and every second read is real I/O on a high-bitrate file over a share.
+var keyframeWindows = []float64{3, 10, 30}
+
 // KeyframeAt returns the time of the keyframe at or before ms in the file's
-// first video stream, which is where a stream asked for at ms begins.
+// first video stream, which is where a stream asked for at ms begins. Times
+// count from the file's own start, as ffmpeg's -ss does; ffprobe reports
+// packet times as stored, which in MPEG-TS start at an arbitrary value.
 func (s *Service) KeyframeAt(ctx context.Context, path string, ms int64) (int64, error) {
 	if ms <= 0 {
 		return 0, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	sec := strconv.FormatFloat(float64(ms)/1000, 'f', 3, 64)
-	out, err := exec.CommandContext(ctx, s.FFprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags",
-		"-read_intervals", sec+"%+#8", "-of", "csv=p=0", path).Output()
+	out, err := exec.CommandContext(ctx, s.FFprobe, "-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0", path).Output()
 	if err != nil {
 		return 0, fmt.Errorf("find keyframe: %w", err)
 	}
-	// The read starts at the seek point, which is a keyframe; take the first
-	// packet flagged K in case the demuxer hands over a non-key packet first.
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	start, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil {
+		start = 0 // "N/A": the file's times already start at 0
+	}
+	at := start + float64(ms)/1000
+	for _, w := range keyframeWindows {
+		from := math.Max(start, at-w)
+		interval := strconv.FormatFloat(from, 'f', 3, 64) + "%" + strconv.FormatFloat(at+0.001, 'f', 3, 64)
+		out, err := exec.CommandContext(ctx, s.FFprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags",
+			"-read_intervals", interval, "-of", "csv=p=0", path).Output()
+		if err != nil {
+			return 0, fmt.Errorf("find keyframe: %w", err)
+		}
+		if k, ok := lastKeyframe(string(out), start, ms); ok {
+			return k, nil
+		}
+		if from <= start {
+			break // read from the very start and found none
+		}
+	}
+	return 0, nil
+}
+
+// lastKeyframe picks the latest packet flagged K at or before ms (counted from
+// start) in ffprobe's "pts_time,flags" lines. Packets come in decode order,
+// and a demuxer that seeks by byte (MPEG-TS) may hand over some from before
+// the window, so it takes the maximum rather than the first.
+func lastKeyframe(out string, start float64, ms int64) (int64, bool) {
+	best, ok := int64(0), false
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		f := strings.Split(line, ",")
 		if len(f) < 2 || !strings.HasPrefix(f[1], "K") {
 			continue
 		}
 		t, err := strconv.ParseFloat(f[0], 64)
-		if err != nil || t < 0 {
+		if err != nil {
 			continue
 		}
-		if k := int64(t*1000 + 0.5); k <= ms {
-			return k, nil
+		k := int64((t-start)*1000 + 0.5)
+		if k < 0 {
+			k = 0
 		}
-		return 0, nil
+		if k <= ms && (!ok || k > best) {
+			best, ok = k, true
+		}
 	}
-	return 0, nil
+	return best, ok
 }
 
 // Options describe one stream.
@@ -185,6 +220,10 @@ type Options struct {
 	AudioIndex int
 	// TranscodeAudio converts it to stereo AAC; otherwise it is copied.
 	TranscodeAudio bool
+	// AudioCodec is that track's FFprobe codec name. Copied AAC gets the
+	// ADTS-to-MP4 bitstream filter: MPEG-TS carries AAC as ADTS, which the MP4
+	// muxer refuses, and the filter passes AAC from MKV or MP4 through as is.
+	AudioCodec string
 	// HEVC tags the video hvc1, which Safari and Chrome require in MP4.
 	HEVC bool
 	// Video, when set, re-encodes the video to H.264 instead of copying it.
@@ -355,6 +394,9 @@ func (s *Service) convertArgs(o Options) []string {
 			a = append(a, "-c:a", "aac", "-ac", "2", "-b:a", "192k")
 		} else {
 			a = append(a, "-c:a", "copy")
+			if o.AudioCodec == "aac" {
+				a = append(a, "-bsf:a", "aac_adtstoasc")
+			}
 		}
 	}
 	return append(a, "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1", "-avoid_negative_ts", "make_zero")

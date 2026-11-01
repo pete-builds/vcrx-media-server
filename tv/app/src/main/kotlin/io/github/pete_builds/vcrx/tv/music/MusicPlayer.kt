@@ -58,7 +58,10 @@ data class MusicState(
 /**
  * The app's one music player. It outlives the screens, so music keeps playing
  * between the album, the artist and Now Playing; it does not play in the
- * background once the app leaves the screen (a TV does not need that).
+ * background once the app leaves the screen (a TV does not need that):
+ * MainActivity stops it in onStop, and keeps the screen on while it plays so
+ * the screensaver does not. A sign-out or a change of profile stops it too
+ * ([stopIfRunning]), so one person's queue never plays on as another's.
  *
  * The queue's rules live in [MusicQueue]; Media3 holds the same queue as a
  * playlist in play order, which gives gapless playback between tracks for
@@ -334,5 +337,14 @@ class MusicPlayer private constructor(private val context: Context, private val 
             instance ?: synchronized(this) {
                 instance ?: MusicPlayer(context.applicationContext, graph).also { instance = it }
             }
+
+        /**
+         * Stops the music, closing its listen, if the player exists; never
+         * creates one. Safe from any thread: the stop runs on the main thread,
+         * where Media3 needs it.
+         */
+        fun stopIfRunning() {
+            instance?.let { p -> p.scope.launch { p.stop() } }
+        }
     }
 }

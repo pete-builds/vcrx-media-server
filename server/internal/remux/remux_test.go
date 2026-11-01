@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,12 +47,90 @@ func probe(t *testing.T, fp, file, entries string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// MPEG-TS from a broadcast or a Blu-ray remux starts at a large timestamp, and
+// its demuxer seeks by byte: KeyframeAt must still find the keyframe at or
+// before the position, counted from the file's own start, or every seek and
+// resume in a .ts restarts at 0.
+func TestKeyframeAtTransportStream(t *testing.T) {
+	ff, fp := tools(t)
+	in := filepath.Join(t.TempDir(), "in.ts")
+	cmd := exec.Command(ff, "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=30",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=30", "-c:v", "libx264", "-g", "48", "-keyint_min", "48", "-sc_threshold", "0",
+		"-pix_fmt", "yuv420p", "-c:a", "aac", "-output_ts_offset", "600", "-y", in)
+	if msg, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("cannot build fixture (needs libx264): %v %s", err, msg)
+	}
+	s := New(ff, fp, 2, nil)
+	for _, at := range []int64{10050, 12700, 21000, 29900} {
+		k, err := s.KeyframeAt(context.Background(), in, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Keyframes every 2 s from the start, give or take the muxer's delay.
+		if k > at || at-k > 2300 {
+			t.Errorf("KeyframeAt(%d) = %d; want the keyframe at or up to 2 s before it", at, k)
+		}
+	}
+	// The stream ffmpeg makes from that keyframe runs from there to the end:
+	// -ss counts from the file's start, the same clock KeyframeAt answers in.
+	k, err := s.KeyframeAt(context.Background(), in, 21000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Its AAC is ADTS, which the MP4 muxer refuses unless it is converted on the way.
+	streamLasts(t, s, fp, Options{Path: in, StartMs: k, AudioIndex: 1, AudioCodec: "aac"}, 30-float64(k)/1000)
+	// The same filter leaves AAC that is already MP4-style (Matroska) as it is.
+	mkv := filepath.Join(t.TempDir(), "in.mkv")
+	if msg, err := exec.Command(ff, "-nostdin", "-loglevel", "error", "-i", in, "-c", "copy", "-y", mkv).CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, msg)
+	}
+	streamLasts(t, s, fp, Options{Path: mkv, AudioIndex: 1, AudioCodec: "aac"}, 30)
+}
+
+// streamLasts streams o and checks the output carries video and audio for
+// about want seconds: a stream ffmpeg gave up on still has a valid header.
+func streamLasts(t *testing.T, s *Service, fp string, o Options, want float64) {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := s.Stream(context.Background(), &buf, o); err != nil {
+		t.Fatalf("stream %s: %v", filepath.Base(o.Path), err)
+	}
+	out := filepath.Join(t.TempDir(), "out.mp4")
+	if err := os.WriteFile(out, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, sel := range []string{"v:0", "a:0"} {
+		got, err := exec.Command(fp, "-v", "error", "-select_streams", sel, "-show_entries", "packet=pts_time", "-of", "csv=p=0", out).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		times := strings.Fields(string(got))
+		if len(times) == 0 {
+			t.Fatalf("stream %s from %d ms has no %s packets", filepath.Base(o.Path), o.StartMs, sel)
+		}
+		last, _ := strconv.ParseFloat(times[len(times)-1], 64)
+		if math.Abs(last-want) > 0.7 {
+			t.Errorf("stream %s from %d ms: %s runs to %.2f s; want about %.2f s", filepath.Base(o.Path), o.StartMs, sel, last, want)
+		}
+	}
+}
+
 func TestKeyframeAndStreamStartTogether(t *testing.T) {
 	ff, fp := tools(t)
 	in := fixture(t, ff)
 	s := New(ff, fp, 2, nil)
 	ctx := context.Background()
+	// Keyframes are stored every 2 s; KeyframeAt answers from the file's start,
+	// which some ffmpeg builds put a few ms before 0 (audio priming).
+	start, err := strconv.ParseFloat(probe(t, fp, in, "format=start_time"), 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shift := int64(math.Round(-start * 1000))
 	for want, at := range map[int64]int64{0: 0, 12000: 12700, 10000: 10050, 28000: 29900} {
+		if want > 0 {
+			want += shift
+		}
 		k, err := s.KeyframeAt(ctx, in, at)
 		if err != nil || k != want {
 			t.Errorf("KeyframeAt(%d) = %d, %v; want %d", at, k, err, want)

@@ -154,6 +154,11 @@ func streamAudio(w http.ResponseWriter, r *http.Request, v catalog.Version, ss p
 func convertOptions(ss playback.StreamSession, v catalog.Version, path string, startMs int64, audio int, transcode bool) remux.Options {
 	opts := remux.Options{Path: path, StartMs: max(0, startMs), AudioIndex: audio, TranscodeAudio: transcode,
 		HEVC: deref(v.VideoCodec) == "hevc"}
+	for _, t := range v.AudioTracks {
+		if t.Index != nil && int(*t.Index) == audio {
+			opts.AudioCodec = deref(t.Codec)
+		}
+	}
 	if ss.Decision == playback.Transcode {
 		video := playback.TranscodeVideo(v, ss.Caps)
 		opts.Video, opts.HEVC = &video, false
@@ -184,8 +189,17 @@ func (s *Server) convertedStream(w http.ResponseWriter, r *http.Request) {
 	opts := convertOptions(ss, v, path, int64(queryInt(r, "start_ms", 0)), audio, transcode)
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	s.streams.add(id, &cancel)
+	if beforeStreamRegister != nil {
+		beforeStreamRegister(id)
+	}
+	if s.streams.addConverted(id, &cancel) && opts.Wait == 0 {
+		// The stream this one replaced frees its slot a moment after it is stopped.
+		opts.Wait = 3 * time.Second
+	}
 	defer s.streams.remove(id, &cancel)
+	if s.terminatedSinceCheck(w, r, id) {
+		return
+	}
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Accept-Ranges", "none")

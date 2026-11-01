@@ -195,7 +195,9 @@ func (h *HLS) Start(ctx context.Context, session string, o Options) (string, err
 	if err := cmd.Start(); err != nil {
 		cancel()
 		<-sem
-		_ = os.RemoveAll(filepath.Dir(j.dir))
+		// Only this run's folder: a racing seek's run may be live beside it.
+		_ = os.RemoveAll(j.dir)
+		_ = os.Remove(filepath.Dir(j.dir)) // fails, harmlessly, while another run is in there
 		return "", fmt.Errorf("start ffmpeg: %w", err)
 	}
 	j.cancel, j.proc = cancel, cmd.Process

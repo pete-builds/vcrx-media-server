@@ -516,6 +516,68 @@ func TestMassMissingAborts(t *testing.T) {
 	}
 }
 
+// Rule 3 counts files already missing too: a share losing folders over several
+// scans (a pool dropping disks, a flapping mount) must abort at the same point
+// as losing them all at once, or it hides the library a step at a time and
+// retention then deletes it, watch history included.
+func TestMassMissingAbortsAcrossScans(t *testing.T) {
+	e := newEnv(t, KindMovie, "folder", movieTree)
+	e.scan(Options{})
+	aborted := false
+	for _, dir := range []string{"Night of the Living Dead (1968)", "Nosferatu.1922.1080p.BluRay.x264-VCRXTEST",
+		"Nosferatu.1922.2160p.UHD.BluRay.x265-SAMPLEGRP", "Quillmoor.2022.1080p.WEBRip.x265-VCRXTEST"} {
+		e.remove(dir)
+		e.clock.advance(time.Hour)
+		before := e.digest()
+		run, err := e.scanErr(Options{})
+		if errors.Is(err, ErrAborted) {
+			if !strings.Contains(run.Error, "of 8") || e.digest() != before {
+				t.Fatalf("abort after removing %s: run = %+v, rows changed = %v", dir, run, e.digest() != before)
+			}
+			aborted = true
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(`SELECT COUNT(*) FROM media_versions WHERE missing_since IS NOT NULL`); n*2 > 8 {
+			t.Fatalf("after removing %s, %d of 8 versions are missing and the scan did not abort", dir, n)
+		}
+	}
+	if !aborted {
+		t.Fatal("losing 6 of 8 files over four scans never aborted")
+	}
+	// Forcing accepts it, as for a single scan.
+	if run := e.scan(Options{Force: true}); run.Status != StatusOK {
+		t.Fatalf("forced run = %+v", run)
+	}
+}
+
+// A file the walk lists but cannot stat (EIO, ESTALE or EACCES on a flaky
+// share) is not gone: it is left as it was, with a warning, like an
+// unreadable folder. Only a file that no longer exists is marked missing.
+func TestUnstattableFileIsNotMissing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permissions are not enforced")
+	}
+	e := newEnv(t, KindMovie, "folder", movieTree)
+	e.scan(Options{})
+	dir := e.path("Night of the Living Dead (1968)")
+	// Listable but not searchable: the names come back, every stat fails.
+	if err := os.Chmod(dir, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	e.clock.advance(time.Hour)
+	run := e.scan(Options{})
+	if run.Missing != 0 || !strings.Contains(run.Error, "could not be read") {
+		t.Fatalf("run = %+v; want nothing missing and a warning", run)
+	}
+	if n := e.count(`SELECT COUNT(*) FROM media_versions WHERE missing_since IS NOT NULL`); n != 0 {
+		t.Fatalf("%d versions marked missing", n)
+	}
+}
+
 // Rule 4: missing files are flagged, come back cleanly, and are only deleted
 // after the retention period.
 func TestMissingLifecycle(t *testing.T) {

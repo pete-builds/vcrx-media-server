@@ -138,3 +138,55 @@ func TestPathMapCannotEscapeTheRoot(t *testing.T) {
 		t.Fatalf("scanned: %+v", *got)
 	}
 }
+
+// Delete events scan the deleted item's parent, because a targeted scan of
+// the item itself fails: its folder is gone (the scan errors on the missing
+// path, or the name finds no library at all), or it no longer holds a video
+// (the scan aborts as "holds no video files").
+func TestDeleteEventsScanTheParent(t *testing.T) {
+	d, got, _, _ := setup(t)
+	libs, _ := d.Libraries(context.Background())
+
+	// Radarr removed the whole folder: its name finds nothing any more.
+	res, err := d.Handle(context.Background(), movie("MovieDelete", "/volume1/data/movies/Gone Already (1999)"))
+	if err != nil || res.Action != "scanned" || res.LibraryID != 1 || res.Path != "" {
+		t.Fatalf("MovieDelete of a removed folder: %+v %v", res, err)
+	}
+	// The last file went, the folder stayed.
+	res, err = d.Handle(context.Background(), movie("MovieFileDelete", "/volume1/data/movies/Harbor Lights (2001)"))
+	if err != nil || res.Action != "scanned" || res.LibraryID != 1 || res.Path != "" {
+		t.Fatalf("MovieFileDelete: %+v %v", res, err)
+	}
+	// Sonarr through the path map: the series folder's parent is the TV root.
+	d.Map = []PathMap{{From: "/tv", To: libs[1].RootPath}}
+	p := Payload{EventType: "EpisodeFileDelete"}
+	p.Series = &struct {
+		Path  string `json:"path"`
+		Title string `json:"title"`
+	}{Path: "/tv/Quiet Street"}
+	res, err = d.Handle(context.Background(), p)
+	if err != nil || res.Action != "scanned" || res.LibraryID != 2 || res.Path != "" {
+		t.Fatalf("EpisodeFileDelete: %+v %v", res, err)
+	}
+	want := []scanned{{1, ""}, {1, ""}, {2, ""}}
+	if len(*got) != len(want) {
+		t.Fatalf("scans: %+v", *got)
+	}
+	for i := range want {
+		if (*got)[i] != want[i] {
+			t.Fatalf("scans: %+v, want %+v", *got, want)
+		}
+	}
+	// An import still scans just its folder.
+	if res, _ := d.Handle(context.Background(), movie("Download", "/volume1/data/movies/Harbor Lights (2001)")); res.Path != "Harbor Lights (2001)" {
+		t.Fatalf("Download: %+v", res)
+	}
+}
+
+func TestParentOf(t *testing.T) {
+	for in, want := range map[string]string{"": "", "Film (2001)": "", "Show/Season 01": "Show", "a/b/c": "a/b"} {
+		if got := parentOf(in); got != want {
+			t.Errorf("parentOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

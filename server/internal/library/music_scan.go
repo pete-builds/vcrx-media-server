@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"path"
 	"strings"
 	"sync"
@@ -78,9 +77,18 @@ func (s *Scanner) scanMusic(ctx context.Context, lib Library, opt Options, run *
 	for _, f := range mw.files {
 		seen[f.abs] = true
 	}
-	present, gone := 0, 0
+	// As for video: files already missing and still not back count toward
+	// the half rule, so losing folders a scan at a time aborts too.
+	present, gone, stillMissing, indexed := 0, 0, 0, 0
 	for _, t := range stored {
-		if !inScope(t.rel, sub, isFile) || t.missingSince != 0 {
+		if !inScope(t.rel, sub, isFile) {
+			continue
+		}
+		indexed++
+		if t.missingSince != 0 {
+			if !seen[t.abs] {
+				stillMissing++
+			}
 			continue
 		}
 		present++
@@ -96,8 +104,9 @@ func (s *Scanner) scanMusic(ctx context.Context, lib Library, opt Options, run *
 			}
 			return "", abortf("%s holds no audio files but %d are indexed under it; the share may be unmounted or emptied. Nothing was changed; rescan with force to accept", where, present)
 		}
-		if sub == "" && present > 0 && gone*2 > present {
-			return "", abortf("%d of %d indexed files (more than half) are no longer under %s. Nothing was changed; rescan with force to accept", gone, present, lib.RootPath)
+		if sub == "" && gone > 0 && (gone+stillMissing)*2 > indexed {
+			return "", abortf("%d of %d indexed files (more than half) are no longer under %s%s. Nothing was changed; rescan with force to accept",
+				gone+stillMissing, indexed, lib.RootPath, alreadyMissing(stillMissing))
 		}
 	}
 
@@ -140,21 +149,25 @@ func (s *Scanner) scanMusic(ctx context.Context, lib Library, opt Options, run *
 	for _, f := range all {
 		folder, _ := albumFolderOf(f.rel)
 		for _, dir := range []string{folder, parentRel(folder)} {
-			if _, ok := mw.folders[dir]; !ok {
+			if _, ok := mw.folders[dir]; !ok && !mw.w.underFailed(dir) {
 				// A folder outside a targeted scan: its listing still decides
 				// whether it is a show and what its cover is.
-				_ = mw.folder(dir)
+				if err := mw.folder(dir); err != nil {
+					mw.w.log.Warn("folder unreadable, its albums will be left as they were", "path", dir, "err", err)
+					mw.w.failed = append(mw.w.failed, dir)
+				}
 			}
 		}
 	}
 	mw.readTextFiles(log)
 
 	albums, artists := groupMusic(all, mw.folders)
+	albums = readableAlbums(albums, mw.w)
 	if err := s.writeMusic(ctx, lib, albums, artists, run, nowMs); err != nil {
 		return "", err
 	}
 	if len(mw.w.failed) > 0 {
-		warning = fmt.Sprintf("completed with warnings: %d folders could not be read (first: %s); their files were left as they were", len(mw.w.failed), mw.w.failed[0])
+		warning = fmt.Sprintf("completed with warnings: %d folders or files could not be read (first: %s); their files were left as they were", len(mw.w.failed), mw.w.failed[0])
 	}
 	return warning, nil
 }
@@ -180,6 +193,23 @@ func musicSkipDir(name string) bool {
 }
 
 // folder lists one folder (not its subfolders) and files what it holds.
+// readableAlbums drops albums whose folder the walk could not read. Their
+// title, show details, cover and checksums all come from that folder's
+// listing, so writing them from a failed read would blank the stored ones;
+// skipped, the album and its tracks stay exactly as they were, which is what
+// the run's warning says.
+func readableAlbums(albums []*albumPlan, w *walker) []*albumPlan {
+	kept := albums[:0]
+	for _, al := range albums {
+		if w.underFailed(al.folder) {
+			w.log.Info("album left as it was: its folder could not be read", "folder", al.folder)
+			continue
+		}
+		kept = append(kept, al)
+	}
+	return kept
+}
+
 func (mw *musicWalk) folder(rel string) error {
 	l, err := mw.w.read(rel)
 	if err != nil {
@@ -246,8 +276,8 @@ func (mw *musicWalk) addFile(rel string) {
 		return
 	}
 	abs := mw.w.absOf(rel)
-	fi, err := os.Stat(abs)
-	if err != nil || !fi.Mode().IsRegular() {
+	fi := mw.w.statFile(rel)
+	if fi == nil {
 		return
 	}
 	mw.files = append(mw.files, &musicFile{rel: rel, abs: abs, size: fi.Size(), mtime: fi.ModTime().UnixMilli()})

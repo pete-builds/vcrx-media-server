@@ -13,11 +13,51 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/notify"
 )
 
+// beforeStreamRegister, when a test sets it, runs between a stream's session
+// check and its registration, the window terminatedSinceCheck closes.
+var beforeStreamRegister func(session string)
+
+// terminatedSinceCheck answers 410 when the session was terminated after the
+// handler checked it but before its stream was registered: Terminate writes
+// the session's state and then cancels what is registered, so a stream
+// registered just after that cancel would otherwise play on. Checking again
+// once registered closes the gap: either the cancel reaches the stream, or
+// this check sees the terminated state.
+func (s *Server) terminatedSinceCheck(w http.ResponseWriter, r *http.Request, session string) bool {
+	msg, ok := s.Playback.Terminated(r.Context(), session)
+	if ok {
+		writeError(w, http.StatusGone, "session_terminated", msg)
+	}
+	return ok
+}
+
 // streamRegistry tracks open file responses by playback session, so stopping a
 // session from Activity also cuts off the bytes already flowing to the device.
 type streamRegistry struct {
 	mu   sync.Mutex
 	open map[string]map[*context.CancelFunc]bool
+	// converted is each session's one converted (fMP4) stream. Direct play
+	// may have several responses open at once (a browser's range requests);
+	// a converted stream holds a conversion slot, so a session gets one.
+	converted map[string]*context.CancelFunc
+}
+
+// addConverted registers a session's converted stream, stopping the one it
+// replaces, and reports whether there was one. A seek, a retry or a second
+// tab then never needs a second slot.
+func (g *streamRegistry) addConverted(session string, cancel *context.CancelFunc) bool {
+	g.mu.Lock()
+	if g.converted == nil {
+		g.converted = map[string]*context.CancelFunc{}
+	}
+	prev := g.converted[session]
+	g.converted[session] = cancel
+	g.mu.Unlock()
+	if prev != nil {
+		(*prev)()
+	}
+	g.add(session, cancel)
+	return prev != nil
 }
 
 func (g *streamRegistry) add(session string, cancel *context.CancelFunc) {
@@ -38,6 +78,9 @@ func (g *streamRegistry) remove(session string, cancel *context.CancelFunc) {
 	delete(g.open[session], cancel)
 	if len(g.open[session]) == 0 {
 		delete(g.open, session)
+	}
+	if g.converted[session] == cancel {
+		delete(g.converted, session)
 	}
 }
 

@@ -39,6 +39,15 @@ class ConvertedStreamTest {
     }
 
     @Test
+    fun onlyTheFileOrAnFmp4StreamIsPlayable() {
+        assertTrue(StreamKinds.isPlayable(session("direct_play", "progressive")))
+        assertTrue(StreamKinds.isPlayable(session("remux", "fmp4")))
+        // HLS, or a protocol from a newer server, is never opened as if it were the file.
+        assertFalse(StreamKinds.isPlayable(session("remux", "hls")))
+        assertFalse(StreamKinds.isPlayable(session("remux", "dash")))
+    }
+
+    @Test
     fun labelsMatchTheWebPlayer() {
         assertNull(StreamKinds.label(session("direct_play", "progressive")))
         assertEquals("Audio converted", StreamKinds.label(session("audio_transcode", "fmp4")))
