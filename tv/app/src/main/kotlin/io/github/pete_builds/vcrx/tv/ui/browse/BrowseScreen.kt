@@ -54,6 +54,7 @@ const val HOME = "home"
 const val SEARCH = "search"
 const val SETTINGS = "settings"
 const val ACTIVITY = "activity"
+const val LIVE = "live"
 fun librarySection(id: Long) = "library:$id"
 
 /**
@@ -84,14 +85,20 @@ class BrowseViewModel(private val graph: AppGraph) : ViewModel() {
     var isAdmin by mutableStateOf(false)
         private set
 
+    /** Live TV in the rail: the user may watch it and there are channels. */
+    var liveTv by mutableStateOf(false)
+        private set
+
     init {
         loadLibraries()
         viewModelScope.launch {
-            isAdmin = try {
-                graph.api.me().isAdmin
+            val me = try {
+                graph.api.me()
             } catch (_: ApiException) {
-                false
+                null
             }
+            isAdmin = me?.isAdmin ?: false
+            liveTv = me?.liveTv ?: false
         }
     }
 
@@ -143,6 +150,7 @@ fun BrowseScreen() {
             }
             add(RailEntry(librarySection(it.id), it.name, icon))
         }
+        if (vm.liveTv) add(RailEntry(LIVE, "Live TV", AppIcons.Live))
         add(RailEntry(SEARCH, "Search", Icons.Filled.Search))
         if (vm.isAdmin) add(RailEntry(ACTIVITY, "Activity", Icons.Filled.PlayArrow))
         add(RailEntry(SETTINGS, "Settings", Icons.Filled.Settings))
@@ -187,6 +195,7 @@ fun BrowseScreen() {
                 section == SEARCH -> SearchSection(vm.focus)
                 section == SETTINGS -> SettingsSection(vm.focus)
                 section == ACTIVITY -> ActivitySection(vm.focus)
+                section == LIVE -> LiveSection(vm.focus)
                 section.startsWith("library:") -> {
                     val library = libraries.firstOrNull { librarySection(it.id) == section }
                     when {

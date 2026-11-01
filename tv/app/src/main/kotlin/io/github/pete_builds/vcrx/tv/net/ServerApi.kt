@@ -156,6 +156,23 @@ class ServerApi(
     /** What the profile's Before a movie settings play ahead of this item; empty for most. */
     suspend fun before(itemId: Long): BeforeResponse = get("/api/v1/items/$itemId/before", BeforeResponse.serializer())
 
+    /** Live TV channels the user may watch, with what is on now and next. */
+    suspend fun liveChannels(): List<LiveChannel> = get("/api/v1/live/channels", LiveChannelsResponse.serializer()).channels
+
+    /** Starts the channel's pull on the server, or joins it; the playlist to play. */
+    suspend fun liveWatch(channelId: Long): LiveWatch =
+        send(Request.Builder().url(url("/api/v1/live/channels/$channelId/watch")).post(EMPTY_BODY).build(), LiveWatch.serializer())
+
+    /**
+     * Tells the server this viewer has left the channel, so a pull nobody is
+     * watching stops at once rather than holding a stream for a minute.
+     */
+    suspend fun liveLeave(channelId: Long, run: String) {
+        send<Unit>(Request.Builder().url(url("/api/v1/live/channels/$channelId/hls/$run/leave")).post(EMPTY_BODY).build(), null)
+    }
+
+    fun liveLogoUrl(channelId: Long): String? = absoluteUrl("/api/v1/live/channels/$channelId/logo")
+
     suspend fun startPlayback(request: PlaybackRequest): PlaybackSession =
         send(post("/api/v1/playback/sessions", request, PlaybackRequest.serializer()), PlaybackSession.serializer())
 

@@ -55,6 +55,14 @@ object AppIcons {
         rect(8f, 18f, 8f, 2f)
     }
 
+    /** Live TV: a set with rabbit ears, which never meet so the even-odd fill stays solid. */
+    val Live: ImageVector = icon("Live", evenOdd = true) {
+        rect(2f, 7f, 20f, 14f)
+        rect(4f, 9f, 16f, 10f)
+        moveTo(10.2f, 7f); lineTo(6.2f, 3f); lineTo(7.6f, 1.6f); lineTo(11.6f, 5.6f); close()
+        moveTo(13.8f, 7f); lineTo(17.8f, 3f); lineTo(16.4f, 1.6f); lineTo(12.4f, 5.6f); close()
+    }
+
     private fun icon(name: String, evenOdd: Boolean = false, block: PathBuilder.() -> Unit): ImageVector =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
             .path(

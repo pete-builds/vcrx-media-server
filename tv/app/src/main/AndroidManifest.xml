@@ -52,5 +52,11 @@
             android:exported="false"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.App.Player" />
+        <activity
+            android:name=".live.LivePlayerActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.App.Player" />
     </application>
 </manifest>
