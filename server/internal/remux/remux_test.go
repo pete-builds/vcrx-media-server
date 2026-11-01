@@ -332,22 +332,44 @@ func TestToneMapHDR(t *testing.T) {
 		}
 		t.Skip("ffmpeg has no zscale filter: HDR is sent without tone mapping")
 	}
-	in := filepath.Join(t.TempDir(), "hdr.mkv")
-	if msg, err := exec.Command(ff, "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=4",
-		"-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc",
-		"-y", in).CombinedOutput(); err != nil {
-		t.Skipf("cannot build an HDR10 fixture (needs libx265): %v %s", err, msg)
+	// Since ffmpeg 7.1 the -color_* output options alone no longer tag an x265
+	// stream, so the tagged fixtures pass the same values to x265 too. The
+	// untagged one is a stream with no colour tags at all, as Dolby Vision
+	// profile 5 files usually are: the chain must not depend on the tags.
+	cases := []struct {
+		name, hdr, fixtureTags string
+		args                   []string
+	}{
+		{"hdr10", "hdr10", "smpte2084,bt2020", []string{"-x265-params", "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
+			"-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc"}},
+		{"hlg", "hlg", "arib-std-b67,bt2020", []string{"-x265-params", "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc",
+			"-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc"}},
+		{"untagged", "dolby_vision", "unknown,unknown", nil},
 	}
-	var buf bytes.Buffer
-	if err := s.Stream(context.Background(), &buf, Options{Path: in, AudioIndex: -1,
-		Video: &Video{SrcWidth: 640, SrcHeight: 360, HDR: "hdr10", ToneMap: true}}); err != nil {
-		t.Fatal(err)
-	}
-	out := filepath.Join(t.TempDir(), "out.mp4")
-	if err := os.WriteFile(out, buf.Bytes(), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got := probe(t, fp, out, "stream=codec_name,pix_fmt,color_transfer,color_primaries"); got != "h264,yuv420p,bt709,bt709" {
-		t.Fatalf("tone mapped stream: %q", got)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := filepath.Join(t.TempDir(), "hdr.mkv")
+			args := append([]string{"-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=4",
+				"-c:v", "libx265", "-pix_fmt", "yuv420p10le"}, c.args...)
+			if msg, err := exec.Command(ff, append(args, "-y", in)...).CombinedOutput(); err != nil {
+				t.Skipf("cannot build an HDR fixture (needs libx265): %v %s", err, msg)
+			}
+			// The fixture is what this case claims, or the test proves nothing.
+			if got := probe(t, fp, in, "stream=color_transfer,color_primaries"); got != c.fixtureTags {
+				t.Fatalf("fixture tags %q, want %q", got, c.fixtureTags)
+			}
+			var buf bytes.Buffer
+			if err := s.Stream(context.Background(), &buf, Options{Path: in, AudioIndex: -1,
+				Video: &Video{SrcWidth: 640, SrcHeight: 360, HDR: c.hdr, ToneMap: true}}); err != nil {
+				t.Fatal(err)
+			}
+			out := filepath.Join(t.TempDir(), "out.mp4")
+			if err := os.WriteFile(out, buf.Bytes(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := probe(t, fp, out, "stream=codec_name,pix_fmt,color_transfer,color_primaries"); got != "h264,yuv420p,bt709,bt709" {
+				t.Fatalf("tone mapped stream: %q", got)
+			}
+		})
 	}
 }
