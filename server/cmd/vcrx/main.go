@@ -519,6 +519,12 @@ func serve() error {
 	}
 
 	hs := srv.HTTPServer(cfg.Addr())
+	// Requests run on a context shutdown can cancel: a stream (and the ffmpeg
+	// it runs) never finishes by itself. It keeps ctx's values, not its end,
+	// so a signal does not cut off requests before their grace period.
+	reqCtx, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelRequests()
+	hs.BaseContext = func(net.Listener) context.Context { return reqCtx }
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
 	log.Info("listening", "addr", cfg.Addr())
@@ -530,9 +536,33 @@ func serve() error {
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
-	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	return shutdown(log, hs, cancelRequests, scans, requestGrace, scanGrace)
+}
+
+// The shutdown budget, inside compose's 15 s stop_grace_period: requests get
+// requestGrace to finish, then the scans get scanGrace of their own to stop
+// at a safe point and close their runs before the database closes.
+const (
+	requestGrace = 5 * time.Second
+	scanGrace    = 8 * time.Second
+)
+
+// shutdown stops serving in stages, each with its own deadline, so a stream
+// that would never finish cannot use up the time the scans need. Requests
+// still open after requestGrace (streams) are cancelled and their
+// connections closed.
+func shutdown(log *slog.Logger, hs *http.Server, cancelRequests context.CancelFunc,
+	scans interface{ Shutdown(context.Context) error }, requestGrace, scanGrace time.Duration) error {
+	rctx, cancel := context.WithTimeout(context.Background(), requestGrace)
+	herr := hs.Shutdown(rctx)
+	cancel()
+	if herr != nil {
+		log.Info("stopping requests still open after the grace period, such as streams", "err", herr)
+		cancelRequests()
+		herr = hs.Close()
+	}
+	sctx, cancel := context.WithTimeout(context.Background(), scanGrace)
 	defer cancel()
-	herr := hs.Shutdown(sctx)
 	if err := scans.Shutdown(sctx); err != nil {
 		log.Warn("scans did not stop cleanly", "err", err)
 	}
