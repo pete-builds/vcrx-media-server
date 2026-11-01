@@ -3,7 +3,10 @@ package api
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,6 +51,116 @@ func withLive(t *testing.T, f *fixture) int64 {
 	}
 	f.srv.Live = &Live{Store: store, LogoDir: logos}
 	return id
+}
+
+// withLiveStream makes a channel watchable: its stream is ffmpeg drawing a
+// test pattern in real time on this machine, and its playlist becomes the
+// admin's own file, which may name a stream on loopback. Segments are 1 s, so
+// a playlist is ready about 3 s after the first viewer asks.
+func withLiveStream(t *testing.T, f *fixture, channel int64) {
+	t.Helper()
+	ff, err := osexec.LookPath("ffmpeg")
+	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("ffmpeg must be installed in CI")
+		}
+		t.Skip("ffmpeg not on PATH")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cmd := osexec.CommandContext(r.Context(), ff, "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10",
+			"-f", "lavfi", "-i", "sine=frequency=440", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "10",
+			"-c:a", "mp2", "-f", "mpegts", "pipe:1")
+		out, err := cmd.StdoutPipe()
+		if err != nil || cmd.Start() != nil {
+			http.Error(w, "no ffmpeg", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "video/mp2t")
+		fl, _ := w.(http.Flusher)
+		buf := make([]byte, 32<<10)
+		for {
+			n, err := out.Read(buf)
+			if n > 0 {
+				if _, werr := w.Write(buf[:n]); werr != nil {
+					break
+				}
+				if fl != nil {
+					fl.Flush()
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		_ = cmd.Wait()
+	}))
+	t.Cleanup(srv.Close)
+	if _, err := f.db.Exec(`UPDATE channels SET stream_url = ? WHERE id = ?`, srv.URL+"/live.ts", channel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Exec(`UPDATE live_sources SET url = '/config/walk.m3u'`); err != nil {
+		t.Fatal(err)
+	}
+	streams := &live.Streams{FFmpeg: ff, Root: t.TempDir(), SegmentSeconds: 1, Ready: 30 * time.Second}
+	t.Cleanup(streams.Close)
+	f.srv.Live.Streams = streams
+}
+
+// startLiveWatch asks to watch a channel and waits for its playlist, and
+// returns the run.
+func startLiveWatch(t *testing.T, f *fixture, tok string, channel int64) string {
+	t.Helper()
+	r := f.do("POST", fmt.Sprintf("/api/v1/live/channels/%d/watch", channel), tok, nil)
+	var out struct{ Run, Playlist string }
+	r.json(t, &out)
+	if r.code != 200 || out.Run == "" || out.Playlist != fmt.Sprintf("/api/v1/live/channels/%d/hls/%s/index.m3u8", channel, out.Run) {
+		t.Fatalf("watch: %d %s", r.code, r.body)
+	}
+	if r := f.do("GET", out.Playlist, tok, nil); r.code != 200 || !strings.Contains(string(r.body), "#EXTINF") {
+		t.Fatalf("live playlist: %d %s", r.code, r.body)
+	}
+	return out.Run
+}
+
+func TestLiveWatch(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	news := withLive(t, f)
+	withLiveStream(t, f, news)
+	friend := f.userID("friend")
+	watch := fmt.Sprintf("/api/v1/live/channels/%d/watch", news)
+	if r := f.do("POST", watch, f.friendTok, nil); r.code != 404 {
+		t.Fatalf("watch without the grant: %d %s", r.code, r.body)
+	}
+	if r := f.do("PUT", fmt.Sprintf("/api/v1/admin/users/%d/policy", friend), f.adminTok, map[string]any{"allow_transcode": true, "allow_live_tv": true}); r.code != 204 {
+		t.Fatalf("grant: %d %s", r.code, r.body)
+	}
+	run := startLiveWatch(t, f, f.friendTok, news)
+	// The admin joins the same pull.
+	if again := startLiveWatch(t, f, f.adminTok, news); again != run || f.srv.Live.Streams.Running() != 1 {
+		t.Errorf("a second viewer got run %s with %d pulls, want %s with one", again, f.srv.Live.Streams.Running(), run)
+	}
+	base := fmt.Sprintf("/api/v1/live/channels/%d/hls/%s/", news, run)
+	r := f.do("GET", base+"index.m3u8", f.friendTok, nil)
+	if r.hdr.Get("Content-Type") != "application/vnd.apple.mpegurl" || strings.Contains(string(r.body), "127.0.0.1") || strings.Contains(string(r.body), "live.ts") {
+		t.Errorf("playlist %q:\n%s", r.hdr.Get("Content-Type"), r.body)
+	}
+	if r := f.do("GET", base+"init.mp4", f.friendTok, nil); r.code != 200 || r.hdr.Get("Content-Type") != "video/mp4" || len(r.body) == 0 {
+		t.Errorf("init segment: %d %q", r.code, r.hdr.Get("Content-Type"))
+	}
+	if r := f.do("GET", base+"..%2F..%2Fvcrx.db", f.friendTok, nil); r.code != 404 {
+		t.Errorf("a path for a segment: %d", r.code)
+	}
+	// The admin turns the channel off: the stream stops for everyone.
+	if r := f.do("PUT", fmt.Sprintf("/api/v1/admin/live/channels/%d", news), f.adminTok, map[string]any{"enabled": false}); r.code != 204 {
+		t.Fatalf("disable: %d", r.code)
+	}
+	if n := f.srv.Live.Streams.Running(); n != 0 {
+		t.Errorf("%d pulls still running after the channel was turned off", n)
+	}
+	if r := f.do("GET", base+"index.m3u8", f.adminTok, nil); r.code != 404 {
+		t.Errorf("playlist of a channel turned off: %d", r.code)
+	}
 }
 
 func TestLiveChannelsFollowTheGrant(t *testing.T) {

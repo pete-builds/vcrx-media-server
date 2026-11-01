@@ -185,8 +185,10 @@ type walkFixture struct {
 	horrorShow, horrorSeason, horrorEpisode int64 // denied label on the show
 	strictSeason, strictEpisode             int64 // TV-MA episode of a TV-14 show
 	mixedCollection, hiddenCollection       int64
-	// channel is a Live TV channel, seen only with the Live TV grant.
+	// channel is a Live TV channel, seen only with the Live TV grant;
+	// liveRun is the friend's pull of it, started while allowed.
 	channel        int64
+	liveRun        string
 	hiddenVersions []int64 // one per hidden playable, plus the film's 4K
 	hiddenSubs     []int64
 	posters        []int64
@@ -205,6 +207,7 @@ func newWalkFixture(t *testing.T) *walkFixture {
 	withHLS(t, f, remux.New("ffmpeg", "ffprobe", 2, nil))
 	w.music = withMusic(t, f)
 	w.channel = withLive(t, f)
+	withLiveStream(t, f, w.channel)
 	now := time.Now().UnixMilli()
 	exec := func(q string, args ...any) int64 {
 		t.Helper()
@@ -509,6 +512,9 @@ func (w *walkFixture) liveProbes() []probe {
 		at("GET /api/v1/live/channels").hides("Walk News", "Walk Weather", "Walk Bulletin"),
 		at("GET /api/v1/live/guide").hides("Walk News", "Walk Weather", "Walk Bulletin"),
 		at("GET /api/v1/live/channels/{channel_id}/logo", w.channel),
+		at("POST /api/v1/live/channels/{channel_id}/watch", w.channel),
+		at("GET /api/v1/live/channels/{channel_id}/hls/{run}/index.m3u8", w.channel, w.liveRun),
+		at("GET /api/v1/live/channels/{channel_id}/hls/{run}/{segment}", w.channel, w.liveRun, "init.mp4"),
 	}
 }
 
@@ -773,6 +779,8 @@ func accessWalk(t *testing.T, kind string) {
 	}
 	sessions = append(sessions, w.startSession(w.friendTok, w.movieID, &w.v4k))
 	listen := w.startListen(w.friendTok, w.music.flac)
+	// And a live channel, watched while the grant lasts.
+	w.liveRun = startLiveWatch(t, w.fixture, w.friendTok, w.channel)
 	// And on the extras about to be hidden: a trailer session has no version,
 	// so its events and streams must check the extra itself.
 	for _, x := range w.hiddenExtras {

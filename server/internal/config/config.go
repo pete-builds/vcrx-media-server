@@ -40,6 +40,9 @@ type LiveTVSpec struct {
 	RefreshHours int `yaml:"refresh_hours"`
 	// GuideRefreshHours is how often every guide is read again (6 by default).
 	GuideRefreshHours int `yaml:"guide_refresh_hours"`
+	// MaxStreams caps channels being watched at once across all playlists (4
+	// by default); each is one pull, shared by everyone watching it.
+	MaxStreams int `yaml:"max_streams"`
 }
 
 // LiveSourceSpec is one M3U playlist: m3u is an http(s) URL or an absolute
@@ -55,6 +58,9 @@ type LiveSourceSpec struct {
 	// playlist's own x-tvg-url is never followed: someone else wrote it.
 	XMLTV        string `yaml:"xmltv"`
 	XMLTVURLFile string `yaml:"xmltv_url_file"`
+	// MaxStreams is how many of this playlist's channels may be pulled at
+	// once (a provider's connection limit); 0 is no limit of its own.
+	MaxStreams int `yaml:"max_streams"`
 	// Location is m3u, or the URL read from m3u_url_file; GuideLocation is
 	// the same for the guide.
 	Location      string `yaml:"-"`
@@ -430,6 +436,9 @@ func (c *Config) validate() error {
 	if h := c.LiveTV.RefreshHours; h < 0 || h > 168 {
 		errs = append(errs, fmt.Errorf("live_tv.refresh_hours %d must be 1 to 168, or 0 for the default", h))
 	}
+	if n := c.LiveTV.MaxStreams; n < 0 || n > 64 {
+		errs = append(errs, fmt.Errorf("live_tv.max_streams %d must be 1 to 64, or 0 for the default", n))
+	}
 	if h := c.LiveTV.GuideRefreshHours; h < 0 || h > 168 {
 		errs = append(errs, fmt.Errorf("live_tv.guide_refresh_hours %d must be 1 to 168, or 0 for the default", h))
 	}
@@ -447,6 +456,8 @@ func (c *Config) validate() error {
 		case s.Location != "" && !strings.HasPrefix(s.Location, "http://") && !strings.HasPrefix(s.Location, "https://") && !filepath.IsAbs(s.Location):
 			// Say which key, never the value: it may be a URL with credentials.
 			errs = append(errs, fmt.Errorf("live_tv source %q: the playlist must be an http(s) URL or an absolute file path", s.Name))
+		case s.MaxStreams < 0:
+			errs = append(errs, fmt.Errorf("live_tv source %q: max_streams cannot be negative", s.Name))
 		case s.XMLTV != "" && s.XMLTVURLFile != "":
 			errs = append(errs, fmt.Errorf("live_tv source %q: give xmltv or xmltv_url_file, not both", s.Name))
 		case s.GuideLocation != "" && !strings.HasPrefix(s.GuideLocation, "http://") && !strings.HasPrefix(s.GuideLocation, "https://") &&
@@ -473,6 +484,17 @@ func (c Config) LiveGuideInterval() time.Duration {
 	}
 	return 6 * time.Hour
 }
+
+// LiveMaxStreams caps channels watched at once across all playlists.
+func (c Config) LiveMaxStreams() int {
+	if c.LiveTV.MaxStreams > 0 {
+		return c.LiveTV.MaxStreams
+	}
+	return 4
+}
+
+// LiveStreamDir holds the live HLS segments while channels are watched.
+func (c Config) LiveStreamDir() string { return filepath.Join(c.CacheDir, "live") }
 
 // LogoCacheDir holds Live TV channel logos.
 func (c Config) LogoCacheDir() string { return filepath.Join(c.CacheDir, "channel-logos") }

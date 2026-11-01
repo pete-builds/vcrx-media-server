@@ -227,6 +227,29 @@ func (s *Store) Logo(ctx context.Context, id int64, allowed bool) (string, error
 	return file.String, err
 }
 
+// WatchTarget is what a pull of a channel needs: never sent to a client.
+type WatchTarget struct {
+	Channel  int64
+	Source   int64
+	URL      string
+	Playlist string
+}
+
+// WatchTarget looks up a channel a viewer may watch: enabled, still listed,
+// and allowed (the caller's grant). Anything else is ErrNotFound.
+func (s *Store) WatchTarget(ctx context.Context, id int64, allowed bool) (WatchTarget, error) {
+	if !allowed {
+		return WatchTarget{}, ErrNotFound
+	}
+	t := WatchTarget{Channel: id}
+	err := s.DB.QueryRowContext(ctx, `SELECT c.source_id, c.stream_url, l.url FROM channels c JOIN live_sources l ON l.id = c.source_id
+		WHERE c.id = ? AND c.enabled = 1 AND c.gone = 0`, id).Scan(&t.Source, &t.URL, &t.Playlist)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WatchTarget{}, ErrNotFound
+	}
+	return t, err
+}
+
 // logoWork is a channel whose logo has not been fetched yet.
 type logoWork struct {
 	ID  int64

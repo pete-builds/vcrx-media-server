@@ -59,9 +59,14 @@ server_name: VCRX
 # file, gzipped or not (xmltv_url_file for a URL with a key in it), read every
 # guide_refresh_hours (6) and matched to channels by tvg-id, else by name. A
 # playlist's own x-tvg-url is never followed: set the guide here.
+# Watching: one pull per channel, shared by everyone watching it, at most
+# max_streams (4) channels at once; a source's own max_streams is its
+# provider's connection limit. A playlist from the internet may only name
+# streams on public addresses.
 #live_tv:
 #  refresh_hours: 12
 #  guide_refresh_hours: 6
+#  max_streams: 4
 #  sources:
 #    - name: My playlist
 #      m3u: /config/channels.m3u
@@ -69,6 +74,7 @@ server_name: VCRX
 #    - name: My provider
 #      m3u_url_file: /config/provider-url.txt
 #      xmltv_url_file: /config/provider-guide-url.txt
+#      max_streams: 2
 
 # Radarr and Sonarr webhooks find the folder by name in a library. If they see
 # the NAS at another path and folder names differ, map their prefix to VCRX's.

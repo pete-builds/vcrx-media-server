@@ -406,7 +406,7 @@ func serve() error {
 	liveStore := &live.Store{DB: a.db}
 	var sources []live.SourceSpec
 	for _, src := range cfg.LiveTV.Sources {
-		sources = append(sources, live.SourceSpec{Name: src.Name, Location: src.Location, Guide: src.GuideLocation})
+		sources = append(sources, live.SourceSpec{Name: src.Name, Location: src.Location, Guide: src.GuideLocation, MaxStreams: src.MaxStreams})
 	}
 	refresher := &live.Refresher{Store: liveStore, Sources: sources, Interval: cfg.LiveRefreshInterval(), GuideInterval: cfg.LiveGuideInterval(),
 		LogoDir: cfg.LogoCacheDir(),
@@ -414,7 +414,12 @@ func serve() error {
 	if err := refresher.Start(ctx); err != nil {
 		return err
 	}
-	srv.Live = &api.Live{Store: liveStore, Refresher: refresher, LogoDir: cfg.LogoCacheDir()}
+	streams := &live.Streams{FFmpeg: cfg.FFmpegPath, Root: cfg.LiveStreamDir(), Log: log.With("component", "live"), MaxStreams: cfg.LiveMaxStreams()}
+	if err := os.MkdirAll(streams.Root, 0o700); err != nil {
+		return fmt.Errorf("live stream directory: %w", err)
+	}
+	go streams.Run(ctx)
+	srv.Live = &api.Live{Store: liveStore, Refresher: refresher, LogoDir: cfg.LogoCacheDir(), Streams: streams}
 	srv.MarkerHours = markerHours
 	if markerJob != nil {
 		srv.Markers = markerJob
