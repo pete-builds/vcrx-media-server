@@ -315,8 +315,12 @@ func (s *Service) videoArgs(v Video) []string {
 				tin = "arib-std-b67"
 			}
 			// Linear light, BT.709 primaries, Hable's curve, then back to BT.709.
-			filters = append(filters, "zscale=tin="+tin+":min=bt2020nc:pin=bt2020:rin=tv:t=linear:npl=100",
-				"format=gbrpf32le", "zscale=p=bt709", "tonemap=tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv")
+			// The output primaries are stated, not left to "input": since ffmpeg
+			// 7.1 that copies the frame's own tag, and a stream with no colour
+			// tags (common for Dolby Vision profile 5) then has no path to linear
+			// light ("code 3074: no path between colorspaces"), so the stream died.
+			filters = append(filters, "zscale=tin="+tin+":min=bt2020nc:pin=bt2020:rin=tv:t=linear:npl=100:p=bt2020",
+				"format=gbrpf32le", "zscale=p=bt709", "tonemap=tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv:p=bt709")
 			toneMapped = true
 		}
 		// Without zscale the HDR picture goes out as 8-bit with its HDR tags
