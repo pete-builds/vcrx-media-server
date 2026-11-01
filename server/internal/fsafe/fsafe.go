@@ -15,6 +15,10 @@ import (
 // ErrOutsideRoot means a path resolved to somewhere outside its root.
 var ErrOutsideRoot = errors.New("path escapes its root")
 
+// afterResolve, when a test sets it, runs between OpenUnder's checks and its
+// open, where a path on a share could change underneath it.
+var afterResolve func()
+
 // Within reports whether path is root or lies beneath it. Both must be clean and
 // absolute; no filesystem access happens here.
 func Within(root, path string) bool {
@@ -64,7 +68,34 @@ func OpenUnder(root, target string) (*os.File, os.FileInfo, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	f, err := os.Open(p)
+	// Checked before opening too: opening a FIFO for reading blocks until a
+	// writer appears, so a FIFO named like a sidecar would hang the caller.
+	if fi, err := os.Stat(p); err != nil {
+		return nil, nil, err
+	} else if !fi.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("%s: not a regular file", p)
+	}
+	if afterResolve != nil {
+		afterResolve()
+	}
+	// Open through an os.Root on the real root: if a folder on the way was
+	// swapped for a symlink out of the library after the checks above (anyone
+	// who can write to the share could try), the open fails instead of
+	// following it.
+	realRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
+	if err != nil {
+		return nil, nil, err
+	}
+	rel, err := filepath.Rel(realRoot, p)
+	if err != nil {
+		return nil, nil, err
+	}
+	r, err := os.OpenRoot(realRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	f, err := r.Open(rel)
+	_ = r.Close() // the opened file stays valid
 	if err != nil {
 		return nil, nil, err
 	}

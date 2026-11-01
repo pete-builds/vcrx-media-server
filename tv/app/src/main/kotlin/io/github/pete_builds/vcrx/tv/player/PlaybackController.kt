@@ -3,6 +3,7 @@ package io.github.pete_builds.vcrx.tv.player
 import android.content.Context
 import android.net.Uri
 import android.view.KeyEvent
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.annotation.OptIn
 import androidx.compose.runtime.getValue
@@ -343,6 +344,10 @@ class PlaybackController(
 
     private fun play(created: PlaybackSession) {
         resetSubtitles()
+        if (!StreamKinds.isPlayable(created)) {
+            phase = Phase.Failed("The server sent a kind of stream this app cannot play. Update the app.", false)
+            return
+        }
         if (StreamKinds.isConverted(created)) {
             playConverted(created)
             return
@@ -372,7 +377,6 @@ class PlaybackController(
             .setUri(uri)
             .setMediaId(created.sessionId)
             .setSubtitleConfigurations(subtitles)
-            .apply { if (created.stream.protocol == "hls") setMimeType(MimeTypes.APPLICATION_M3U8) }
             .build()
 
         session = created
@@ -531,6 +535,16 @@ class PlaybackController(
         }
     }
 
+    /** Lets the screen sleep while paused; see [PlaybackPolicy.keepScreenOn]. */
+    private fun updateKeepScreenOn() {
+        val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        if (PlaybackPolicy.keepScreenOn(player.playWhenReady, player.playbackState)) {
+            activity.window.addFlags(flag)
+        } else {
+            activity.window.clearFlags(flag)
+        }
+    }
+
     private fun listener() = object : Player.Listener {
         override fun onIsPlayingChanged(playing: Boolean) {
             isPlaying = playing
@@ -543,10 +557,12 @@ class PlaybackController(
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            updateKeepScreenOn()
             if (!playWhenReady) reporter?.onPaused(position(), duration())
         }
 
         override fun onPlaybackStateChanged(state: Int) {
+            updateKeepScreenOn()
             buffering = state == Player.STATE_BUFFERING
             when (state) {
                 Player.STATE_BUFFERING -> if (player.playWhenReady) reporter?.onBuffering(position(), duration())

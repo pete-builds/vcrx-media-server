@@ -33,6 +33,10 @@ class TokenStore(context: Context) {
     @Volatile
     private var loaded = false
 
+    /** Called after every save and sign-out: the session the app acts for changed. */
+    @Volatile
+    var onSessionChange: (() -> Unit)? = null
+
     /** The active profile's token. */
     fun token(): String? {
         if (loaded) return cached
@@ -80,6 +84,7 @@ class TokenStore(context: Context) {
             .commit()
         cached = token
         loaded = true
+        onSessionChange?.invoke()
     }
 
     /** Signs out: drops the active slot. */
@@ -89,6 +94,7 @@ class TokenStore(context: Context) {
         prefs.edit().remove(ivKey(slot)).remove(tokenKey(slot)).remove(KEY_ACTIVE).commit()
         cached = null
         loaded = true
+        onSessionChange?.invoke()
     }
 
     private fun activeSlot(): String = prefs.getString(KEY_ACTIVE, null) ?: ""

@@ -626,14 +626,25 @@ async function main() {
       // All the player's text, hidden controls included: they show on the next
       // mouse move, so a "null" there is one the viewer will see.
       const shell = v.closest(".player");
+      const mute = shell && [...shell.querySelectorAll(".pc-btn")].find((b) => /^(Mute|Unmute)$/.test(b.textContent));
+      const bar = shell && shell.querySelector(".pc-bar");
       return { ok: v.currentTime > 1.5, t: v.currentTime, err: v.error && v.error.code, converted: !v.controls, pill: pill ? pill.textContent : null,
         text: shell ? shell.textContent : "",
+        focus: document.activeElement === document.body ? "body" : (document.activeElement && (document.activeElement.id || document.activeElement.tagName)),
+        muteName: mute ? (mute.getAttribute("aria-label") || mute.textContent) : null, muteText: mute ? mute.textContent : null,
+        valuetext: bar ? bar.getAttribute("aria-valuetext") : null,
         why: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
     if (!res.ok) fail(`play ${label}`, `video did not advance (t=${res.t}, media error ${res.err}) ${res.why || ""}`);
     const playerJunk = (res.text || "").match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
     if (playerJunk) fail(`play ${label}`, `the player shows "${playerJunk[0]}": ${res.text.slice(0, 160).replace(/\s+/g, " ")}`);
     if (res.converted !== (wantDecision === "converted")) fail(`play ${label}`, `expected a ${wantDecision} stream`);
     if (wantPill && res.pill !== wantPill) fail(`play ${label}`, `labelled "${res.pill}", expected "${wantPill}"`);
+    if (res.focus === "body") fail(`play ${label}`, "keyboard focus was left on the page body after navigating");
+    if (wantDecision === "converted") {
+      // The converted player's own controls: names a screen reader can use.
+      if (!res.muteText || res.muteName !== res.muteText) fail(`play ${label}`, `the mute button is announced as "${res.muteName}" while it shows "${res.muteText}"`);
+      if (!/^\d+:\d\d(:\d\d)? of \d+:\d\d(:\d\d)?$/.test(res.valuetext || "")) fail(`play ${label}`, `the position slider reads "${res.valuetext}", not a time`);
+    }
     if (exceptions.length) fail(`play ${label}`, `threw: ${exceptions[0]}`);
   }
 
