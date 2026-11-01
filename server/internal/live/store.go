@@ -160,6 +160,16 @@ func (s *Store) Channels(ctx context.Context, allowed bool) ([]Channel, error) {
 	return s.list(ctx, `WHERE c.enabled = 1 AND c.gone = 0`, false)
 }
 
+// HasChannels reports whether any channel is listed for viewers.
+func (s *Store) HasChannels(ctx context.Context) (bool, error) {
+	var one int
+	err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM channels WHERE enabled = 1 AND gone = 0 LIMIT 1`).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // AllChannels lists every channel for the admin page, disabled and gone ones too.
 func (s *Store) AllChannels(ctx context.Context) ([]Channel, error) {
 	return s.list(ctx, ``, true)

@@ -227,6 +227,8 @@ async function main() {
     ["/settings/devices", ".scope-form"],
     ["/settings/friends", ".link-form"],
     ["/settings/markers", "table.list"],
+    // Live TV: the dev server lists no playlists, so the page says how to add one.
+    ["/live", ".empty"],
   ];
   for (const [path, selector] of pages) {
     console.log(`page #${path}`);

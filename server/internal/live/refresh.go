@@ -113,12 +113,21 @@ func (r *Refresher) Start(ctx context.Context) error {
 	return nil
 }
 
-// RefreshAll refreshes every source's playlist in turn.
+// RefreshAll refreshes every source's playlist in turn, then caches any new
+// logos, which can take a while for a thousand channels and so come last.
 func (r *Refresher) RefreshAll(ctx context.Context) {
 	for _, src := range r.Sources {
 		if err := r.Refresh(ctx, r.ids[src.Name]); err != nil && ctx.Err() == nil {
 			r.log().Warn("live tv: playlist refresh failed", "source", src.Name, "err", err)
 		}
+	}
+	r.FetchAllLogos(ctx)
+}
+
+// FetchAllLogos caches the logos of every source's channels not cached yet.
+func (r *Refresher) FetchAllLogos(ctx context.Context) {
+	for _, src := range r.Sources {
+		r.FetchLogos(ctx, r.ids[src.Name])
 	}
 }
 
@@ -134,9 +143,9 @@ func (r *Refresher) RefreshGuides(ctx context.Context) {
 	}
 }
 
-// Refresh reads one source's playlist into the channels table and fetches
-// any logos not cached yet. A failure is recorded on the source and leaves
-// its channels as they were.
+// Refresh reads one source's playlist into the channels table. A failure is
+// recorded on the source and leaves its channels as they were. Logos are
+// FetchLogos, separately, so a guide need not wait behind them.
 func (r *Refresher) Refresh(ctx context.Context, sourceID int64) error {
 	loc, err := r.Store.SourceURL(ctx, sourceID)
 	if err != nil {
@@ -153,7 +162,6 @@ func (r *Refresher) Refresh(ctx context.Context, sourceID int64) error {
 	if truncated {
 		_ = r.Store.Failed(ctx, sourceID, fmt.Sprintf("the playlist lists more than %d channels; only the first %d were kept", MaxEntries, MaxEntries))
 	}
-	r.fetchLogos(ctx, sourceID)
 	return nil
 }
 
@@ -166,7 +174,8 @@ func (r *Refresher) read(ctx context.Context, loc string) ([]Entry, bool, error)
 	return Parse(io.LimitReader(body, maxPlaylistBytes))
 }
 
-func (r *Refresher) fetchLogos(ctx context.Context, sourceID int64) {
+// FetchLogos caches the logos of one source's channels not cached yet.
+func (r *Refresher) FetchLogos(ctx context.Context, sourceID int64) {
 	if r.Logos == nil || r.LogoDir == "" {
 		return
 	}

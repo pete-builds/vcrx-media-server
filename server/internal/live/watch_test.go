@@ -1,6 +1,7 @@
 package live
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -95,6 +96,49 @@ func TestWatchSharesOnePullPerChannel(t *testing.T) {
 	}
 	if _, err := s.Playlist(ctx, 7, run); !errors.Is(err, ErrNoStream) {
 		t.Errorf("playlist after Stop: %v", err)
+	}
+}
+
+func TestFollowWritesOneFragmentedMP4(t *testing.T) {
+	t.Parallel()
+	ff, url := testStream(t)
+	s := newStreams(t, ff)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	run, err := s.Watch(ctx, WatchRequest{Channel: 7, Source: 1, URL: url, Playlist: "/config/a.m3u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	flushes := 0
+	// The test stream is a file, so the pull ends after it; Follow ends with it.
+	err = s.Follow(ctx, 7, run, &out, func() { flushes++ }, func() bool { return true })
+	if !errors.Is(err, ErrNoStream) {
+		t.Fatalf("Follow ended with %v, want ErrNoStream when the pull ended", err)
+	}
+	b := out.Bytes()
+	if len(b) < 8 || string(b[4:8]) != "ftyp" || !bytes.Contains(b, []byte("moof")) || flushes < 2 {
+		t.Fatalf("%d bytes, %d flushes: want the init segment (ftyp) then media segments (moof)", len(b), flushes)
+	}
+	// Taking the grant away ends a stream within a few segments.
+	run, err = s.Watch(ctx, WatchRequest{Channel: 8, Source: 1, URL: url, Playlist: "/config/a.m3u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := s.Follow(ctx, 8, run, &out, func() {}, func() bool { return false }); !errors.Is(err, ErrNoStream) {
+		t.Errorf("revoked: %v", err)
+	}
+}
+
+func TestNewestSegment(t *testing.T) {
+	t.Parallel()
+	pl := []byte("#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:4.0,\nseg00011.m4s\n#EXTINF:4.0,\nseg00012.m4s\n")
+	if n := newestSegment(pl); n != 12 {
+		t.Errorf("newest %d, want 12", n)
+	}
+	if n := newestSegment([]byte("#EXTM3U\n")); n != -1 {
+		t.Errorf("empty: %d", n)
 	}
 }
 
