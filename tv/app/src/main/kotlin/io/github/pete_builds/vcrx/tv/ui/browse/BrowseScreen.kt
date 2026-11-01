@@ -30,7 +30,10 @@ import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.viewModelScope
 import androidx.tv.material3.MaterialTheme
 import io.github.pete_builds.vcrx.tv.AppGraph
@@ -102,6 +105,23 @@ class BrowseViewModel(private val graph: AppGraph) : ViewModel() {
         }
     }
 }
+
+/**
+ * Whether Browse is the page in front (its back stack entry is resumed). It
+ * is not while Details fades in over it or out of it, for 700ms each way, and
+ * focus must not move then (HomeRows.cardTakesFocus). This is the state, for
+ * keying effects so they run again when Browse is back in front; it can lag
+ * a frame behind a click that navigates away, so each effect checks
+ * [inFrontNow] again when it runs.
+ */
+@Composable
+fun browseInFront(): Boolean {
+    val state by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    return state.isAtLeast(Lifecycle.State.RESUMED)
+}
+
+/** Whether Browse is in front at this moment. For effects only: never read it during composition. */
+fun Lifecycle.inFrontNow(): Boolean = currentState.isAtLeast(Lifecycle.State.RESUMED)
 
 private data class RailEntry(val key: String, val label: String, val icon: ImageVector)
 
@@ -182,8 +202,12 @@ fun BrowseScreen() {
 
     // If nothing took focus (a section failed silently, or Browse came back with its
     // card gone), give it to the rail so the D-pad always has somewhere to start.
-    LaunchedEffect(vm.section) {
+    // Counted from when Browse is back in front, after the card has had its turn.
+    val inFront = browseInFront()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(vm.section, inFront) {
+        if (!inFront) return@LaunchedEffect
         delay(600)
-        if (!anyFocus) runCatching { railRequester.requestFocus() }
+        if (!anyFocus && lifecycle.inFrontNow()) runCatching { railRequester.requestFocus() }
     }
 }

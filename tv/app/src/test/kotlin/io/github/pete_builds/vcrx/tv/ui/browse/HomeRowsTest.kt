@@ -67,13 +67,27 @@ class HomeRowsTest {
     @Test
     fun backFromMoreInfoFocusesMoreInfo() {
         // It used to land on the rail: nothing on Home claimed focus for the hero's More info.
-        assertEquals(HomeRows.HeroFocus.MoreInfo, HomeRows.heroFocus(hasHero = true, toContent = false, restoreItemId = null, restoreHero = true))
+        assertEquals(HomeRows.HeroFocus.MoreInfo, HomeRows.heroFocus(inFront = true, hasHero = true, toContent = false, restoreItemId = null, restoreHero = true))
         // The rail handing over still lands on Play.
-        assertEquals(HomeRows.HeroFocus.First, HomeRows.heroFocus(hasHero = true, toContent = true, restoreItemId = null, restoreHero = false))
+        assertEquals(HomeRows.HeroFocus.First, HomeRows.heroFocus(inFront = true, hasHero = true, toContent = true, restoreItemId = null, restoreHero = false))
         // A card taking focus back keeps it.
-        assertEquals(null, HomeRows.heroFocus(hasHero = true, toContent = true, restoreItemId = 4, restoreHero = false))
-        assertEquals(null, HomeRows.heroFocus(hasHero = true, toContent = false, restoreItemId = null, restoreHero = false))
-        assertEquals(null, HomeRows.heroFocus(hasHero = false, toContent = true, restoreItemId = null, restoreHero = true))
+        assertEquals(null, HomeRows.heroFocus(inFront = true, hasHero = true, toContent = true, restoreItemId = 4, restoreHero = false))
+        assertEquals(null, HomeRows.heroFocus(inFront = true, hasHero = true, toContent = false, restoreItemId = null, restoreHero = false))
+        assertEquals(null, HomeRows.heroFocus(inFront = true, hasHero = false, toContent = true, restoreItemId = null, restoreHero = true))
+    }
+
+    @Test
+    fun nothingTakesFocusWhileDetailsFadesInOverBrowse() {
+        // Seen on the TV 2026-10-31 (vc208): pressing More info or a card set the
+        // restore, Browse recomposed under the fading-in Details, and the restore
+        // ran there and was used up, so Back landed on the rail.
+        assertEquals(null, HomeRows.heroFocus(inFront = false, hasHero = true, toContent = false, restoreItemId = null, restoreHero = true))
+        assertFalse(HomeRows.cardTakesFocus(inFront = false, restoring = true, first = false, toContent = false, restoreItemId = 4))
+        assertFalse(HomeRows.cardTakesFocus(inFront = false, restoring = false, first = true, toContent = true, restoreItemId = null))
+        // Back in front, the same flags take focus.
+        assertTrue(HomeRows.cardTakesFocus(inFront = true, restoring = true, first = false, toContent = false, restoreItemId = 4))
+        assertTrue(HomeRows.cardTakesFocus(inFront = true, restoring = false, first = true, toContent = true, restoreItemId = null))
+        assertFalse(HomeRows.cardTakesFocus(inFront = true, restoring = false, first = true, toContent = true, restoreItemId = 4))
     }
 
     @Test
