@@ -3,16 +3,21 @@ package io.github.pete_builds.vcrx.tv.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.pete_builds.vcrx.tv.graph
+import io.github.pete_builds.vcrx.tv.music.MusicPlayer
 import io.github.pete_builds.vcrx.tv.ui.browse.BrowseScreen
 import io.github.pete_builds.vcrx.tv.ui.connect.ConnectScreen
 import io.github.pete_builds.vcrx.tv.ui.connect.LoginScreen
@@ -24,7 +29,9 @@ import io.github.pete_builds.vcrx.tv.ui.music.musicScreens
 import io.github.pete_builds.vcrx.tv.ui.pair.PairScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.ProfilePickerScreen
 import io.github.pete_builds.vcrx.tv.ui.rewind.RewindScreen
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import io.github.pete_builds.vcrx.tv.ui.profiles.StartScreen
 import io.github.pete_builds.vcrx.tv.ui.profiles.startScreen
 import io.github.pete_builds.vcrx.tv.ui.settings.AboutScreen
@@ -75,5 +82,30 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Home, another app, or a video taking the screen: the music stops with
+        // its listen rather than playing on with nothing on screen to stop it.
+        if (!isChangingConfigurations) MusicPlayer.stopIfRunning()
+    }
+}
+
+/**
+ * Keeps the screen on while music plays, so the screensaver (which stops this
+ * activity, and with it the music) does not cut an album off. Only a change
+ * between playing and not playing recomposes this, not every position tick.
+ */
+@Composable
+private fun KeepScreenOnWhileMusicPlays() {
+    val context = LocalContext.current
+    val playing by remember {
+        MusicPlayer.get(context.graph, context).state.map { it.playing }.distinctUntilChanged()
+    }.collectAsState(initial = false)
+    val view = LocalView.current
+    DisposableEffect(view, playing) {
+        view.keepScreenOn = playing
+        onDispose { view.keepScreenOn = false }
     }
 }
