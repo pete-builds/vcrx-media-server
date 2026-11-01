@@ -188,7 +188,8 @@ func videoOK(v catalog.Version, caps Capabilities) (problem string, warnings []s
 	return "", warnings
 }
 
-// audioOK passes when at least one audio track decodes: the player picks it.
+// audioOK passes when at least one audio track decodes, within the decoder's
+// channel limit: the player picks it.
 func audioOK(v catalog.Version, caps Capabilities) (ok bool, chosen string) {
 	if len(v.AudioTracks) == 0 {
 		return true, ""
@@ -200,12 +201,19 @@ func audioOK(v catalog.Version, caps Capabilities) (ok bool, chosen string) {
 	for _, t := range tracks {
 		codec := strings.ToLower(s(t.Codec))
 		for _, c := range caps.AudioCodecs {
-			if strings.EqualFold(c.Codec, codec) {
+			if decodes(c, codec, t) {
 				return true, codec
 			}
 		}
 	}
 	return false, ""
+}
+
+// decodes reports whether the client's decoder c takes track t: the codec,
+// and no more channels than its max_channels (0, or an unknown track
+// count, passes).
+func decodes(c AudioCodecCap, codec string, t catalog.Track) bool {
+	return strings.EqualFold(c.Codec, codec) && (c.MaxChannels == 0 || t.Channels == nil || *t.Channels <= int64(c.MaxChannels))
 }
 
 // DefaultAudio is the track a player without track selection plays: the one
@@ -232,7 +240,7 @@ func ChooseAudio(v catalog.Version, caps Capabilities) (index int, transcode boo
 			continue
 		}
 		for _, c := range caps.AudioCodecs {
-			if strings.EqualFold(c.Codec, codec) && (c.MaxChannels == 0 || t.Channels == nil || *t.Channels <= int64(c.MaxChannels)) {
+			if decodes(c, codec, t) {
 				return int(*t.Index), false
 			}
 		}
