@@ -343,6 +343,10 @@ class PlaybackController(
 
     private fun play(created: PlaybackSession) {
         resetSubtitles()
+        if (!StreamKinds.isPlayable(created)) {
+            phase = Phase.Failed("The server sent a kind of stream this app cannot play. Update the app.", false)
+            return
+        }
         if (StreamKinds.isConverted(created)) {
             playConverted(created)
             return
@@ -372,7 +376,6 @@ class PlaybackController(
             .setUri(uri)
             .setMediaId(created.sessionId)
             .setSubtitleConfigurations(subtitles)
-            .apply { if (created.stream.protocol == "hls") setMimeType(MimeTypes.APPLICATION_M3U8) }
             .build()
 
         session = created
