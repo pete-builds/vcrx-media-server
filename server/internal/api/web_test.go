@@ -142,3 +142,33 @@ func TestSignInCookieNeedsTheClientHeader(t *testing.T) {
 		t.Errorf("bearer auto sign-in without the header: %d %s", r.code, r.body)
 	}
 }
+
+// Behind a TLS-terminating proxy the browser is on HTTPS, so the session
+// cookie must be Secure; the proxy's X-Forwarded-Proto is believed only from a
+// trusted proxy, as for invite links.
+func TestSessionCookieSecureBehindTrustedProxy(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	proxy := netip.PrefixFrom(netip.MustParseAddr("10.9.9.9"), 32)
+	f.srv.TrustedProxies = []netip.Prefix{proxy}
+	f.h = f.srv.Handler()
+	login := map[string]any{"username": "pete", "password": "adminpass1", "cookie": true}
+	for _, c := range []struct {
+		what   string
+		hdr    []string
+		secure bool
+	}{
+		{"trusted proxy, https", []string{"RemoteAddr", "10.9.9.9:4000", "X-Forwarded-For", "203.0.113.5", "X-Forwarded-Proto", "https"}, true},
+		{"trusted proxy, http", []string{"RemoteAddr", "10.9.9.9:4000", "X-Forwarded-For", "203.0.113.5"}, false},
+		{"untrusted peer claiming https", []string{"RemoteAddr", "192.168.1.20:5555", "X-Forwarded-Proto", "https"}, false},
+	} {
+		r := f.do("POST", "/api/v1/auth/login", "", login, append(c.hdr, csrfHeader, "web")...)
+		set := r.hdr.Get("Set-Cookie")
+		if r.code != 200 || !strings.HasPrefix(set, cookieName+"=") {
+			t.Fatalf("%s: %d %s", c.what, r.code, r.body)
+		}
+		if got := strings.Contains(set, "; Secure"); got != c.secure {
+			t.Errorf("%s: Secure = %v, want %v (%s)", c.what, got, c.secure, set)
+		}
+	}
+}
