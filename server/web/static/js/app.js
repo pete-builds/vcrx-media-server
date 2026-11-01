@@ -112,6 +112,10 @@ async function render() {
       return;
     }
     view.replaceChildren(out.el);
+    // Replacing the page drops keyboard focus to the body, so the next Tab
+    // would start from the top bar again. Unless the view put focus somewhere
+    // itself, it goes to the new page (without scrolling).
+    if (!document.activeElement || document.activeElement === document.body) view.focus({ preventScroll: true });
     setHero(!!out.hero);
     cleanup = out.cleanup || null;
     if (out.title) document.title = `${out.title} · VCRX`;

@@ -18,13 +18,13 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 |---|---|
 | Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, smart collections and hidden labels from YAML rules, genre and decade filters | Online lists (IMDb Top 250 and the like), playlists, automatic director and studio collections |
 | Local accounts and per-user access: library grants, a resolution ceiling, a content-rating ceiling, label allow and deny lists, converting allowed or not, all edited in Settings > Users and enforced on every route (a test walks them all) | Access settings in the TV app |
-| Direct play over HTTP with Range; converted streams for clients that ask for them (fragmented MP4, or HLS for Safari: video copied, or transcoded to H.264 when the client cannot decode it; audio copied or converted to AAC); sidecar and embedded text subtitles (also as WebVTT for browsers), subtitle search and download from OpenSubtitles (optional), a per-user subtitle delay | Video transcoding for the TV app (HLS), picture subtitle burn-in, VA-API hardware acceleration |
+| Direct play over HTTP with Range; converted streams for clients that ask for them (fragmented MP4, or HLS for Safari: video copied, or transcoded to H.264 when the client cannot decode it; audio copied or converted to AAC); sidecar and embedded text subtitles (also as WebVTT for browsers), subtitle search and download from OpenSubtitles (optional), a per-user subtitle delay | Picture subtitle burn-in, VA-API hardware acceleration |
 | Skip Intro and Skip Credits (web and TV): intros and end credits found from each season's audio at night, chapter titles and Plex-style NFO markers honoured, an admin editor, and a per-user choice of button, automatic or off | Skip markers for movies other than by hand |
 | Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, per-title history, stats, per-user totals, stop a stream, webhooks, a watch state export for cleanup tools | Activity screens in a client |
 | Music libraries: artists, albums and compilations from tags, live shows (date, venue, source, the taper's info file and checksums), covers, direct play or AAC/Opus conversion, play queues, a web player that keeps playing across pages, and a TV Music section | Setlists and per-song chapters, tape trading |
 | Web app at `/`: browse, details, search, play in the browser with subtitles (including files whose video the browser cannot decode, transcoded on the server), Activity screens. REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Other TV platforms |
 
-A file the TV cannot play directly is refused with a message saying why ("needs video conversion: the device has no av1 video decoder"). Transcoding for the TV app arrives with HLS in milestone 3; the web app already gets it.
+A file the TV cannot play directly is converted on the server, as for the web app, in a fragmented MP4 stream: the container rewrapped, the audio converted to AAC, or the video transcoded to H.264, under the same policy and limits. It is refused, with a message saying why, only when the account may not use converted streams or the server cannot convert it (for example, with transcoding turned off).
 
 ## Run the server
 
@@ -87,6 +87,15 @@ vcrx healthcheck              what the container HEALTHCHECK runs
 ### Configuration
 
 Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its backups (before every migration, and a nightly snapshot kept for seven days, in `/config/backups`) and the settings file live in `/config`; resized artwork, Safari's HLS segments while they play, and other caches live in `/cache` and can be deleted at any time.
+
+**Restoring a backup.** Each backup is a complete database. From `deploy/`, with `/config` being `${VCRX_DATA_DIR:-./data}/config` on the host:
+
+1. `docker compose stop vcrx`.
+2. Move `vcrx.db`, `vcrx.db-wal` and `vcrx.db-shm` out of `/config`. Never leave an old `-wal` or `-shm` beside a restored database: SQLite would replay it into the restored file.
+3. Copy the backup you want (for example `backups/vcrx-nightly-20261031T201000Z.db`) to `/config/vcrx.db`.
+4. `docker compose start vcrx`. A backup from before an upgrade is migrated forward at startup, and copied to `backups` first.
+
+Anything written after the backup was taken is gone, so pick the newest one from before the problem. `TestRestoreDrill` in `server/internal/db` runs these steps against a backup taken at an older schema.
 
 ### TMDb posters and plots (optional)
 
@@ -183,7 +192,7 @@ Extras laid out the way Plex reads them work with no internet: `<name>-trailer.m
 
 **Before a movie (optional, per profile):** each profile can choose up to three local trailers for other movies it may see and has not watched, and a pre-roll clip, to play before a movie. Pre-rolls come from `preroll_dir`, a folder of short clips mounted read-only (`VCRX_PREROLL_DIR` in `.env`). Off by default. Trailers come only from local trailer files, never YouTube, and follow the profile's access rules, so a kids' profile never sees a trailer for a title it cannot see. Nothing that plays first counts as watched.
 
-**Live TV (in progress, optional):** channels from M3U playlists you list under `live_tv` in `vcrx.yaml`, read at startup and every 12 hours. VCRX ships no playlist and suggests none; play what you have the right to watch. A playlist URL with an account's password goes in a file named by `m3u_url_file`, and neither it nor any stream URL ever reaches a client. Viewers need the Live TV grant in Settings > Users; admins always have it. Each playlist can name an XMLTV guide (`xmltv`, a URL or file, gzipped or not), read every 6 hours and matched to channels by tvg-id or name: channels list what is on now and next (`GET /api/v1/live/channels`) and `GET /api/v1/live/guide` gives the grid. To watch, `POST /api/v1/live/channels/{id}/watch` returns VCRX's own live HLS playlist: one pull per channel, shared by everyone watching it, video copied and audio converted to AAC, at most `max_streams` (4) channels at once. The web app has a Live TV page with the guide's now and next and a player with channel up and down; the TV app comes next (`docs/plans/2026-10-31-live-tv.md`).
+**Live TV (in progress, optional):** channels from M3U playlists you list under `live_tv` in `vcrx.yaml`, read at startup and every 12 hours. VCRX ships no playlist and suggests none; play what you have the right to watch. A playlist URL with an account's password goes in a file named by `m3u_url_file`, and neither it nor any stream URL ever reaches a client. Viewers need the Live TV grant in Settings > Users; admins always have it. Each playlist can name an XMLTV guide (`xmltv`, a URL or file, gzipped or not), read every 6 hours and matched to channels by tvg-id or name: channels list what is on now and next (`GET /api/v1/live/channels`) and `GET /api/v1/live/guide` gives the grid. To watch, `POST /api/v1/live/channels/{id}/watch` returns VCRX's own live HLS playlist: one pull per channel, shared by everyone watching it, video copied and audio converted to AAC, at most `max_streams` (4) channels at once. The web app has a Live TV page with the guide's now and next and a player with channel up and down, and the TV app has the same in a Live TV row (`docs/plans/2026-10-31-live-tv.md`).
 
 ### Collections
 

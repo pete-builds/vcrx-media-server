@@ -1,5 +1,6 @@
 package io.github.pete_builds.vcrx.tv.player
 
+import androidx.media3.common.Player
 import io.github.pete_builds.vcrx.tv.net.Track
 import io.github.pete_builds.vcrx.tv.settings.AudioPrefs
 import io.github.pete_builds.vcrx.tv.settings.Languages
@@ -65,6 +66,14 @@ object PlaybackPolicy {
 
     /** Reading a track out of a very large file can take minutes; past this, give up and say so. */
     const val SUBTITLE_GIVE_UP_MS = 20 * 60 * 1000L
+
+    /**
+     * Whether the screen stays on: while the viewer wants the film to play,
+     * playing or buffering toward it. Paused or ended, the TV may start its
+     * screensaver or sleep, which ends the session at its position.
+     */
+    fun keepScreenOn(playWhenReady: Boolean, playbackState: Int): Boolean =
+        playWhenReady && (playbackState == Player.STATE_READY || playbackState == Player.STATE_BUFFERING)
 
     private const val MIN_COUNTDOWN = 3
     private const val MAX_COUNTDOWN = 60

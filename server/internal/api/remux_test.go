@@ -503,3 +503,52 @@ func TestConvertedStreamOnePerSession(t *testing.T) {
 		}
 	}
 }
+
+// An admin terminating a session at the moment a stream request has checked it
+// but not yet registered must still cut that stream: the request answers 410
+// instead of playing on unseen by the terminate. Not parallel: the hook is
+// package-wide.
+func TestTerminateBetweenCheckAndRegisterCutsTheStream(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs /bin/sh")
+	}
+	ff := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(ff, []byte("#!/bin/sh\nexec sleep 60\n"), 0o700); err != nil { //nolint:gosec // a test stand-in for ffmpeg
+		t.Fatal(err)
+	}
+	f := newFixture(t)
+	f.srv.Playback.CanRemux = true
+	f.srv.Remux = remux.New(ff, "ffprobe", 2, nil)
+	srv := httptest.NewServer(f.h)
+	defer srv.Close()
+	var s struct {
+		SessionID string `json:"session_id"`
+		Stream    struct{ URL string }
+	}
+	r := f.do("POST", "/api/v1/playback/sessions", f.adminTok, map[string]any{"item_id": f.movieID, "version_id": f.v1080, "capabilities": browserCaps(true)})
+	r.json(t, &s)
+	if s.Stream.URL == "" {
+		t.Fatalf("start: %s", r.body)
+	}
+	beforeStreamRegister = func(session string) {
+		if session != s.SessionID {
+			return
+		}
+		if r := f.do("POST", "/api/v1/admin/activity/sessions/"+session+"/terminate", f.adminTok, map[string]any{"message": "test"}); r.code != 200 {
+			t.Errorf("terminate: %d %s", r.code, r.body)
+		}
+	}
+	t.Cleanup(func() { beforeStreamRegister = nil })
+	client := srv.Client()
+	client.Timeout = 3 * time.Second
+	req, _ := http.NewRequest("GET", srv.URL+s.Stream.URL+"?start_ms=0", nil)
+	req.Header.Set("Authorization", "Bearer "+f.adminTok)
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("the stream kept playing after its session was terminated: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusGone {
+		t.Fatalf("stream after terminate: %d, want 410", res.StatusCode)
+	}
+}

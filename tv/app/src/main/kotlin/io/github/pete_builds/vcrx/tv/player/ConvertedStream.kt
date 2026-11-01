@@ -19,8 +19,16 @@ import kotlinx.serialization.json.Json
  */
 object StreamKinds {
     const val FMP4 = "fmp4"
+    const val PROGRESSIVE = "progressive"
 
     fun isConverted(session: PlaybackSession): Boolean = session.stream.protocol == FMP4
+
+    /**
+     * Whether this app can play the session's stream: the file itself, or a converted
+     * fragmented MP4. Anything else (HLS, which the app never asks for, or a protocol
+     * from a newer server) would be opened as if it were the file, so it is refused.
+     */
+    fun isPlayable(session: PlaybackSession): Boolean = session.stream.protocol == PROGRESSIVE || isConverted(session)
 
     /** What the viewer is told about a converted stream, as the web player labels it; null for direct play. */
     fun label(session: PlaybackSession): String? = if (!isConverted(session)) {

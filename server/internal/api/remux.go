@@ -189,11 +189,17 @@ func (s *Server) convertedStream(w http.ResponseWriter, r *http.Request) {
 	opts := convertOptions(ss, v, path, int64(queryInt(r, "start_ms", 0)), audio, transcode)
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+	if beforeStreamRegister != nil {
+		beforeStreamRegister(id)
+	}
 	if s.streams.addConverted(id, &cancel) && opts.Wait == 0 {
 		// The stream this one replaced frees its slot a moment after it is stopped.
 		opts.Wait = 3 * time.Second
 	}
 	defer s.streams.remove(id, &cancel)
+	if s.terminatedSinceCheck(w, r, id) {
+		return
+	}
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Accept-Ranges", "none")

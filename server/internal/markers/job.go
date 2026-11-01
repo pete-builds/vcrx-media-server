@@ -499,7 +499,7 @@ func (j *Job) prepare(ctx context.Context, e *episode) {
 			e.explicit[k] = m
 		}
 	}
-	if nfo, err := fromNFO(path); err == nil {
+	if nfo, err := fromNFO(e.root, path); err == nil {
 		for k, m := range nfo { // NFO beats chapters
 			e.explicit[k] = m
 		}
