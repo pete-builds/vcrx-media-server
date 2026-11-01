@@ -18,6 +18,14 @@ server_name: VCRX
 # protection). Add a Tailscale MagicDNS or local name if you open VCRX by name.
 #allowed_hosts: [vcrx.local]
 
+# Video a client cannot decode is transcoded to H.264 on the CPU, and 4K is
+# often slower than real time, so a transcode is capped at 1080p: the picture
+# fits inside 1920x1080, keeping its shape, never scaled up. The cap is a height
+# in a 16:9 box (720 is 1280x720, 2160 is 3840x2160); 0 removes it. Direct play
+# and remux copy the video and keep the source's size. VCRX_MAX_TRANSCODE_HEIGHT
+# in .env wins over this.
+#max_transcode_height: 1080
+
 # Which playback events go to the webhooks in VCRX_WEBHOOK_URLS (the URLs carry
 # tokens, so they live in .env, not here). Default: all of them.
 #webhook_events: [play, stop, refused, terminated, added]

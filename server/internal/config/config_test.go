@@ -40,6 +40,22 @@ func TestDefaultsAndEnv(t *testing.T) {
 		t.Fatal("negative max transcodes accepted")
 	}
 	t.Setenv("VCRX_MAX_TRANSCODES", "")
+	if c.MaxTranscodeHeight != 1080 {
+		t.Fatalf("max transcode height default %d", c.MaxTranscodeHeight)
+	}
+	t.Setenv("VCRX_MAX_TRANSCODE_HEIGHT", "0")
+	if c, err = Load(); err != nil || c.MaxTranscodeHeight != 0 {
+		t.Fatalf("no transcode cap: %d %v", c.MaxTranscodeHeight, err)
+	}
+	t.Setenv("VCRX_MAX_TRANSCODE_HEIGHT", "2160")
+	if c, err = Load(); err != nil || c.MaxTranscodeHeight != 2160 {
+		t.Fatalf("4K transcodes: %d %v", c.MaxTranscodeHeight, err)
+	}
+	t.Setenv("VCRX_MAX_TRANSCODE_HEIGHT", "-1")
+	if _, err := Load(); err == nil {
+		t.Fatal("negative max transcode height accepted")
+	}
+	t.Setenv("VCRX_MAX_TRANSCODE_HEIGHT", "")
 	t.Setenv("VCRX_PORT", "seventy")
 	if _, err := Load(); err == nil {
 		t.Fatal("bad port accepted")
@@ -178,5 +194,16 @@ func TestMarkerSettings(t *testing.T) {
 	t.Setenv("VCRX_MARKER_HOURS", "always")
 	if c, err = Load(); err != nil || c.MarkerHours != "always" {
 		t.Fatalf("env: %v %q", err, c.MarkerHours)
+	}
+}
+
+func TestMaxTranscodeHeightFromYAML(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("VCRX_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "vcrx.yaml"), []byte("max_transcode_height: 720\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := Load(); err != nil || c.MaxTranscodeHeight != 720 {
+		t.Fatalf("yaml: %d %v", c.MaxTranscodeHeight, err)
 	}
 }
