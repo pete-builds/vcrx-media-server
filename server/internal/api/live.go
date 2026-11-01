@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/live"
@@ -26,6 +27,7 @@ func (s *Server) liveRoutes() []route {
 	return []route{
 		{"GET", "/api/v1/live/channels", signedIn, s.liveChannels},
 		{"GET", "/api/v1/live/channels/{channel_id}/logo", signedIn, s.liveLogo},
+		{"GET", "/api/v1/live/guide", signedIn, s.liveGuide},
 		{"GET", "/api/v1/admin/live/sources", adminOnly, s.adminLiveSources},
 		{"POST", "/api/v1/admin/live/sources/{source_id}/refresh", adminOnly, s.adminLiveRefresh},
 		{"GET", "/api/v1/admin/live/channels", adminOnly, s.adminLiveChannels},
@@ -41,11 +43,53 @@ func (s *Server) liveChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	list, err := s.Live.Store.Channels(r.Context(), info(r).Policy.CanWatchLive())
+	if err == nil {
+		err = s.Live.Store.NowNext(r.Context(), list)
+	}
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"channels": list})
+}
+
+// liveGuide is the grid: each channel the caller may watch with its
+// programmes between from and to (Unix milliseconds; now to three hours on
+// by default, at most a day).
+func (s *Server) liveGuide(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	from, to := now, now.Add(3*time.Hour)
+	if v := r.URL.Query().Get("from"); v != "" {
+		ms, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "from is Unix milliseconds.")
+			return
+		}
+		from = time.UnixMilli(ms)
+		to = from.Add(3 * time.Hour)
+	}
+	if v := r.URL.Query().Get("to"); v != "" {
+		ms, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "to is Unix milliseconds.")
+			return
+		}
+		to = time.UnixMilli(ms)
+	}
+	if !to.After(from) || to.Sub(from) > live.MaxGuideWindow {
+		writeError(w, http.StatusBadRequest, "bad_request", "to must be after from, and at most a day later.")
+		return
+	}
+	if !s.liveOn() {
+		writeJSON(w, http.StatusOK, map[string]any{"from": from.UnixMilli(), "to": to.UnixMilli(), "channels": []live.ChannelGuide{}})
+		return
+	}
+	g, err := s.Live.Store.Guide(r.Context(), info(r).Policy.CanWatchLive(), from, to)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"from": from.UnixMilli(), "to": to.UnixMilli(), "channels": g})
 }
 
 // logoTypes are the content types the refresher saves logos as, by extension.
@@ -120,6 +164,8 @@ func (s *Server) adminLiveRefresh(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "No such playlist.")
 		return
 	}
+	// Then its guide, which matches the channels just read. Its failure is in guide_error.
+	_ = s.Live.Refresher.RefreshGuide(ctx, id)
 	sources, err := s.Live.Store.Sources(r.Context())
 	if err != nil {
 		s.internal(w, r, err)

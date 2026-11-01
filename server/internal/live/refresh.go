@@ -21,20 +21,23 @@ import (
 )
 
 // SourceSpec is a playlist from vcrx.yaml: an http(s) URL, or an absolute path
-// to a file on the server.
+// to a file on the server, and its XMLTV guide the same way ("" for none).
 type SourceSpec struct {
 	Name     string
 	Location string
+	Guide    string
 }
 
 // Refresher reads each playlist when the server starts and then every
-// Interval, and caches channel logos under LogoDir.
+// Interval, caches channel logos under LogoDir, and reads each guide after
+// its playlist and then every GuideInterval.
 type Refresher struct {
-	Store    *Store
-	Sources  []SourceSpec
-	Interval time.Duration
-	LogoDir  string
-	Log      *slog.Logger
+	Store         *Store
+	Sources       []SourceSpec
+	Interval      time.Duration
+	GuideInterval time.Duration
+	LogoDir       string
+	Log           *slog.Logger
 	// Playlists fetches playlist URLs. The admin chose them, so they may be on
 	// the LAN (a tuner or a playlist proxy there). Nil uses a client with a timeout.
 	Playlists *http.Client
@@ -58,7 +61,7 @@ const DefaultInterval = 12 * time.Hour
 func (r *Refresher) Register(ctx context.Context) error {
 	r.ids = map[string]int64{}
 	for _, src := range r.Sources {
-		id, err := r.Store.EnsureSource(ctx, src.Name, src.Location)
+		id, err := r.Store.EnsureSource(ctx, src.Name, src.Location, src.Guide)
 		if err != nil {
 			return fmt.Errorf("live_tv source %q: %w", src.Name, err)
 		}
@@ -76,30 +79,51 @@ func (r *Refresher) Start(ctx context.Context) error {
 	if len(r.Sources) == 0 {
 		return nil
 	}
-	every := r.Interval
+	every, guides := r.Interval, r.GuideInterval
 	if every <= 0 {
 		every = DefaultInterval
 	}
+	if guides <= 0 {
+		guides = DefaultGuideInterval
+	}
 	go func() {
-		t := time.NewTicker(every)
-		defer t.Stop()
+		playlists, guideTick := time.NewTicker(every), time.NewTicker(guides)
+		defer playlists.Stop()
+		defer guideTick.Stop()
+		// The first guides wait for the first playlists: they match its channels.
+		r.RefreshAll(ctx)
+		r.RefreshGuides(ctx)
 		for {
-			r.RefreshAll(ctx)
 			select {
 			case <-ctx.Done():
 				return
-			case <-t.C:
+			case <-playlists.C:
+				r.RefreshAll(ctx)
+			case <-guideTick.C:
+				r.RefreshGuides(ctx)
 			}
 		}
 	}()
 	return nil
 }
 
-// RefreshAll refreshes every source in turn.
+// RefreshAll refreshes every source's playlist in turn.
 func (r *Refresher) RefreshAll(ctx context.Context) {
 	for _, src := range r.Sources {
 		if err := r.Refresh(ctx, r.ids[src.Name]); err != nil && ctx.Err() == nil {
 			r.log().Warn("live tv: playlist refresh failed", "source", src.Name, "err", err)
+		}
+	}
+}
+
+// RefreshGuides refreshes every source's guide in turn.
+func (r *Refresher) RefreshGuides(ctx context.Context) {
+	for _, src := range r.Sources {
+		if src.Guide == "" {
+			continue
+		}
+		if err := r.RefreshGuide(ctx, r.ids[src.Name]); err != nil && ctx.Err() == nil {
+			r.log().Warn("live tv: guide refresh failed", "source", src.Name, "err", err)
 		}
 	}
 }
@@ -128,32 +152,12 @@ func (r *Refresher) Refresh(ctx context.Context, sourceID int64) error {
 }
 
 func (r *Refresher) read(ctx context.Context, loc string) ([]Entry, bool, error) {
-	if !strings.HasPrefix(loc, "http://") && !strings.HasPrefix(loc, "https://") {
-		f, err := os.Open(loc) //nolint:gosec // the admin names this file in vcrx.yaml
-		if err != nil {
-			return nil, false, fmt.Errorf("open playlist: %w", err)
-		}
-		defer func() { _ = f.Close() }()
-		return Parse(io.LimitReader(f, maxPlaylistBytes))
-	}
-	client := r.Playlists
-	if client == nil {
-		client = &http.Client{Timeout: time.Minute}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loc, nil)
+	body, err := r.open(ctx, loc, "playlist")
 	if err != nil {
-		return nil, false, errors.New("the playlist URL is not valid")
+		return nil, false, err
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		// The error text carries the URL, and the URL may carry credentials.
-		return nil, false, errors.New("could not download the playlist: " + redact(err))
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, false, fmt.Errorf("the playlist server answered %s", resp.Status)
-	}
-	return Parse(io.LimitReader(resp.Body, maxPlaylistBytes))
+	defer func() { _ = body.Close() }()
+	return Parse(io.LimitReader(body, maxPlaylistBytes))
 }
 
 func (r *Refresher) fetchLogos(ctx context.Context, sourceID int64) {

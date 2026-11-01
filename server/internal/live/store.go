@@ -19,6 +19,11 @@ type Source struct {
 	RefreshedAt  *int64  `json:"refreshed_at"`
 	LastError    *string `json:"last_error"`
 	ChannelCount int     `json:"channel_count"`
+	// HasGuide is an xmltv location set in vcrx.yaml; the rest is its last read.
+	HasGuide         bool    `json:"has_guide"`
+	GuideRefreshedAt *int64  `json:"guide_refreshed_at"`
+	GuideError       *string `json:"guide_error"`
+	ProgramCount     int     `json:"program_count"`
 }
 
 // Channel is a channel as clients see it: no stream or logo URL.
@@ -28,6 +33,9 @@ type Channel struct {
 	Name    string  `json:"name"`
 	Group   *string `json:"group"`
 	HasLogo bool    `json:"has_logo"`
+	// Now and Next are from the guide, when the channel has one (NowNext).
+	Now  *Program `json:"now,omitempty"`
+	Next *Program `json:"next,omitempty"`
 	// Admin-only fields, left out of the viewer's list.
 	SourceID       int64   `json:"source_id,omitempty"`
 	Enabled        *bool   `json:"enabled,omitempty"`
@@ -48,12 +56,12 @@ func (s *Store) now() int64 {
 	return time.Now().UnixMilli()
 }
 
-// EnsureSource adds a playlist named in vcrx.yaml, or updates its URL, and
-// returns its id. Sources are matched by name.
-func (s *Store) EnsureSource(ctx context.Context, name, url string) (int64, error) {
+// EnsureSource adds a playlist named in vcrx.yaml, or updates its URL and
+// its guide's (empty: none), and returns its id. Sources are matched by name.
+func (s *Store) EnsureSource(ctx context.Context, name, url, guide string) (int64, error) {
 	var id int64
-	err := s.DB.QueryRowContext(ctx, `INSERT INTO live_sources (name, url) VALUES (?, ?)
-		ON CONFLICT (name) DO UPDATE SET url = excluded.url RETURNING id`, name, url).Scan(&id)
+	err := s.DB.QueryRowContext(ctx, `INSERT INTO live_sources (name, url, guide_url) VALUES (?, ?, ?)
+		ON CONFLICT (name) DO UPDATE SET url = excluded.url, guide_url = excluded.guide_url RETURNING id`, name, url, null(guide)).Scan(&id)
 	return id, err
 }
 
@@ -69,7 +77,8 @@ func (s *Store) SourceURL(ctx context.Context, id int64) (string, error) {
 
 // Sources lists the playlists, by name.
 func (s *Store) Sources(ctx context.Context) ([]Source, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, refreshed_at, last_error, channel_count FROM live_sources ORDER BY name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, refreshed_at, last_error, channel_count, guide_url IS NOT NULL,
+		guide_refreshed_at, guide_error, program_count FROM live_sources ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -77,11 +86,15 @@ func (s *Store) Sources(ctx context.Context) ([]Source, error) {
 	out := []Source{}
 	for rows.Next() {
 		var src Source
-		var at sql.NullInt64
-		var msg sql.NullString
-		if err := rows.Scan(&src.ID, &src.Name, &at, &msg, &src.ChannelCount); err != nil {
+		var at, gat sql.NullInt64
+		var msg, gmsg sql.NullString
+		if err := rows.Scan(&src.ID, &src.Name, &at, &msg, &src.ChannelCount, &src.HasGuide, &gat, &gmsg, &src.ProgramCount); err != nil {
 			return nil, err
 		}
+		if gat.Valid {
+			src.GuideRefreshedAt = &gat.Int64
+		}
+		src.GuideError = ptr(gmsg)
 		if at.Valid {
 			src.RefreshedAt = &at.Int64
 		}

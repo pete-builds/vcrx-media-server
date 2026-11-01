@@ -506,7 +506,8 @@ func (w *walkFixture) musicProbes(listen string) []probe {
 // grant, so the channel list stops naming the channel and its logo is a 404.
 func (w *walkFixture) liveProbes() []probe {
 	return []probe{
-		at("GET /api/v1/live/channels").hides("Walk News", "Walk Weather"),
+		at("GET /api/v1/live/channels").hides("Walk News", "Walk Weather", "Walk Bulletin"),
+		at("GET /api/v1/live/guide").hides("Walk News", "Walk Weather", "Walk Bulletin"),
 		at("GET /api/v1/live/channels/{channel_id}/logo", w.channel),
 	}
 }
