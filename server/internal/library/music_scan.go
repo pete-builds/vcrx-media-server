@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"path"
 	"strings"
 	"sync"
@@ -164,7 +163,7 @@ func (s *Scanner) scanMusic(ctx context.Context, lib Library, opt Options, run *
 		return "", err
 	}
 	if len(mw.w.failed) > 0 {
-		warning = fmt.Sprintf("completed with warnings: %d folders could not be read (first: %s); their files were left as they were", len(mw.w.failed), mw.w.failed[0])
+		warning = fmt.Sprintf("completed with warnings: %d folders or files could not be read (first: %s); their files were left as they were", len(mw.w.failed), mw.w.failed[0])
 	}
 	return warning, nil
 }
@@ -256,8 +255,8 @@ func (mw *musicWalk) addFile(rel string) {
 		return
 	}
 	abs := mw.w.absOf(rel)
-	fi, err := os.Stat(abs)
-	if err != nil || !fi.Mode().IsRegular() {
+	fi := mw.w.statFile(rel)
+	if fi == nil {
 		return
 	}
 	mw.files = append(mw.files, &musicFile{rel: rel, abs: abs, size: fi.Size(), mtime: fi.ModTime().UnixMilli()})

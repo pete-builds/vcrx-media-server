@@ -439,7 +439,7 @@ func (s *Scanner) scan(ctx context.Context, lib Library, opt Options, run *Run) 
 	}
 	rep.Log(log)
 	if len(w.failed) > 0 {
-		warning = fmt.Sprintf("completed with warnings: %d folders could not be read (first: %s); their files were left as they were", len(w.failed), w.failed[0])
+		warning = fmt.Sprintf("completed with warnings: %d folders or files could not be read (first: %s); their files were left as they were", len(w.failed), w.failed[0])
 	}
 	return warning, nil
 }

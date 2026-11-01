@@ -311,6 +311,24 @@ func TestMusicMassMissingAbortsAcrossScans(t *testing.T) {
 	}
 }
 
+// As for video, a track the walk lists but cannot stat is left as it was.
+func TestMusicUnstattableFileIsNotMissing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permissions are not enforced")
+	}
+	f := newMusicFixture(t)
+	f.scan(t, Options{Trigger: "cli"})
+	dir := filepath.Join(f.root, "Cedar Static", "Low Orbit")
+	if err := os.Chmod(dir, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	run := f.scan(t, Options{Trigger: "schedule"})
+	if run.Missing != 0 || !strings.Contains(run.Error, "could not be read") {
+		t.Fatalf("run = %+v; want nothing missing and a warning", run)
+	}
+}
+
 func TestMusicScanIncrementalAndMissing(t *testing.T) {
 	f := newMusicFixture(t)
 	f.scan(t, Options{Trigger: "cli"})

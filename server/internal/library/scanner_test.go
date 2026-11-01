@@ -553,6 +553,31 @@ func TestMassMissingAbortsAcrossScans(t *testing.T) {
 	}
 }
 
+// A file the walk lists but cannot stat (EIO, ESTALE or EACCES on a flaky
+// share) is not gone: it is left as it was, with a warning, like an
+// unreadable folder. Only a file that no longer exists is marked missing.
+func TestUnstattableFileIsNotMissing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permissions are not enforced")
+	}
+	e := newEnv(t, KindMovie, "folder", movieTree)
+	e.scan(Options{})
+	dir := e.path("Night of the Living Dead (1968)")
+	// Listable but not searchable: the names come back, every stat fails.
+	if err := os.Chmod(dir, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	e.clock.advance(time.Hour)
+	run := e.scan(Options{})
+	if run.Missing != 0 || !strings.Contains(run.Error, "could not be read") {
+		t.Fatalf("run = %+v; want nothing missing and a warning", run)
+	}
+	if n := e.count(`SELECT COUNT(*) FROM media_versions WHERE missing_since IS NOT NULL`); n != 0 {
+		t.Fatalf("%d versions marked missing", n)
+	}
+}
+
 // Rule 4: missing files are flagged, come back cleanly, and are only deleted
 // after the retention period.
 func TestMissingLifecycle(t *testing.T) {
