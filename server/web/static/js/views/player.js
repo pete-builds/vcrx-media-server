@@ -237,13 +237,17 @@ export async function playerView({ match, params }) {
     const playBtn = h("button", { class: "pc-btn", type: "button", "aria-label": "Play or pause" });
     const timeLbl = h("span", { class: "pc-time" });
     const bar = h("input", { class: "pc-bar", type: "range", min: "0", max: String(totalMs || 1), step: "1000", value: "0", "aria-label": "Position" });
-    const muteBtn = h("button", { class: "pc-btn", type: "button", "aria-label": "Mute" }, "Mute");
+    // No aria-label: the visible text (Mute or Unmute) is the button's name,
+    // so a screen reader hears the state that a click would change to.
+    const muteBtn = h("button", { class: "pc-btn", type: "button" }, "Mute");
     const fsBtn = h("button", { class: "pc-btn", type: "button", "aria-label": "Full screen" }, "Full screen");
     let dragging = false;
     const draw = () => {
       playBtn.textContent = video.paused ? "Play" : "Pause";
       if (!dragging) bar.value = String(pos());
       timeLbl.textContent = `${clock(dragging ? Number(bar.value) : pos())} / ${clock(totalMs)}`;
+      // A screen reader reads the position as a time, not as milliseconds.
+      bar.setAttribute("aria-valuetext", `${clock(Number(bar.value))} of ${clock(totalMs)}`);
       muteBtn.textContent = video.muted ? "Unmute" : "Mute";
     };
     playBtn.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
