@@ -37,7 +37,7 @@ import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
 import io.github.pete_builds.vcrx.tv.ui.components.CardShape
 import io.github.pete_builds.vcrx.tv.ui.components.EmptyView
 import io.github.pete_builds.vcrx.tv.ui.components.ItemCard
-import io.github.pete_builds.vcrx.tv.ui.components.Label
+import io.github.pete_builds.vcrx.tv.ui.components.SectionTitle
 import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
@@ -193,7 +193,7 @@ private const val HERO_DETAIL_DELAY_MS = 350L
 private fun HomeRowView(row: HomeRow, focus: BrowseFocus, firstRow: Boolean, onFocused: (Item) -> Unit) {
     val actions = LocalAppActions.current
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Label(row.title, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 24.dp))
+        SectionTitle(row.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 24.dp))
         LazyRow(
             modifier = Modifier.focusRestorer(),
             contentPadding = PaddingValues(horizontal = 24.dp),
