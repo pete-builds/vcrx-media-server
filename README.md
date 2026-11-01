@@ -88,6 +88,15 @@ vcrx healthcheck              what the container HEALTHCHECK runs
 
 Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its backups (before every migration, and a nightly snapshot kept for seven days, in `/config/backups`) and the settings file live in `/config`; resized artwork, Safari's HLS segments while they play, and other caches live in `/cache` and can be deleted at any time.
 
+**Restoring a backup.** Each backup is a complete database. From `deploy/`, with `/config` being `${VCRX_DATA_DIR:-./data}/config` on the host:
+
+1. `docker compose stop vcrx`.
+2. Move `vcrx.db`, `vcrx.db-wal` and `vcrx.db-shm` out of `/config`. Never leave an old `-wal` or `-shm` beside a restored database: SQLite would replay it into the restored file.
+3. Copy the backup you want (for example `backups/vcrx-nightly-20261031T201000Z.db`) to `/config/vcrx.db`.
+4. `docker compose start vcrx`. A backup from before an upgrade is migrated forward at startup, and copied to `backups` first.
+
+Anything written after the backup was taken is gone, so pick the newest one from before the problem. `TestRestoreDrill` in `server/internal/db` runs these steps against a backup taken at an older schema.
+
 ### TMDb posters and plots (optional)
 
 Set `VCRX_TMDB_API_KEY` in `.env` to your own [TMDb](https://www.themoviedb.org/settings/api) API key or API Read Access Token, then `docker compose up -d`. Two minutes after startup, and every 15 minutes after that, the server fills new movies and shows with plot, tagline, genres, cast, studio or network, content rating, TMDb rating, poster and backdrop, and episodes with titles, plots and stills. The first pass over a large library takes a while; `vcrx metadata refresh` runs it in the foreground.
