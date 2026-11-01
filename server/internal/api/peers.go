@@ -224,6 +224,11 @@ func (s *Server) peersHome(w http.ResponseWriter, r *http.Request) {
 			out = append(out, pj)
 			continue
 		}
+		if p.State == federation.StateTokenUnreadable {
+			pj.Error = p.LastError
+			out = append(out, pj)
+			continue
+		}
 		wg.Add(1)
 		go func(p federation.Peer, pj peerJSON) {
 			defer wg.Done()
@@ -294,6 +299,12 @@ func (s *Server) peerFor(w http.ResponseWriter, r *http.Request) (federation.Pee
 	}
 	if p.State == federation.StateUnlinked {
 		writeError(w, http.StatusBadGateway, "peer_unlinked", p.Name+" has ended the link with this server.")
+		return p, false
+	}
+	if p.State == federation.StateTokenUnreadable {
+		s.Log.Error("friend's server link token cannot be read", "peer", p.ID, "name", p.Name, "err", p.TokenErr)
+		writeError(w, http.StatusBadGateway, "peer_token_unreadable",
+			"The link to "+p.Name+" cannot be used: this server cannot read its link token. An admin can restore the key file or link it again.")
 		return p, false
 	}
 	return p, true

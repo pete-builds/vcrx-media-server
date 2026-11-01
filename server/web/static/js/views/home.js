@@ -32,7 +32,8 @@ export async function homeView() {
   return { el, title: "Home", hero: !!featured };
 }
 
-const PEER_STATES = { offline: "offline", checking: "not answering yet", bad_answer: "answering badly", unlinked: "ended the link" };
+const PEER_STATES = { offline: "offline", checking: "not answering yet", bad_answer: "answering badly", unlinked: "ended the link",
+  token_unreadable: "linked, but its token cannot be read here" };
 
 // friendsRow adds what linked friends' servers share: their newest titles in
 // one row, each badged with the server it lives on ("on Mark's server, 4K"),
