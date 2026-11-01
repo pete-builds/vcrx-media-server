@@ -239,8 +239,9 @@ func apply(ctx context.Context, conn *sql.DB, m migration) error {
 	return nil
 }
 
-// Backup writes a consistent copy of the live database into dir with VACUUM INTO
-// and returns its path.
+// Backup writes a consistent copy of the live database into dir with VACUUM INTO,
+// checks the copy with PRAGMA integrity_check, and returns its path. A copy
+// that fails the check is removed, so it never takes the place of good ones.
 func Backup(ctx context.Context, conn *sql.DB, dir, tag string) (string, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", err
@@ -249,7 +250,46 @@ func Backup(ctx context.Context, conn *sql.DB, dir, tag string) (string, error) 
 	if _, err := conn.ExecContext(ctx, `VACUUM INTO ?`, dest); err != nil {
 		return "", err
 	}
+	if err := checkBackup(ctx, dest); err != nil {
+		_ = os.Remove(dest)
+		return "", fmt.Errorf("the copy failed its integrity check, so it was removed: %w", err)
+	}
 	return dest, nil
+}
+
+// checkBackup is integrityCheck; tests replace it to simulate a damaged copy.
+var checkBackup = integrityCheck
+
+// integrityCheck opens the database file at path read-only and runs PRAGMA
+// integrity_check, which answers a single "ok" when the file is sound.
+func integrityCheck(ctx context.Context, path string) error {
+	conn, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(10000)")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	rows, err := conn.QueryContext(ctx, `PRAGMA integrity_check`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	var problems []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			return err
+		}
+		if line != "ok" && len(problems) < 5 {
+			problems = append(problems, line)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("integrity_check: %s", strings.Join(problems, "; "))
+	}
+	return nil
 }
 
 // Prune deletes all but the newest keep backups with tag in dir, and returns
