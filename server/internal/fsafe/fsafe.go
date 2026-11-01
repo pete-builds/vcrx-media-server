@@ -64,6 +64,13 @@ func OpenUnder(root, target string) (*os.File, os.FileInfo, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	// Checked before opening too: opening a FIFO for reading blocks until a
+	// writer appears, so a FIFO named like a sidecar would hang the caller.
+	if fi, err := os.Stat(p); err != nil {
+		return nil, nil, err
+	} else if !fi.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("%s: not a regular file", p)
+	}
 	f, err := os.Open(p)
 	if err != nil {
 		return nil, nil, err

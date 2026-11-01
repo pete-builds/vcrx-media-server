@@ -30,7 +30,7 @@ func TestNFOMarkers(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	media := filepath.Join(dir, "Show - S01E01.mkv")
-	if m, err := fromNFO(media); err != nil || len(m) != 0 {
+	if m, err := fromNFO(dir, media); err != nil || len(m) != 0 {
 		t.Fatalf("no NFO: %v %v", m, err)
 	}
 	nfo := `<?xml version="1.0"?><episodedetails><title>Pilot</title>
@@ -42,7 +42,7 @@ func TestNFOMarkers(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "Show - S01E01.nfo"), []byte(nfo), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m, err := fromNFO(media)
+	m, err := fromNFO(dir, media)
 	if err != nil {
 		t.Fatal(err)
 	}
