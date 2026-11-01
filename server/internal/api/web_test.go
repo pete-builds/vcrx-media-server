@@ -149,7 +149,7 @@ func TestSignInCookieNeedsTheClientHeader(t *testing.T) {
 func TestSessionCookieSecureBehindTrustedProxy(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	proxy, _ := netip.ParsePrefix("10.9.9.9/32")
+	proxy := netip.PrefixFrom(netip.MustParseAddr("10.9.9.9"), 32)
 	f.srv.TrustedProxies = []netip.Prefix{proxy}
 	f.h = f.srv.Handler()
 	login := map[string]any{"username": "pete", "password": "adminpass1", "cookie": true}
