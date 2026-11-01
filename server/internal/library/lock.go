@@ -14,21 +14,8 @@ import (
 // and is left alone. With no lockDir every running run is closed, as before
 // locks existed.
 func AbortOrphanedRuns(ctx context.Context, db *sql.DB, lockDir string, now time.Time) (int, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, library_id FROM scan_runs WHERE status = 'running'`)
+	runs, err := openRuns(ctx, db)
 	if err != nil {
-		return 0, err
-	}
-	type open struct{ id, lib int64 }
-	var runs []open
-	for rows.Next() {
-		var o open
-		if err := rows.Scan(&o.id, &o.lib); err != nil {
-			_ = rows.Close()
-			return 0, err
-		}
-		runs = append(runs, o)
-	}
-	if err := rows.Close(); err != nil {
 		return 0, err
 	}
 	n := 0
@@ -47,4 +34,25 @@ func AbortOrphanedRuns(ctx context.Context, db *sql.DB, lockDir string, now time
 		n++
 	}
 	return n, nil
+}
+
+type openRun struct{ id, lib int64 }
+
+// openRuns lists the runs still marked running, read in full before any is
+// updated.
+func openRuns(ctx context.Context, db *sql.DB) ([]openRun, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id, library_id FROM scan_runs WHERE status = 'running'`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var runs []openRun
+	for rows.Next() {
+		var o openRun
+		if err := rows.Scan(&o.id, &o.lib); err != nil {
+			return nil, err
+		}
+		runs = append(runs, o)
+	}
+	return runs, rows.Err()
 }
