@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
@@ -260,5 +261,69 @@ func TestFramesAndBadgesFollowThePolicy(t *testing.T) {
 		if err != nil || filepath.Base(src.path) != c.want || !src.extract {
 			t.Errorf("max resolution %q: frame from %q (%v), want %s", c.pol.MaxResolution, src.path, err, c.want)
 		}
+	}
+}
+
+// A viewer scrolling past a card cancels its thumbnail request mid-extract.
+// That is not a failure of the file: the next request must try again rather
+// than find a 24-hour failure marker. A real failure still writes one.
+func TestCancelledExtractIsNotAFailure(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := db.Open(filepath.Join(dir, "vcrx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := db.Migrate(context.Background(), conn, "", slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(dir, "Movies")
+	video := filepath.Join(root, "a", "film.mkv")
+	if err := os.MkdirAll(filepath.Dir(video), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(video, []byte("not really a video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO libraries (id, name, kind, root_path, created_at, updated_at) VALUES (1, 'Movies', 'movie', '` + root + `', 0, 0)`,
+		`INSERT INTO items (id, library_id, kind, group_key, title, sort_title, added_at, updated_at) VALUES (1, 1, 'movie', 'k', 'Film', 'Film', 0, 0)`,
+		`INSERT INTO media_versions (item_id, library_id, path, rel_path, size, mtime, height, resolution, probe_status, added_at, updated_at)
+			VALUES (1, 1, '` + video + `', 'a/film.mkv', 1, 0, 1080, '1080p', 'ok', 0, 0)`,
+	} {
+		if _, err := conn.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := func(body string) string {
+		p := filepath.Join(t.TempDir(), "ffmpeg")
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil { //nolint:gosec // a test stand-in for ffmpeg
+			t.Fatal(err)
+		}
+		return p
+	}
+	markers := func(cache string) []string {
+		m, _ := filepath.Glob(filepath.Join(cache, "1", "*.fail"))
+		return m
+	}
+
+	cache := filepath.Join(dir, "cache")
+	s := New(conn, cache, script("exec sleep 5"))
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if _, err := s.Get(ctx, all, 1, "thumb", 320, true); err == nil {
+		t.Fatal("a cancelled extract returned a thumbnail")
+	}
+	if m := markers(cache); len(m) != 0 {
+		t.Fatalf("a cancelled request left a failure marker: %v", m)
+	}
+
+	// Control: ffmpeg failing on its own is remembered.
+	s = New(conn, cache, script("echo broken >&2; exit 1"))
+	if _, err := s.Get(context.Background(), all, 1, "thumb", 320, true); err == nil {
+		t.Fatal("a failing extract returned a thumbnail")
+	}
+	if m := markers(cache); len(m) != 1 {
+		t.Fatalf("a real failure left %d markers, want 1", len(m))
 	}
 }
