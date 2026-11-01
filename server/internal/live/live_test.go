@@ -164,6 +164,10 @@ func TestRefreshReadsThePlaylistAndKeepsTheURLsPrivate(t *testing.T) {
 	if err := r.Refresh(ctx, src); err != nil {
 		t.Fatal(err)
 	}
+	if got, _ := s.Channels(ctx, true); got[0].HasLogo {
+		t.Error("Refresh fetched a logo; logos are FetchLogos, after the guides")
+	}
+	r.FetchLogos(ctx, src)
 	got, _ := s.Channels(ctx, true)
 	if names(got) != "News,Weather" || !got[0].HasLogo || got[1].HasLogo {
 		t.Fatalf("channels %+v: want both, News with its logo, Weather without (HTML is not a logo)", got)

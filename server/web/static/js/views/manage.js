@@ -141,6 +141,8 @@ function userRow(u, libraries, labels, redraw) {
   const conv4k = h("label", { class: "check" }, h("input", { type: "checkbox", checked: p.allow_4k_transcode }), "Including 4K");
   const subDl = h("label", { class: "check", title: "Spends the server's daily OpenSubtitles quota" },
     h("input", { type: "checkbox", checked: p.allow_subtitle_download }), "May download subtitles");
+  const liveTv = h("label", { class: "check", title: "Channels from the playlists under live_tv in vcrx.yaml" },
+    h("input", { type: "checkbox", checked: p.allow_live_tv }), "May watch Live TV");
   const deny = labelChecks(labels, p.deny_labels);
   const allow = labelChecks(labels, p.allow_labels);
   const labelsBlock = labels.length || deny.length
@@ -158,6 +160,7 @@ function userRow(u, libraries, labels, redraw) {
         allow_labels: checked(allow), deny_labels: checked(deny),
         allow_transcode: conv.querySelector("input").checked, allow_4k_transcode: conv4k.querySelector("input").checked,
         allow_subtitle_download: subDl.querySelector("input").checked,
+        allow_live_tv: liveTv.querySelector("input").checked,
       } });
       toast(`Saved ${u.username}`);
       redraw();
@@ -171,7 +174,7 @@ function userRow(u, libraries, labels, redraw) {
       h("div", {}, h("div", { class: "k" }, "Libraries"), h("div", { class: "checks" }, boxes)),
       h("div", {}, h("div", { class: "k" }, "Limits"), h("div", { class: "checks" }, res, rating),
         hint,
-        h("div", { class: "checks k-gap" }, conv, conv4k, subDl)),
+        h("div", { class: "checks k-gap" }, conv, conv4k, subDl, liveTv)),
       h("div", {}, labelsBlock)),
     h("div", { class: "actions" }, save));
 }

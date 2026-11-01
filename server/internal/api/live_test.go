@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -132,6 +134,9 @@ func TestLiveWatch(t *testing.T) {
 	if r := f.do("POST", watch, f.friendTok, nil); r.code != 404 {
 		t.Fatalf("watch without the grant: %d %s", r.code, r.body)
 	}
+	if r := f.do("GET", "/api/v1/me", f.friendTok, nil); !strings.Contains(string(r.body), `"live_tv":false`) {
+		t.Errorf("me without the grant: %s", r.body)
+	}
 	if r := f.do("PUT", fmt.Sprintf("/api/v1/admin/users/%d/policy", friend), f.adminTok, map[string]any{"allow_transcode": true, "allow_live_tv": true}); r.code != 204 {
 		t.Fatalf("grant: %d %s", r.code, r.body)
 	}
@@ -150,6 +155,27 @@ func TestLiveWatch(t *testing.T) {
 	}
 	if r := f.do("GET", base+"..%2F..%2Fvcrx.db", f.friendTok, nil); r.code != 404 {
 		t.Errorf("a path for a segment: %d", r.code)
+	}
+	// Browsers without HLS: one fragmented MP4, read for a moment.
+	srv := httptest.NewServer(f.h)
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+base+"stream.mp4", nil)
+	req.Header.Set("Authorization", "Bearer "+f.friendTok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := make([]byte, 64<<10)
+	n, _ := io.ReadAtLeast(resp.Body, head, 32<<10)
+	cancel()
+	_ = resp.Body.Close()
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "video/mp4" || n < 8 || string(head[4:8]) != "ftyp" || !bytes.Contains(head[:n], []byte("moof")) {
+		t.Errorf("stream.mp4: %d %q, %d bytes", resp.StatusCode, resp.Header.Get("Content-Type"), n)
+	}
+	// /me tells the web app to show Live TV.
+	if r := f.do("GET", "/api/v1/me", f.friendTok, nil); !strings.Contains(string(r.body), `"live_tv":true`) {
+		t.Errorf("me: %s", r.body)
 	}
 	// The admin turns the channel off: the stream stops for everyone.
 	if r := f.do("PUT", fmt.Sprintf("/api/v1/admin/live/channels/%d", news), f.adminTok, map[string]any{"enabled": false}); r.code != 204 {

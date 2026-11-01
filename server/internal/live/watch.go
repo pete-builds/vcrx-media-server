@@ -287,6 +287,11 @@ func (s *Streams) lookup(channel int64, run string) (*watchJob, error) {
 // Playlist returns the channel's live playlist once it lists three segments,
 // waiting up to Ready for ffmpeg to write them.
 func (s *Streams) Playlist(ctx context.Context, channel int64, run string) ([]byte, error) {
+	return s.waitPlaylist(ctx, channel, run, liveMinSegments)
+}
+
+// waitPlaylist returns the playlist once it lists min segments.
+func (s *Streams) waitPlaylist(ctx context.Context, channel int64, run string, min int) ([]byte, error) {
 	j, err := s.lookup(channel, run)
 	if err != nil {
 		return nil, err
@@ -298,7 +303,7 @@ func (s *Streams) Playlist(ctx context.Context, channel int64, run string) ([]by
 	deadline := time.Now().Add(ready)
 	for {
 		b, err := os.ReadFile(filepath.Join(j.dir, livePlaylist))
-		if err == nil && strings.Count(string(b), "#EXTINF") >= liveMinSegments {
+		if err == nil && strings.Count(string(b), "#EXTINF") >= min {
 			return b, nil
 		}
 		select {

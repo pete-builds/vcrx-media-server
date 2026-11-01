@@ -355,6 +355,7 @@ paths:
                       kind: { type: string, enum: [user, profile, token], description: "token: an invited device, which never sees the profile picker." }
                       device_expires_at: { type: integer, description: When an invited device's access ends. }
                       loan: { $ref: "#/components/schemas/BorrowerLoan" }
+                      live_tv: { type: boolean, description: "The caller may watch Live TV and there are channels to watch: show the Live TV page." }
         "401":
           description: >-
             Not signed in. A lent tape's device whose loan is over gets error loan_ended, with "Be kind, rewind."
@@ -2606,6 +2607,20 @@ paths:
         - { name: run, in: path, required: true, schema: { type: string } }
       responses:
         "200": { description: The playlist, content: { application/vnd.apple.mpegurl: {} } }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /api/v1/live/channels/{channel_id}/hls/{run}/stream.mp4:
+    get:
+      operationId: liveWatchStream
+      summary: >-
+        The same live pull as one endless fragmented MP4, for browsers without HLS (all but Safari): the init segment,
+        then each segment as it is written, starting near the live edge as soon as there is one. Asks the grant again
+        every few segments.
+      parameters:
+        - { name: channel_id, in: path, required: true, schema: { type: integer } }
+        - { name: run, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The stream, until the viewer stops or the pull ends, content: { video/mp4: {} } }
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
   /api/v1/live/channels/{channel_id}/hls/{run}/{segment}:

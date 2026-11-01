@@ -22,6 +22,7 @@ import { pickerView, drawProfileButton } from "./views/profiles.js";
 import { pairView, inviteView } from "./views/devices.js";
 import { lendView, rewindView } from "./views/lend.js";
 import { peerItemView } from "./views/peer.js";
+import { liveView, livePlayerView } from "./views/live.js";
 
 // rewind is set once a lent tape's loan is over: {title, message}.
 export const state = { me: null, server: null, libraries: [], rewind: null };
@@ -48,6 +49,8 @@ const routes = [
   [/^\/invite\/([A-Za-z2-7-]{16,64})$/, () => inviteView],
   [/^\/lend\/(\d+)$/, () => lendView],
   [/^\/rewind$/, () => rewindView],
+  [/^\/live$/, () => liveView],
+  [/^\/live\/(\d+)$/, () => livePlayerView],
 ];
 
 // An invite link opens on a device that has no session yet.
@@ -88,7 +91,7 @@ async function render() {
     match = path.match(re);
     if (match) { viewFn = fn(); break; }
   }
-  const playing = /^\/(peer\/\d+\/)?play\//.test(path);
+  const playing = /^\/(peer\/\d+\/)?play\//.test(path) || /^\/live\/\d+$/.test(path);
   document.getElementById("topbar").hidden = !state.me || playing || path === "/profiles" || path === "/rewind" || isInvite(path);
   markNav(path);
   setMenu(false);
@@ -137,6 +140,7 @@ export function drawNav() {
   const nav = document.getElementById("nav");
   const links = [h("a", { class: "nav-link", href: "#/" }, "Home")];
   for (const lib of state.libraries) links.push(h("a", { class: "nav-link", href: libraryHref(lib) }, lib.name));
+  if (state.me && state.me.live_tv) links.push(h("a", { class: "nav-link", href: "#/live" }, "Live TV"));
   if (state.me && state.me.is_admin) links.push(h("a", { class: "nav-link", href: "#/activity" }, "Activity"));
   // On a phone the top bar has no room for Settings, so the menu carries it.
   links.push(h("a", { class: "nav-link nav-phone-only", href: "#/settings" }, "Settings"));

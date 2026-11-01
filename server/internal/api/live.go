@@ -33,6 +33,7 @@ func (s *Server) liveRoutes() []route {
 		{"GET", "/api/v1/live/guide", signedIn, s.liveGuide},
 		{"POST", "/api/v1/live/channels/{channel_id}/watch", signedIn, s.liveWatch},
 		{"GET", "/api/v1/live/channels/{channel_id}/hls/{run}/index.m3u8", signedIn, s.liveWatchPlaylist},
+		{"GET", "/api/v1/live/channels/{channel_id}/hls/{run}/stream.mp4", signedIn, s.liveWatchStream},
 		{"GET", "/api/v1/live/channels/{channel_id}/hls/{run}/{segment}", signedIn, s.liveWatchSegment},
 		{"GET", "/api/v1/admin/live/sources", adminOnly, s.adminLiveSources},
 		{"POST", "/api/v1/admin/live/sources/{source_id}/refresh", adminOnly, s.adminLiveRefresh},
@@ -170,8 +171,10 @@ func (s *Server) adminLiveRefresh(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "No such playlist.")
 		return
 	}
-	// Then its guide, which matches the channels just read. Its failure is in guide_error.
+	// Then its guide, which matches the channels just read (its failure is
+	// in guide_error), then any new logos.
 	_ = s.Live.Refresher.RefreshGuide(ctx, id)
+	s.Live.Refresher.FetchLogos(ctx, id)
 	sources, err := s.Live.Store.Sources(r.Context())
 	if err != nil {
 		s.internal(w, r, err)
@@ -305,6 +308,56 @@ func (s *Server) liveWatchPlaylist(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(b)
+}
+
+// liveWatchStream is the same pull as one endless fragmented MP4, for
+// browsers that have no HLS (every one but Safari). It asks the grant again
+// every few segments.
+func (s *Server) liveWatchStream(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.liveTarget(w, r)
+	if !ok {
+		return
+	}
+	pol := info(r).Policy
+	allowed := func() bool {
+		_, err := s.Live.Store.WatchTarget(r.Context(), t.Channel, pol.CanWatchLive())
+		return err == nil
+	}
+	// Headers go out with the first bytes, once the pull has some.
+	hw := &lazyHeaders{w: w}
+	flush := func() {
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}
+	err := s.Live.Streams.Follow(r.Context(), t.Channel, r.PathValue("run"), hw, flush, allowed)
+	if hw.started {
+		return // mid-stream, an end is just the end
+	}
+	switch {
+	case errors.Is(err, live.ErrNoStream):
+		writeError(w, http.StatusNotFound, "not_found", "That stream has ended. Ask to watch the channel again.")
+	case err != nil && !errors.Is(err, context.Canceled):
+		s.Log.Warn("live: stream", "channel", t.Channel, "err", err)
+		writeError(w, http.StatusBadGateway, "stream_failed", "The channel's stream is not playing.")
+	}
+}
+
+// lazyHeaders sets the stream's headers on its first write.
+type lazyHeaders struct {
+	w       http.ResponseWriter
+	started bool
+}
+
+func (l *lazyHeaders) Write(p []byte) (int, error) {
+	if !l.started {
+		l.started = true
+		h := l.w.Header()
+		h.Set("Content-Type", "video/mp4")
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Content-Type-Options", "nosniff")
+	}
+	return l.w.Write(p)
 }
 
 func (s *Server) liveWatchSegment(w http.ResponseWriter, r *http.Request) {

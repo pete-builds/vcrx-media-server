@@ -669,3 +669,24 @@ kbd {
   .sub-timing-label { display: none; }
   .player .sub-search { right: 12px; top: 56px; }
 }
+
+/* Live TV: one row per channel, what is on now with how far in, and next. */
+.live-page .toolbar { gap: 16px; flex-wrap: wrap; }
+.live-filter { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; min-width: 220px; color: inherit; }
+.live-list { display: flex; flex-direction: column; gap: 2px; }
+.live-row { display: grid; grid-template-columns: 56px 64px minmax(120px, 1.2fr) minmax(160px, 2fr) minmax(120px, 1.4fr); align-items: center; gap: 16px; padding: 10px 12px; border-radius: var(--radius); color: inherit; text-decoration: none; }
+.live-row:hover, .live-row:focus-visible { background: rgba(255,255,255,.07); }
+.live-row[hidden] { display: none; }
+.live-num { font-family: Rajdhani, sans-serif; font-weight: 700; font-size: 18px; color: var(--orange); text-align: right; }
+.live-logo { width: 64px; height: 36px; object-fit: contain; }
+.live-logo.none { display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.08); border-radius: 4px; font-size: 12px; text-transform: uppercase; }
+.live-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.live-now { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.live-title, .live-next { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.live-ep, .live-row .dim { color: var(--muted); }
+.live-bar { height: 3px; background: rgba(255,255,255,.12); border-radius: 2px; overflow: hidden; }
+.live-bar span { display: block; height: 100%; background: var(--orange); }
+@media (max-width: 720px) {
+  .live-row { grid-template-columns: 40px 48px 1fr; }
+  .live-now, .live-next { display: none; }
+}
