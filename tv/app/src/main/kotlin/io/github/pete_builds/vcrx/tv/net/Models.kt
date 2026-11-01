@@ -52,6 +52,8 @@ data class User(
     val username: String,
     @SerialName("display_name") val displayName: String? = null,
     @SerialName("is_admin") val isAdmin: Boolean = false,
+    /** From GET /me: the user may watch Live TV and there are channels. */
+    @SerialName("live_tv") val liveTv: Boolean = false,
 )
 
 @Serializable
