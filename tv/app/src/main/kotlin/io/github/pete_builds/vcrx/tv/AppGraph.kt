@@ -75,7 +75,7 @@ class AppGraph(context: Context) {
         rewindState.value = null
     }
 
-    val api = ServerApi(httpClient, { settings.serverUrl }, json) { error ->
+    val api = ServerApi(httpClient, { settings.serverUrl }, json, tokens::token) { error ->
         tokens.clear()
         val rewound = RewindLogic.from(error)
         if (rewound != null) rewindState.value = rewound else signedOutEvents.tryEmit(Unit)
