@@ -1,7 +1,7 @@
 # Caddy in front of VCRX for access from the internet. See
 # docs/INTERNET-ACCESS.md before starting it: it does nothing useful (and
 # nothing harmful) until the router forwards a port to it.
-#   cp caddy.env.example caddy.env    (then fill it in; chmod 600)
+#   cp caddy.env.example caddy.env    (then fill in the three values; chmod 600)
 #   docker compose build && docker compose up -d
 name: vcrx-caddy
 

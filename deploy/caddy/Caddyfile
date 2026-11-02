@@ -11,11 +11,11 @@
 #   VCRX_DOMAIN   the public name, e.g. watch.example.com
 #   CADDY_BIND    this host's LAN address, the only address Caddy listens on
 #   HTTPS_PORT    the port the router forwards 443 to
-#   ACME_EMAIL    contact address for Let's Encrypt expiry mail
 {
 	# No admin API: the configuration changes only by restarting the container.
 	admin off
-	email {$ACME_EMAIL}
+	# No ACME contact address: Let's Encrypt no longer sends expiry mail, and
+	# Caddy renews on its own.
 	https_port {$HTTPS_PORT}
 	# Port 80 is not forwarded, so there is no plain-HTTP listener to redirect.
 	auto_https disable_redirects
@@ -37,7 +37,6 @@
 
 	tls {
 		issuer acme {
-			email {$ACME_EMAIL}
 			# Let's Encrypt connects to public 443, which the router forwards
 			# here: TLS-ALPN-01 is answered on this listener. Port 80 is not
 			# forwarded, so the HTTP challenge is never tried. Until the

@@ -67,7 +67,7 @@ Install on the server:
 
 ```bash
 cd ~/docker/vcrx/deploy/caddy
-cp caddy.env.example caddy.env && chmod 600 caddy.env   # fill in the four values
+cp caddy.env.example caddy.env && chmod 600 caddy.env   # fill in the three values
 mkdir -p data config && chmod 700 data
 docker compose build
 docker compose run --rm caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
