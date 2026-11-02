@@ -24,8 +24,9 @@ if hits=$(grep -nIE "$pattern" -- "${files[@]}"); then
   fail=1
 fi
 # Other private ranges (10/8, 172.16/12) and Tailscale's 100.64/10: only these
-# example values and whole-range names may appear.
-allowed='^(10\.0\.0\.0/8|10\.0\.0\.5|10\.0\.2\.2|10\.9\.9\.9|172\.16\.0\.0/12|100\.64\.0\.0/10|100\.101\.102\.103)$'
+# example values and whole-range names may appear. The first and last address of
+# each range are allowed too: the TV's private-address test checks both edges.
+allowed='^(10\.0\.0\.0/8|10\.0\.0\.5|10\.0\.2\.2|10\.9\.9\.9|10\.255\.255\.255|172\.16\.0\.0/12|172\.16\.0\.1|172\.31\.255\.255|100\.64\.0\.0/10|100\.64\.0\.1|100\.101\.102\.103|100\.127\.255\.255)$'
 other='(^|[^0-9.])(10\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7]))\.[0-9]{1,3}\.[0-9]{1,3}(/[0-9]{1,2})?'
 if hits=$(grep -noIE "$other" -- "${files[@]}" | sed -E 's/:[^0-9]?([0-9.\/]+)$/:\1/' | awk -F: -v ok="$allowed" '{ a = $NF; if (a !~ ok) print }') && [ -n "$hits" ]; then
   echo "check-private: private or Tailscale address that is not a documentation example:" >&2
