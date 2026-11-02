@@ -22,8 +22,10 @@ server_name: VCRX
 # proxy's own address, and only that. Its X-Forwarded-For then names the
 # client. A proxy NOT listed here makes every visitor "unknown" (no LAN rights,
 # no sign-in without a password) and logs a warning, so a missing entry fails
-# safe. Never list 0.0.0.0/0 (refused at start) or a whole LAN range.
-#trusted_proxies: [127.0.0.1, "::1"]
+# safe. Never list 0.0.0.0/0 (refused at start), a whole LAN range, or
+# 127.0.0.1: local tools such as deploy.sh call VCRX from there and would lose
+# their LAN rights. deploy/caddy dials from 127.0.0.2 for exactly this reason.
+#trusted_proxies: [127.0.0.2]
 #allowed_hosts: [watch.example.com]
 
 # Video a client cannot decode is transcoded to H.264 on the CPU, and 4K is

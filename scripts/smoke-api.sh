@@ -10,6 +10,9 @@
 #
 # Needs curl and jq. Leaves one finished playback session in the activity log and
 # a resume point on the movie it picked; pass VCRX_KEEP_POSITION=0 to clear it.
+# VCRX_REQUIRE_ADMIN=1 fails the run when the admin steps cannot run (the user is
+# not an admin, or the server does not see this client as on the LAN) instead of
+# skipping them; deploy.sh sets it, since it signs in as its admin from the host.
 set -euo pipefail
 
 url="${VCRX_URL:?set VCRX_URL, e.g. http://192.168.1.20:3750}"
@@ -18,6 +21,10 @@ pass="${VCRX_PASSWORD:?set VCRX_PASSWORD}"
 keep="${VCRX_KEEP_POSITION:-1}"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+admin_skipped() {
+  [ "${VCRX_REQUIRE_ADMIN:-0}" = 1 ] && fail "admin steps refused: not an admin, or the server does not see this client as on the LAN (a trusted_proxies entry covering this address?)"
+  echo "skipped (not an admin, or not on the LAN)"
+}
 tmp_headers=$(mktemp)
 trap 'rm -f "$tmp_headers"' EXIT
 step() { printf '%-34s' "$1"; }
@@ -126,7 +133,7 @@ step "activity log"
 if hist=$(api "$url/api/v1/admin/activity/sessions?limit=2" 2>/dev/null); then
   echo "$hist" | jq -c '[.sessions[] | {decision, state, device_name, last_position_ms}]'
 else
-  echo "skipped (not an admin, or not on the LAN)"
+  admin_skipped
 fi
 
 step "web app"
@@ -194,7 +201,7 @@ if now=$(api "$url/api/v1/admin/activity/now" 2>/dev/null); then
   users=$(api "$url/api/v1/admin/activity/users" | jq '.users | length')
   echo "ok ($(echo "$now" | jq .stream_count) playing, $plays plays this week, $users users)"
 else
-  echo "skipped (not an admin, or not on the LAN)"
+  admin_skipped
 fi
 
 api -X POST "$url/api/v1/auth/logout" >/dev/null

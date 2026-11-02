@@ -1,7 +1,7 @@
 # Caddy in front of VCRX for access from the internet. See
 # docs/INTERNET-ACCESS.md before starting it: it does nothing useful (and
 # nothing harmful) until the router forwards a port to it.
-#   cp caddy.env.example caddy.env    (then fill it in; chmod 600)
+#   cp caddy.env.example caddy.env    (then fill in the three values; chmod 600)
 #   docker compose build && docker compose up -d
 name: vcrx-caddy
 
@@ -10,8 +10,8 @@ services:
     build: .
     image: vcrx-caddy:local
     container_name: vcrx-caddy
-    # Host networking so Caddy reaches VCRX on loopback, and VCRX sees the
-    # proxy as 127.0.0.1, the only address it is told to believe. Caddy binds
+    # Host networking so Caddy reaches VCRX on loopback, dialling from
+    # 127.0.0.2 (Caddyfile local_address), the only address VCRX believes. Caddy binds
     # CADDY_BIND:HTTPS_PORT only, never the Tailscale address (whose 443 is
     # taken by tailscale serve) and never port 80.
     network_mode: host

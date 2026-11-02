@@ -67,7 +67,7 @@ Install on the server:
 
 ```bash
 cd ~/docker/vcrx/deploy/caddy
-cp caddy.env.example caddy.env && chmod 600 caddy.env   # fill in the four values
+cp caddy.env.example caddy.env && chmod 600 caddy.env   # fill in the three values
 mkdir -p data config && chmod 700 data
 docker compose build
 docker compose run --rm caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
@@ -75,7 +75,8 @@ docker compose up -d
 ```
 
 Caddy runs as an unprivileged user with every capability dropped, a read-only root, 256 MiB and 128 processes. It
-uses host networking so it reaches VCRX on loopback and VCRX sees it as `127.0.0.1`.
+uses host networking so it reaches VCRX on loopback, and it dials from `127.0.0.2`, an address of its own, so VCRX
+can trust exactly Caddy.
 
 ## 3. Certificates
 
@@ -98,9 +99,13 @@ limit of 5 duplicate certificates a week).
 In `deploy/data/config/vcrx.yaml`:
 
 ```yaml
-trusted_proxies: [127.0.0.1, "::1"]   # Caddy, and nothing else
+trusted_proxies: [127.0.0.2]          # Caddy's source address, and nothing else
 allowed_hosts: [watch.example.com]    # VCRX answers 421 to any other name
 ```
+
+Do not list `127.0.0.1`: a trusted proxy that sends no `X-Forwarded-For` is never read as local, so every tool on
+the host that calls VCRX directly (deploy.sh's "is anyone watching" check, the smoke test, admin from a shell) would
+lose its LAN rights, and deploy.sh would refuse to run.
 
 Restart VCRX. Two checks fail safe if this is wrong: a proxy that is not listed makes every visitor "unknown" (no
 LAN rights, no sign-in without a password, logged once as a warning), and a `trusted_proxies` of `0.0.0.0/0` stops
