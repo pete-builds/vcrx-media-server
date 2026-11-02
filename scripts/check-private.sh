@@ -33,5 +33,49 @@ if hits=$(grep -noIE "$other" -- "${files[@]}" | sed -E 's/:[^0-9]?([0-9.\/]+)$/
   echo "$hits" >&2
   fail=1
 fi
+# Screenshots are binary, so the greps above skip them. A script can check the
+# text an image carries: metadata (EXIF, XMP, PNG text chunks) names hosts,
+# paths and devices, so none may be present, and no address may appear in its
+# bytes. What the picture shows is the manual check in docs/screenshots/README.md.
+shots=()
+for f in "${files[@]}"; do
+  case "$f" in docs/screenshots/*.webp | docs/screenshots/*.png | docs/screenshots/*.jpg | docs/screenshots/*.jpeg) shots+=("$f") ;; esac
+done
+if [ "${#shots[@]}" -gt 0 ]; then
+  if hits=$(LC_ALL=C grep -laE "$pattern|$other" -- "${shots[@]}"); then
+    echo "check-private: an address or home path inside a screenshot's bytes:" >&2
+    echo "$hits" >&2
+    fail=1
+  fi
+  if ! python3 - "${shots[@]}" << 'PY'; then
+import struct, sys
+bad = 0
+for path in sys.argv[1:]:
+    b = open(path, "rb").read()
+    found = []
+    if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
+        i = 12
+        while i + 8 <= len(b):
+            tag, n = b[i:i + 4], struct.unpack("<I", b[i + 4:i + 8])[0]
+            if tag in (b"EXIF", b"XMP "):
+                found.append(tag.decode())
+            i += 8 + n + (n & 1)
+    elif b[:8] == b"\x89PNG\r\n\x1a\n":
+        i = 8
+        while i + 8 <= len(b):
+            n, tag = struct.unpack(">I", b[i:i + 4])[0], b[i + 4:i + 8]
+            if tag in (b"tEXt", b"iTXt", b"zTXt", b"eXIf"):
+                found.append(tag.decode())
+            i += 12 + n
+    else:
+        found.append("not WebP or PNG (JPEG carries EXIF; export WebP or PNG)")
+    if found:
+        print(f"check-private: {path}: metadata {', '.join(found)}; strip it before committing", file=sys.stderr)
+        bad = 1
+sys.exit(bad)
+PY
+    fail=1
+  fi
+fi
 [ "$fail" -eq 0 ] || exit 1
 echo "check-private: ${#files[@]} files clean"
