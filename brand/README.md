@@ -35,3 +35,4 @@ This kit replaced the orange one (VCRX Orange #FF5F00) on 2026-11-02. `colors.js
 - `generated/`: the wordmark on black for the README.
 
 On screens, text on the green is black: #008F11 gives black text 4.9:1 (WCAG AA) and white only 4.3:1.
+Buttons never fill with the full green. A button the pointer or the remote is on takes a dark green tint (`#002B05`, the green at about 30% over black) with a green ring and white text; solid green is kept for small marks such as progress bars, badges and the nav underline.

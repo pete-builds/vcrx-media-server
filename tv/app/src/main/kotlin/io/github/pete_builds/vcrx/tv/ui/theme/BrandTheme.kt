@@ -27,6 +27,8 @@ import io.github.pete_builds.vcrx.tv.R
 // focus, accents, primary actions and headings. Body text is white and secondary
 // text light gray, as on the brand spec board. No other hues.
 val Accent = Color(0xFF008F11) // VCRX Green, brand/colors.json
+/** A focused or pressed control: the green at about 30% over black. Controls never fill with the full green. */
+val AccentTint = Color(0xFF002B05)
 val Black = Color(0xFF000000)
 val White = Color(0xFFFFFFFF)
 val Gray = Color(0xFFA3A3A3)
