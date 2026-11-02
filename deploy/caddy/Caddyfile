@@ -58,6 +58,22 @@
 		max_size 10MB
 	}
 
+	# Compress the web app and API answers (JS and CSS shrink about 70%, which
+	# a friend on a slow line notices). Only text types are listed, so video
+	# (video/*), HLS playlists (application/vnd.apple.mpegurl), segments,
+	# images, fonts and audio pass through byte for byte and Range requests
+	# keep working.
+	encode zstd gzip {
+		match {
+			header Content-Type text/*
+			header Content-Type application/json*
+			header Content-Type application/javascript*
+			header Content-Type application/manifest+json*
+			header Content-Type application/yaml*
+			header Content-Type image/svg+xml*
+		}
+	}
+
 	# Never reachable from the internet, whatever VCRX itself would answer:
 	# admin (LAN only in VCRX as well), the Radarr and Sonarr webhook (its
 	# token travels in the query string), and inbound server links from
