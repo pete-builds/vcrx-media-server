@@ -139,9 +139,10 @@ type Server struct {
 	peerSessions peerSessionTable
 }
 
-// SetUpFederation turns on linking with friends' servers.
-func (s *Server) SetUpFederation(g federation.Guard) {
-	s.Peers = &federation.Store{DB: s.DB}
+// SetUpFederation turns on linking with friends' servers. keyPath is the key
+// file that seals their tokens at rest, outside the database.
+func (s *Server) SetUpFederation(g federation.Guard, keyPath string) {
+	s.Peers = &federation.Store{DB: s.DB, Key: &federation.TokenKey{Path: keyPath}}
 	s.PeerClient = federation.NewClient(g, "VCRX/"+s.Version)
 	s.PeerCache = &federation.Cache{TTL: 5 * time.Minute, Fetch: s.fetchPeerCatalog}
 }

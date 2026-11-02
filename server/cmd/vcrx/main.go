@@ -290,6 +290,7 @@ func serve() error {
 	// Video transcodes cost whole cores and have their own, smaller limit.
 	rmx := remux.New(cfg.FFmpegPath, cfg.FFprobePath, 4, log.With("component", "remux"))
 	rmx.SetMaxTranscodes(cfg.MaxTranscodes)
+	rmx.SetMaxTranscodeHeight(cfg.MaxTranscodeHeight)
 	pb := &playback.Service{DB: a.db, Catalog: cat, CanRemux: true, CanTranscode: canTranscode(ctx, rmx, cfg.MaxTranscodes, log)}
 	// Safari plays converted streams only as HLS, written to disk per session
 	// under the same slot limits.
@@ -438,7 +439,10 @@ func serve() error {
 	srv.Loans = &loans.Store{DB: a.db, Invites: srv.Invites}
 	// Friends' servers: link with a server invite, stream from each other,
 	// never copy (milestone 9, item 3).
-	srv.SetUpFederation(federation.Guard{AllowLoopback: cfg.PeerAllowLoopback})
+	// Their tokens are sealed with a key file in the config folder, never in
+	// the database, so the database backups carry no usable token.
+	srv.SetUpFederation(federation.Guard{AllowLoopback: cfg.PeerAllowLoopback}, filepath.Join(cfg.ConfigDir, federation.TokenKeyFile))
+	checkPeerTokens(ctx, log, srv.Peers)
 	if cfg.PeerAllowLoopback {
 		log.Warn("peer_allow_loopback is on: friends' servers may be linked on this machine's loopback address; for development only")
 	}
@@ -677,6 +681,31 @@ func nightlyDue(dir string, now time.Time) bool {
 	sort.Strings(matches)
 	newest := strings.TrimPrefix(filepath.Base(matches[len(matches)-1]), "vcrx-nightly-")
 	return newest < now.UTC().Format("20060102")
+}
+
+// checkPeerTokens seals any friend's server token stored before tokens were
+// sealed, and names every link whose token this server cannot open. Neither
+// stops the server: a token that could not be sealed still works, and a link
+// that cannot be opened is kept and shown to the admin as unusable.
+func checkPeerTokens(ctx context.Context, log *slog.Logger, peers *federation.Store) {
+	n, err := peers.SealLegacy(ctx)
+	if err != nil {
+		log.Error("could not seal every friend's server token; those stay as they were and still work", "err", err)
+	}
+	if n > 0 {
+		log.Info("sealed friends' server tokens stored before sealing", "count", n)
+	}
+	list, err := peers.List(ctx)
+	if err != nil {
+		log.Error("friends' servers", "err", err)
+		return
+	}
+	for _, p := range list {
+		if p.State == federation.StateTokenUnreadable {
+			log.Error("friend's server link is unusable: its token cannot be read; restore the key file or unlink and link again",
+				"peer", p.ID, "name", p.Name, "key", peers.Key.Path, "err", p.TokenErr)
+		}
+	}
 }
 
 func maybeNightlyBackup(ctx context.Context, log *slog.Logger, conn *sql.DB, dir string, now time.Time) {

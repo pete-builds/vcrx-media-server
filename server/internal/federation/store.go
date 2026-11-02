@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -21,10 +22,17 @@ const (
 	// StateUnlinked: the peer no longer accepts this server's token. Its
 	// admin revoked the link, or it expired.
 	StateUnlinked = "unlinked"
+	// StateTokenUnreadable: this server cannot open its own sealed token for
+	// the peer (the key file is missing or is not the one it was sealed
+	// with). The row is kept; the link is unusable until the key is restored
+	// or the peer is unlinked and linked again. It is never stored, only
+	// reported.
+	StateTokenUnreadable = "token_unreadable"
 )
 
 // Peer is a friend's server this one has linked to. Token is never sent to
-// clients.
+// clients. The store keeps it sealed (tokenkey.go); a Peer always carries it
+// opened, or empty with State StateTokenUnreadable and TokenErr saying why.
 type Peer struct {
 	ID            int64   `json:"id"`
 	Name          string  `json:"name"`
@@ -38,11 +46,13 @@ type Peer struct {
 	LastOKAt      *int64  `json:"last_ok_at"`
 	State         string  `json:"state"`
 	LastError     *string `json:"last_error"`
+	TokenErr      error   `json:"-"`
 }
 
-// Store keeps the linked peers.
+// Store keeps the linked peers. Key seals their tokens at rest.
 type Store struct {
 	DB  *sql.DB
+	Key *TokenKey
 	Now func() time.Time
 }
 
@@ -55,9 +65,13 @@ func (s *Store) now() int64 {
 
 // Add records a link after the peer accepted this server's invite.
 func (s *Store) Add(ctx context.Context, p Peer) (Peer, error) {
+	sealed, err := s.Key.Seal(p.Token, p.BaseURL)
+	if err != nil {
+		return Peer{}, fmt.Errorf("sealing the friend's server token: %w", err)
+	}
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO peers (name, base_url, remote_name, token, expires_at, created_by, created_at,
 			last_checked_at, last_ok_at, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.Name, p.BaseURL, p.RemoteName, p.Token, p.ExpiresAt, p.CreatedBy, s.now(), s.now(), s.now(), StateOnline)
+		p.Name, p.BaseURL, p.RemoteName, sealed, p.ExpiresAt, p.CreatedBy, s.now(), s.now(), s.now(), StateOnline)
 	if err != nil {
 		return Peer{}, err
 	}
@@ -67,16 +81,89 @@ func (s *Store) Add(ctx context.Context, p Peer) (Peer, error) {
 
 const peerCols = `id, name, base_url, remote_name, token, expires_at, created_by, created_at, last_checked_at, last_ok_at, state, last_error`
 
-func scanPeer(row interface{ Scan(...any) error }) (Peer, error) {
+func (s *Store) scanPeer(row interface{ Scan(...any) error }) (Peer, error) {
 	var p Peer
 	err := row.Scan(&p.ID, &p.Name, &p.BaseURL, &p.RemoteName, &p.Token, &p.ExpiresAt, &p.CreatedBy, &p.CreatedAt, &p.LastCheckedAt,
 		&p.LastOKAt, &p.State, &p.LastError)
-	return p, err
+	if err != nil {
+		return p, err
+	}
+	tok, terr := s.Key.Open(p.Token, p.BaseURL)
+	if terr != nil {
+		msg := TokenProblem(terr)
+		p.Token, p.State, p.LastError, p.TokenErr = "", StateTokenUnreadable, &msg, terr
+		return p, nil
+	}
+	p.Token = tok
+	return p, nil
+}
+
+// TokenProblem says, for an admin, why a peer's token cannot be opened and
+// what to do about it.
+func TokenProblem(err error) string {
+	if errors.Is(err, ErrKeyMissing) {
+		return "This server's key file for friends' server links (" + TokenKeyFile + " in the config folder) is missing, " +
+			"so this link cannot be used. Restore the file, or unlink this server and link it again."
+	}
+	return "This link's token cannot be decrypted with this server's key file for friends' server links (" + TokenKeyFile +
+		" in the config folder). Restore the key it was sealed with, or unlink this server and link it again."
+}
+
+// SealLegacy seals every token stored before tokens were sealed, and returns
+// how many it sealed. Each row is rewritten only if its token is unchanged,
+// so nothing is lost to a concurrent change; one that fails is left as it
+// is, still usable, and reported.
+func (s *Store) SealLegacy(ctx context.Context) (int, error) {
+	todo, err := s.legacyTokens(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	var errs []error
+	for _, l := range todo {
+		sealed, err := s.Key.Seal(l.tok, l.base)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("peer %d: %w", l.id, err))
+			continue
+		}
+		res, err := s.DB.ExecContext(ctx, `UPDATE peers SET token = ? WHERE id = ? AND token = ?`, sealed, l.id, l.tok)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("peer %d: %w", l.id, err))
+			continue
+		}
+		if c, _ := res.RowsAffected(); c == 1 {
+			n++
+		}
+	}
+	return n, errors.Join(errs...)
+}
+
+type legacyToken struct {
+	id        int64
+	base, tok string
+}
+
+// legacyTokens are the rows whose token is not sealed yet.
+func (s *Store) legacyTokens(ctx context.Context) ([]legacyToken, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, base_url, token FROM peers WHERE token NOT LIKE ?`, sealedPrefix+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []legacyToken
+	for rows.Next() {
+		var l legacyToken
+		if err := rows.Scan(&l.id, &l.base, &l.tok); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 // Get returns one peer.
 func (s *Store) Get(ctx context.Context, id int64) (Peer, error) {
-	p, err := scanPeer(s.DB.QueryRowContext(ctx, `SELECT `+peerCols+` FROM peers WHERE id = ?`, id))
+	p, err := s.scanPeer(s.DB.QueryRowContext(ctx, `SELECT `+peerCols+` FROM peers WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Peer{}, ErrNotFound
 	}
@@ -92,7 +179,7 @@ func (s *Store) List(ctx context.Context) ([]Peer, error) {
 	defer func() { _ = rows.Close() }()
 	out := []Peer{}
 	for rows.Next() {
-		p, err := scanPeer(rows)
+		p, err := s.scanPeer(rows)
 		if err != nil {
 			return nil, err
 		}

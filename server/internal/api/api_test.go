@@ -164,7 +164,7 @@ func newFixture(t *testing.T) *fixture {
 	f.srv.Invites, f.srv.Pairings, f.srv.PairLimiter = &invites.Store{DB: conn}, &invites.Pairings{}, auth.NewLimiter(10, 15*time.Minute)
 	f.srv.Loans = &loans.Store{DB: conn, Invites: f.srv.Invites}
 	// Friends' servers. Tests run both servers on loopback.
-	f.srv.SetUpFederation(federation.Guard{AllowLoopback: true})
+	f.srv.SetUpFederation(federation.Guard{AllowLoopback: true}, filepath.Join(dir, federation.TokenKeyFile))
 	// httptest requests carry Host example.com; a real name must be allowed.
 	f.srv.AllowedHosts = []string{"example.com"}
 	f.h = f.srv.Handler()

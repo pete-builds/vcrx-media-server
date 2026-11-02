@@ -777,7 +777,8 @@ paths:
       operationId: getConvertedStream
       summary: >-
         The file as fragmented MP4 from start_ms: video copied, or for a transcode session re-encoded to H.264
-        (High profile, 8-bit 4:2:0, scaled down to fit the device's reported size and never up, a keyframe every
+        (High profile, 8-bit 4:2:0, scaled down to fit the device's reported size and the server's cap
+        (VCRX_MAX_TRANSCODE_HEIGHT, default 1080, so 1920x1080) and never up, a keyframe every
         2 s, HDR tone mapped to SDR for a device that reports no HDR when ffmpeg has zscale); audio copied when the
         device decodes a track MP4 can carry, otherwise the default track converted to stereo AAC. Not seekable by
         byte range; seek by asking the seek endpoint for a new stream. audio picks a track by its stream index. 503
@@ -997,7 +998,7 @@ paths:
                       properties:
                         id: { type: integer }
                         name: { type: string }
-                        state: { type: string, enum: [online, offline, checking, bad_answer, unlinked] }
+                        state: { type: string, enum: [online, offline, checking, bad_answer, unlinked, token_unreadable] }
                         error: { type: [string, "null"] }
                         count: { type: integer }
                   items: { type: array, items: { $ref: "#/components/schemas/PeerItem" } }
@@ -2934,7 +2935,7 @@ components:
         created_at: { type: integer }
         last_checked_at: { type: [integer, "null"] }
         last_ok_at: { type: [integer, "null"] }
-        state: { type: string, enum: [unknown, online, offline, bad_answer, unlinked] }
+        state: { type: string, enum: [unknown, online, offline, bad_answer, unlinked, token_unreadable] }
         last_error: { type: [string, "null"] }
     PeerItem:
       type: object

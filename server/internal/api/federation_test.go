@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/json"
@@ -134,6 +135,16 @@ func newPeerPair(t *testing.T, scope map[string]any, setup ...func(b *fixture)) 
 	return p
 }
 
+// token is A's token as B presents it, opened from B's sealed copy.
+func (p *peerPair) token(t *testing.T) string {
+	t.Helper()
+	peer, err := p.b.srv.Peers.Get(context.Background(), p.peerID)
+	if err != nil || peer.Token == "" {
+		t.Fatalf("B's peer: %+v %v", peer, err)
+	}
+	return peer.Token
+}
+
 type peerHome struct {
 	Peers []struct {
 		ID    int64
@@ -224,10 +235,7 @@ func TestFederationLinkBrowseAndPlay(t *testing.T) {
 	t.Parallel()
 	p := newPeerPair(t, nil)
 	// Both admins see the link, and B's list never carries A's token.
-	var token string
-	if err := p.b.db.QueryRow(`SELECT token FROM peers WHERE id = ?`, p.peerID).Scan(&token); err != nil {
-		t.Fatal(err)
-	}
+	token := p.token(t)
 	r := p.b.do("GET", "/api/v1/admin/peers", p.b.adminTok, nil)
 	if r.code != 200 || !strings.Contains(string(r.body), `"name":"Mark's server"`) || !strings.Contains(string(r.body), `"remote_name":"Mark's VCRX"`) ||
 		strings.Contains(string(r.body), token) {
@@ -614,10 +622,7 @@ func TestNoPeerRouteServesAWholeFile(t *testing.T) {
 func TestFederationTokensAreHashed(t *testing.T) {
 	t.Parallel()
 	p := newPeerPair(t, nil)
-	var token string
-	if err := p.b.db.QueryRow(`SELECT token FROM peers WHERE id = ?`, p.peerID).Scan(&token); err != nil {
-		t.Fatal(err)
-	}
+	token := p.token(t)
 	for what, secret := range map[string]string{"the server invite": p.secret, "the session token": token} {
 		if dbContains(t, p.a, strings.ToLower(secret)) {
 			t.Errorf("A's database holds %s in the clear", what)
@@ -636,10 +641,18 @@ func TestFederationTokensAreHashed(t *testing.T) {
 	if n != 1 {
 		t.Fatal("A does not keep the session token's SHA-256")
 	}
-	// Control: the scan finds the token where it is kept in the clear, on
-	// the watching side, which has to present it.
-	if !dbContains(t, p.b, strings.ToLower(token)) {
-		t.Fatal("control: the database scan cannot find the token on B")
+	// The watching side has to present the token, so it cannot hash it, but
+	// it keeps it sealed with a key file outside the database.
+	if dbContains(t, p.b, strings.ToLower(token)) {
+		t.Error("B's database holds the token in the clear")
+	}
+	// Control: the scan finds what B does store, the sealed form.
+	var stored string
+	if err := p.b.db.QueryRow(`SELECT token FROM peers WHERE id = ?`, p.peerID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if !federation.IsSealed(stored) || !dbContains(t, p.b, strings.ToLower(stored)) {
+		t.Fatalf("control: the database scan cannot find B's stored token %q", stored)
 	}
 }
 
@@ -1185,4 +1198,55 @@ func TestFederationConvertedAndHLSThroughTheProxy(t *testing.T) {
 	}
 	_, r = p.start(p.b.adminTok, map[string]any{"item_id": p.a.episodeID, "capabilities": safariCaps()})
 	wantError(t, "HLS once converting is off for B", r, 403, "playback_refused")
+}
+
+// A peer token is sealed with a key file outside the database. Without that
+// file the link is kept and shown as unusable, every peer route says why,
+// and the admin can still unlink it; nothing is dropped and nothing crashes.
+func TestFederationMissingTokenKeyKeepsTheLink(t *testing.T) {
+	t.Parallel()
+	p := newPeerPair(t, nil)
+	keyPath := filepath.Join(fixtureDir(p.b), federation.TokenKeyFile)
+	fi, err := os.Stat(keyPath)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("key file: %v %v", fi, err)
+	}
+	// The database is restored somewhere the key file never went.
+	if err := os.Remove(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	p.b.srv.Peers.Key = &federation.TokenKey{Path: keyPath}
+
+	r := p.b.do("GET", "/api/v1/admin/peers", p.b.adminTok, nil)
+	var list struct {
+		Peers []struct {
+			ID        int64
+			State     string
+			LastError *string `json:"last_error"`
+		}
+	}
+	r.json(t, &list)
+	if r.code != 200 || len(list.Peers) != 1 || list.Peers[0].State != "token_unreadable" || list.Peers[0].LastError == nil ||
+		!strings.Contains(*list.Peers[0].LastError, federation.TokenKeyFile) {
+		t.Fatalf("B's peers without the key: %d %s", r.code, r.body)
+	}
+	h, _ := p.home(p.b.adminTok)
+	if len(h.Peers) != 1 || h.Peers[0].State != "token_unreadable" {
+		t.Fatalf("Home without the key: %+v", h.Peers)
+	}
+	r = p.b.do("GET", fmt.Sprintf("/api/v1/peers/%d/items/1", p.peerID), p.b.adminTok, nil)
+	wantError(t, "a peer route without the key", r, 502, "peer_token_unreadable")
+	var n int
+	_ = p.b.db.QueryRow(`SELECT COUNT(*) FROM peers WHERE token LIKE 'sealed:v1:%'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("the sealed row is gone or changed: %d", n)
+	}
+	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
+		t.Fatalf("reading peers created a new key file: %v", err)
+	}
+	// The admin can still unlink it; there is no token to tell A with.
+	r = p.b.do("DELETE", fmt.Sprintf("/api/v1/admin/peers/%d", p.peerID), p.b.adminTok, nil)
+	if r.code != 200 || !strings.Contains(string(r.body), `"peer_notified":false`) {
+		t.Fatalf("unlink without the key: %d %s", r.code, r.body)
+	}
 }

@@ -373,3 +373,49 @@ func TestToneMapHDR(t *testing.T) {
 		})
 	}
 }
+
+// A transcode is capped at 1080p by default, whatever the client takes:
+// libx264 on a CPU is often slower than real time at 4K. The cap fits the
+// picture inside 1920x1080 with its shape kept, the config moves or removes
+// it, and copied video (remux) is never scaled.
+func TestTranscodeHeightCap(t *testing.T) {
+	fourK := func(w, h, maxW, maxH int) Options {
+		return Options{Path: "f", AudioIndex: -1, Video: &Video{SrcWidth: w, SrcHeight: h, MaxWidth: maxW, MaxHeight: maxH}}
+	}
+	cases := []struct {
+		name   string
+		height int // -1 keeps New's default
+		o      Options
+		want   string
+	}{
+		{"4K to a 4K client, default cap", -1, fourK(3840, 2160, 3840, 2160), "scale=1920:1080,"},
+		{"4K scope to a 4K client, shape kept", -1, fourK(3840, 1600, 3840, 2160), "scale=1920:800,"},
+		{"4K to a client with no limits", -1, fourK(3840, 2160, 0, 0), "scale=1920:1080,"},
+		{"the client's smaller limit still binds", -1, fourK(3840, 2160, 1280, 720), "scale=1280:720,"},
+		{"a 720p source is never scaled up", -1, fourK(1280, 720, 3840, 2160), "scale=1280:720,"},
+		{"unknown size, left to ffmpeg within the cap", -1, Options{Path: "f", AudioIndex: -1, Video: &Video{}},
+			`scale=min(iw\,1920):min(ih\,1080):force_original_aspect_ratio=decrease`},
+		{"config 2160", 2160, fourK(3840, 2160, 3840, 2160), "scale=3840:2160,"},
+		{"config 720", 720, fourK(3840, 2160, 3840, 2160), "scale=1280:720,"},
+		{"config 0 is no cap", 0, fourK(3840, 2160, 3840, 2160), "scale=3840:2160,"},
+	}
+	for _, c := range cases {
+		s := New("ffmpeg", "ffprobe", 1, nil)
+		if c.height >= 0 {
+			s.SetMaxTranscodeHeight(c.height)
+		}
+		if a := strings.Join(s.args(c.o), " "); !strings.Contains(a, c.want) {
+			t.Errorf("%s: args lack %q:\n%s", c.name, c.want, a)
+		}
+	}
+	// The default cap also sets the bitrate for 1080p, not 4K.
+	s := New("ffmpeg", "ffprobe", 1, nil)
+	if a := strings.Join(s.args(fourK(3840, 2160, 3840, 2160)), " "); !strings.Contains(a, "-maxrate 10000000 ") {
+		t.Errorf("1080p bitrate: %s", a)
+	}
+	// Remux of a 4K file copies the video: no scaling, no cap.
+	a := strings.Join(s.args(Options{Path: "f", AudioIndex: 1, TranscodeAudio: true, HEVC: true}), " ")
+	if !strings.Contains(a, "-c:v copy") || strings.Contains(a, "scale=") || strings.Contains(a, "libx264") {
+		t.Errorf("remux scaled the video: %s", a)
+	}
+}

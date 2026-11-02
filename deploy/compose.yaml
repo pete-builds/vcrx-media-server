@@ -11,7 +11,9 @@ services:
       context: ..
       args:
         VERSION: ${VCRX_VERSION:-dev}
-    image: vcrx-media-server:local
+    # Built here by default; deploy.sh --release vX.Y.Z runs the released image
+    # from ghcr.io instead, recorded as VCRX_IMAGE in .env.
+    image: ${VCRX_IMAGE:-vcrx-media-server:local}
     container_name: vcrx
     # Host networking: the server sees real client IPs (activity history and the
     # LAN-only admin check depend on them) and takes no Docker network.
@@ -22,6 +24,15 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    # Limits, so a transcode cannot starve the rest of the host. Measured with
+    # the image's ffmpeg on a 12-core host (2026-11-01): a 4K HDR film tone
+    # mapped to 1080p peaks at about 1.6 GiB, 11 cores and 83 processes; a
+    # remux at 56 MiB. 6g fits VCRX_MAX_TRANSCODES=2 with room to spare. CPUs
+    # are unlimited by default (Docker refuses more than the host has); set
+    # VCRX_CPUS a core or two below the host's count to keep some for others.
+    cpus: ${VCRX_CPUS:-0}
+    mem_limit: ${VCRX_MEM_LIMIT:-6g}
+    pids_limit: ${VCRX_PIDS_LIMIT:-512}
     tmpfs:
       - /tmp:size=64m
     environment:
@@ -31,6 +42,7 @@ services:
       VCRX_LOG_LEVEL: ${VCRX_LOG_LEVEL:-info}
       VCRX_PROBE_CONCURRENCY: ${VCRX_PROBE_CONCURRENCY:-4}
       VCRX_MAX_TRANSCODES: ${VCRX_MAX_TRANSCODES:-2}
+      VCRX_MAX_TRANSCODE_HEIGHT: ${VCRX_MAX_TRANSCODE_HEIGHT:-}
       VCRX_TMDB_API_KEY: ${VCRX_TMDB_API_KEY:-}
       VCRX_TMDB_LANGUAGE: ${VCRX_TMDB_LANGUAGE:-en-US}
       VCRX_TMDB_COUNTRY: ${VCRX_TMDB_COUNTRY:-US}
