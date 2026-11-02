@@ -77,6 +77,18 @@ func (s *Server) adminScans(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"scans": scans})
 }
 
+// adminUnplayable lists titles the latest full scan of each library found on
+// disk but cannot play, so a disc image or a stalled download is not simply
+// missing from the shelf with nothing saying why.
+func (s *Server) adminUnplayable(w http.ResponseWriter, r *http.Request) {
+	titles, total, err := s.Admin.Unplayable(r.Context())
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"unplayable": titles, "total": total})
+}
+
 func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := s.Admin.Users(r.Context())
 	if err != nil {

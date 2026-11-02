@@ -202,6 +202,19 @@ extra_movies=("Hollow Pines (1987)" "The Lantern Hour (1994)" "Grave Weather (20
 for m in "${extra_movies[@]}"; do tiny "$media/Movies/$m/$m.mp4"; done
 for s in "Lamplight Lane" "North Ferry" "Signal Hill"; do tiny "$media/TV/$s/Season 01/$s - S01E01.mp4"; done
 
+# A download folder's leftovers that VCRX cannot play: a disc image, a job
+# still unpacking, and a release only in RAR volumes. None may become a title;
+# Settings > Libraries lists each under "Found but can't play". The image is a
+# sparse file: the report ignores small ones. dd, not truncate, which macOS lacks.
+sparse() { # out size_in_MiB
+  [ -f "$1" ] && return
+  mkdir -p "$(dirname "$1")"
+  dd if=/dev/zero of="$1" bs=1048576 count=0 seek="$2" 2>/dev/null
+}
+sparse "$media/Movies/Ashfall Quarry (2007)/Ashfall.Quarry.2007.1080p.BR-25.iso" 120
+tiny "$media/Movies/_UNPACK_Dune.Glass.2022.1080p.WEB-GRP/Dune.Glass.2022.1080p.WEB-GRP.mp4"
+sparse "$media/Movies/Low.Orbit.2013.720p.BluRay-GRP/low.orbit.part01.rar" 1
+
 # Extras: a trailer beside a film, two extras folders, and a show's theme
 # music. None may become a title; they attach to Harbor Lights and Quiet Street.
 harbor="$media/Movies/Harbor Lights (2001)"

@@ -9,10 +9,10 @@ import { state } from "../app.js";
 export async function librariesTab(body) {
   let timer = null;
   const draw = async () => {
-    let libs, scans, unmatched;
+    let libs, scans, unmatched, unplayable;
     try {
-      [libs, scans, unmatched] = await Promise.all([api("/admin/libraries"), api("/admin/scans?limit=15"),
-        api("/admin/metadata/unmatched").catch(() => null)]);
+      [libs, scans, unmatched, unplayable] = await Promise.all([api("/admin/libraries"), api("/admin/scans?limit=15"),
+        api("/admin/metadata/unmatched").catch(() => null), api("/admin/scans/unplayable").catch(() => null)]);
     } catch (e) {
       body.replaceChildren(errorBox("Could not load libraries", e.message));
       return;
@@ -46,6 +46,7 @@ export async function librariesTab(body) {
             h("td", {}, btn));
         }))),
       unmatchedSection(unmatched),
+      unplayableSection(unplayable, names),
       h("section", { class: "section" }, h("h2", {}, "Recent scans"),
         scans.scans.length ? h("table", { class: "list" },
           h("thead", {}, h("tr", {}, ["When", "Library", "Started by", "Result", "Seen", "Added", "Changed", "Missing", "Failed"]
@@ -76,11 +77,35 @@ function unmatchedSection(data) {
         h("td", { class: "muted" }, u.reason))))));
 }
 
+// Titles on disk that VCRX found but cannot play, so a disc image or a stalled
+// download is not simply absent with nothing saying why. Nothing is shown when
+// there are none.
+const unplayableWhy = {
+  disc_image: "Disc image (.iso or .img): rip the main title to MKV",
+  disc_folder: "Blu-ray or DVD folder: rip the main title to MKV",
+  archive: "Still packed in RAR or 7z volumes: unpack it",
+  incomplete: "Unfinished download: still unpacking, failed, or stalled",
+};
+
+function unplayableSection(data, names) {
+  if (!data || !data.unplayable.length) return null;
+  const more = data.total > data.unplayable.length ? ` (showing ${data.unplayable.length})` : "";
+  return h("section", { class: "section unplayable" }, h("h2", {}, `Found but can't play (${data.total})${more}`),
+    h("p", { class: "muted" }, "These are in your media folders, but VCRX cannot play them, so they are not in any library. From the last full scan."),
+    h("table", { class: "list" },
+      h("thead", {}, h("tr", {}, ["Path", "Library", "Why"].map((c) => h("th", {}, c)))),
+      h("tbody", {}, data.unplayable.map((u) => h("tr", {},
+        h("td", { class: "faint" }, u.path),
+        h("td", {}, names[u.library_id] || u.library_id),
+        h("td", { class: "muted" }, unplayableWhy[u.reason] || u.reason))))));
+}
+
 function scanSummary(s) {
   if (!s) return h("span", { class: "muted" }, "Never");
   if (s.status === "running") return h("span", { class: "state playing" }, `Scanning since ${when(s.started_at)}`);
   const counts = [s.files_added && `${s.files_added} added`, s.files_changed && `${s.files_changed} changed`,
-    s.files_missing && `${s.files_missing} missing`, s.files_failed && `${s.files_failed} failed`].filter(Boolean).join(", ");
+    s.files_missing && `${s.files_missing} missing`, s.files_failed && `${s.files_failed} failed`,
+    s.files_unplayable && `${s.files_unplayable} can't play`].filter(Boolean).join(", ");
   return h("span", { title: s.error || "" }, `${s.status === "ok" ? "" : s.status + ", "}${when(s.finished_at || s.started_at)}${counts ? " · " + counts : ""}`);
 }
 

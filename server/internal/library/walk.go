@@ -37,6 +37,9 @@ type walker struct {
 	// They attach to an item after the titles are written (extras.go).
 	extraDirs  []extraDir
 	extraFiles []string // rel paths of files named as extras
+	// unplayable are titles on disk that cannot be indexed (unplayable.go).
+	unplayable     []Unplayable
+	unplayableSeen map[string]bool
 }
 
 // extraDir is an extras folder, such as Trailers, and the kind of its files.
@@ -107,6 +110,8 @@ func (w *walker) walk(ctx context.Context, start string) error {
 		return err
 	}
 	stack := []string{start}
+	var archiveDirs []string
+	defer func() { w.noteArchives(archiveDirs) }()
 	for len(stack) > 0 {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -120,6 +125,7 @@ func (w *walker) walk(ctx context.Context, start string) error {
 			continue
 		}
 		var subdirs []string
+		videosBefore, archive := len(w.videos), false
 		for _, e := range l.entries {
 			child := joinRel(rel, e.name)
 			if e.isDir {
@@ -128,10 +134,22 @@ func (w *walker) walk(ctx context.Context, start string) error {
 					subdirs = append(subdirs, child)
 				case "extras":
 					w.extraDirs = append(w.extraDirs, extraDir{rel: child, kind: ExtrasDirKind(e.name, w.kind, rel != "")})
+				case "incomplete":
+					w.noteUnplayable(child, UnplayableIncomplete)
+				case "system":
+					if discDir(e.name) {
+						w.noteUnplayable(rel, UnplayableDiscFolder)
+					}
 				}
 				continue
 			}
+			if w.addUnplayable(child) {
+				archive = true
+			}
 			w.addFile(child)
+		}
+		if archive && len(w.videos) == videosBefore {
+			archiveDirs = append(archiveDirs, rel)
 		}
 		// Push in reverse so folders are visited in name order.
 		for i := len(subdirs) - 1; i >= 0; i-- {

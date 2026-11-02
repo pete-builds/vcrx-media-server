@@ -215,6 +215,8 @@ async function main() {
     ["/profiles", ".picker .profile"],
     ["/settings", ".settings h1"],
     ["/settings/libraries", "table.list"],
+    // The disc image, the unpacking job and the RAR set dev-server.sh leaves.
+    ["/settings/libraries", "section.unplayable td"],
     ["/settings/users", ".user-summary"],
     ["/settings/home", ".layout-list li"],
     ["/row/trending", ".grid .card"],
@@ -654,7 +656,7 @@ async function main() {
     for (const l of (await j("/libraries")).libraries) titles.push(...(await j("/libraries/" + l.id + "/items?limit=200")).items.map((i) => i.title));
     const files = (await j("/items/${ids.cast}")).versions.map((v) => v.file_name);
     return { titles, files };`);
-  const leaked = indexed.titles.filter((t) => /trailer|Raising the Lighthouse|The Long Night|theme/i.test(t));
+  const leaked = indexed.titles.filter((t) => /trailer|Raising the Lighthouse|The Long Night|theme|Ashfall|Dune Glass|Low Orbit/i.test(t));
   if (leaked.length) fail("extras", `extras became titles: ${leaked.join(", ")}`);
   // With title_year grouping, an extra read as a film would join Harbor Lights as a version instead.
   if (indexed.files.length !== 1) fail("extras", `Harbor Lights has ${indexed.files.length} versions: ${indexed.files.join(", ")}`);

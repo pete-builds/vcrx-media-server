@@ -897,8 +897,9 @@ func libraryCmd(args []string) error {
 		for _, l := range libs {
 			last := "never"
 			if l.LastScan != nil {
-				last = fmt.Sprintf("%s %s (%d seen, %d added, %d failed)", l.LastScan.Status,
-					time.UnixMilli(l.LastScan.StartedAt).Format(time.DateTime), l.LastScan.FilesSeen, l.LastScan.FilesAdded, l.LastScan.FilesFailed)
+				last = fmt.Sprintf("%s %s (%d seen, %d added, %d failed, %d can't play)", l.LastScan.Status,
+					time.UnixMilli(l.LastScan.StartedAt).Format(time.DateTime), l.LastScan.FilesSeen, l.LastScan.FilesAdded, l.LastScan.FilesFailed,
+					l.LastScan.FilesUnplayable)
 			}
 			_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%d\t%s\n", l.ID, l.Name, l.Kind, l.RootPath, l.ItemCount, last)
 		}
@@ -923,10 +924,13 @@ func libraryCmd(args []string) error {
 		scanner := &library.Scanner{DB: a.db, Prober: &probe.FFprobe{Path: a.cfg.FFprobePath}, Log: a.log, ProbeConcurrency: a.cfg.ProbeConcurrency,
 			LockDir: a.cfg.ConfigDir}
 		run, err := library.NewManager(scanner, a.log).RunNow(ctx, lib.ID, library.Options{Trigger: "cli", SubPath: *path, Force: *force})
-		fmt.Printf("scan %d: %s, %d seen, %d added, %d changed, %d missing, %d failed\n", run.ID, run.Status, run.Seen, run.Added,
-			run.Changed, run.Missing, run.Failed)
+		fmt.Printf("scan %d: %s, %d seen, %d added, %d changed, %d missing, %d failed, %d can't play\n", run.ID, run.Status, run.Seen,
+			run.Added, run.Changed, run.Missing, run.Failed, len(run.Unplayable))
 		if run.Error != "" {
 			fmt.Println("error:", run.Error)
+		}
+		for _, u := range run.Unplayable {
+			fmt.Printf("  can't play (%s): %s\n", u.Reason, u.Path)
 		}
 		return err
 	default:
