@@ -32,6 +32,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -146,6 +147,9 @@ private data class RailEntry(val key: String, val label: String, val icon: Image
 private val RAIL_CLOSED = 100.dp
 private val RAIL_OPEN = 232.dp
 
+/** How far past the open rail its black wash fades to nothing. */
+private val RAIL_FADE = 200.dp
+
 @Composable
 fun BrowseScreen() {
     val vm = graphViewModel { BrowseViewModel(it) }
@@ -203,11 +207,26 @@ fun BrowseScreen() {
                 }
             }
         }
+        // The wash runs past the open rail and fades out, so it never ends on a hard
+        // edge through the hero's title and text.
+        if (railWash > 0f) {
+            Box(
+                Modifier
+                    .width(RAIL_OPEN + RAIL_FADE)
+                    .fillMaxHeight()
+                    .background(
+                        Brush.horizontalGradient(
+                            0f to Black.copy(alpha = railWash),
+                            RAIL_OPEN / (RAIL_OPEN + RAIL_FADE) to Black.copy(alpha = railWash * 0.85f),
+                            1f to Color.Transparent,
+                        ),
+                    ),
+            )
+        }
         Column(
             Modifier
                 .width(railWidth)
                 .fillMaxHeight()
-                .background(Brush.horizontalGradient(0.7f to Black.copy(alpha = railWash), 1f to Black.copy(alpha = railWash * 0.6f)))
                 .padding(start = 20.dp, top = 24.dp, end = 8.dp)
                 .onFocusChanged { railHasFocus = it.hasFocus }
                 .focusRestorer(railRequester)

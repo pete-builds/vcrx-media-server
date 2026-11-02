@@ -270,7 +270,20 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
                 if (item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
             }
             if (isContainer && item.kind == "show" && vm.seasons.isNotEmpty()) {
-                item(key = "seasons") { keepRowScroll { SeasonRow(vm) } }
+                item(key = "seasons") {
+                    // Down to the seasons lifts them to the top, so the episodes come
+                    // into view: the chips alone are never cut off, so RevealOnly
+                    // would leave the episode list below the screen.
+                    Box(
+                        Modifier.onFocusChanged { state ->
+                            if (state.hasFocus) {
+                                list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "seasons" }?.index?.let { i ->
+                                    scope.launch { list.animateScrollToItem(i) }
+                                }
+                            }
+                        },
+                    ) { keepRowScroll { SeasonRow(vm) } }
+                }
             }
             if (isContainer) {
                 item(key = "episodes") { EpisodeList(vm) }
