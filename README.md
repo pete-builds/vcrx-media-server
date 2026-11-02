@@ -10,9 +10,22 @@ VCRX exists for the things other servers need add-ons and scripts for: per-versi
 
 Licence: AGPL-3.0-or-later. If you run a modified VCRX as a service, share your changes.
 
+<table>
+  <tr>
+    <td><img src="docs/screenshots/home.webp" alt="Home: a featured movie over its backdrop, with Continue Watching below"></td>
+    <td><img src="docs/screenshots/library.webp" alt="Movies: a poster grid with rating badges, sorting and filters"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/details.webp" alt="Details for Sintel: poster with 4K badge, plot, cast and a version picker"></td>
+    <td><img src="docs/screenshots/users.webp" alt="Settings, Users: per-user library, resolution and rating limits in plain English"></td>
+  </tr>
+</table>
+
+<sub>The web app with a demo library of <a href="https://studio.blender.org/films/">Blender Studio open movies</a> (CC BY) and US public-domain films. Artwork and plots from TMDb.</sub>
+
 ## Status
 
-Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV slice.
+Milestones 1 to 8 of [docs/PLAN.md](docs/PLAN.md), plus the first parts of 9 and 10: invited devices with no account, friends' servers linked to each other, and lending a tape. There is no tagged release yet; `main` is what runs.
 
 | Works now | Comes later |
 |---|---|
@@ -20,7 +33,8 @@ Milestones 1 and 2 of [docs/PLAN.md](docs/PLAN.md): the server slice and the TV 
 | Local accounts and per-user access: library grants, a resolution ceiling, a content-rating ceiling, label allow and deny lists, converting allowed or not, all edited in Settings > Users and enforced on every route (a test walks them all) | Access settings in the TV app |
 | Direct play over HTTP with Range; converted streams for clients that ask for them (fragmented MP4, or HLS for Safari: video copied, or transcoded to H.264 when the client cannot decode it; audio copied or converted to AAC); sidecar and embedded text subtitles (also as WebVTT for browsers), subtitle search and download from OpenSubtitles (optional), a per-user subtitle delay | Picture subtitle burn-in, VA-API hardware acceleration |
 | Skip Intro and Skip Credits (web and TV): intros and end credits found from each season's audio at night, chapter titles and Plex-style NFO markers honoured, an admin editor, and a per-user choice of button, automatic or off | Skip markers for movies other than by hand |
-| Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, per-title history, stats, per-user totals, stop a stream, webhooks, a watch state export for cleanup tools | Activity screens in a client |
+| Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, per-title history, stats, per-user totals, stop a stream, webhooks, a watch state export for cleanup tools; Activity screens in the web app and the TV app | Taste signals from friends' watching (opt-in) |
+| Household profiles with optional PINs, invited devices that need no account (a link or a QR code with its own libraries, resolution and expiry), friends' servers linked to each other with per-friend limits and streaming only, never copying, and lending one title to a friend for a day to a week (three days by default) | Playing from whichever friend's copy is fastest, direct connections between friends' servers with no relay |
 | Music libraries: artists, albums and compilations from tags, live shows (date, venue, source, the taper's info file and checksums), covers, direct play or AAC/Opus conversion, play queues, a web player that keeps playing across pages, and a TV Music section | Setlists and per-song chapters, tape trading |
 | Web app at `/`: browse, details, search, play in the browser with subtitles (including files whose video the browser cannot decode, transcoded on the server), Activity screens. REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Other TV platforms |
 

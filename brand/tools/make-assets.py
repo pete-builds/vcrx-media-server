@@ -139,6 +139,22 @@ def main():
 </resources>
 """, *res, "values", "brand_colors.xml")
 
+    # Web app icons (server/web/static/img), named by the manifest.
+    # "any": the wordmark in an orange-edged rounded black tile on clear, as the
+    # favicon has always looked. Maskable and Apple touch: edge to edge black,
+    # since Android and iOS cut their own shape; the wordmark stays inside the
+    # centre circle (radius 40%) that every mask keeps.
+    web = ("..", "server", "web", "static", "img")
+    for px in (192, 512):
+        tile = Image.new("RGBA", (px, px), (0, 0, 0, 0))
+        edge = max(2, round(px * 0.03))
+        ImageDraw.Draw(tile).rounded_rectangle((0, 0, px - 1, px - 1), radius=round(px * 0.2), fill=ORANGE + (255,))
+        ImageDraw.Draw(tile).rounded_rectangle((edge, edge, px - 1 - edge, px - 1 - edge), radius=round(px * 0.2) - edge, fill=BLACK + (255,))
+        save(centered(tile, fit(word, px * 0.74, px * 0.5)), *web, f"icon-{px}.png")
+    for px, name in ((512, "icon-maskable-512.png"), (192, "icon-maskable-192.png"), (180, "apple-touch-icon.png")):
+        full = Image.new("RGBA", (px, px), BLACK + (255,))
+        save(centered(full, fit(word, px * 0.66, px * 0.5)).convert("RGB"), *web, name)
+
     readme = Image.new("RGBA", (1400, 400), BLACK + (255,))
     save(centered(readme, fit(word, 1100, 240)).convert("RGB"), "generated", "vcrx-wordmark-on-black.png")
     print("ok")

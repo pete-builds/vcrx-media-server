@@ -2,12 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#000000">
 <title>VCRX</title>
 <link rel="icon" type="image/png" href="img/icon-64.png">
-<link rel="apple-touch-icon" href="img/icon-192.png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<!-- Added to an iPhone's Home Screen, VCRX opens full screen under a black status bar. -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="VCRX">
 <link rel="stylesheet" href="css/app.css">
 <link rel="stylesheet" href="css/music.css">
 <link rel="stylesheet" href="css/profiles.css">
@@ -21,6 +27,9 @@
   <button class="menu-btn" id="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="nav">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
   </button>
+  <button class="back-btn" id="back-btn" type="button" aria-label="Back" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></svg>
+  </button>
   <a class="brand" href="#/" aria-label="VCRX home"><img src="img/wordmark.png" alt="VCRX" width="120" height="27"></a>
   <nav class="nav" id="nav" aria-label="Libraries"></nav>
   <form class="search" id="search" role="search">
@@ -29,6 +38,9 @@
   <a class="nav-link nav-settings" href="#/settings" id="nav-user" aria-label="Settings">Settings</a>
   <a class="nav-profile" href="#/profiles" id="nav-profile" aria-label="Switch profile" hidden></a>
 </header>
+<!-- On a phone, the main places sit along the bottom, in reach of a thumb. -->
+<nav class="tabbar" id="tabbar" aria-label="Main" hidden></nav>
+<div class="more-sheet" id="more-sheet" hidden><nav aria-label="More"></nav></div>
 <main id="view" tabindex="-1"><div class="loading" role="status">Loading</div></main>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <noscript><p class="noscript">VCRX needs JavaScript in the browser.</p></noscript>

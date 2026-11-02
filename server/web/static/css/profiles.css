@@ -9,6 +9,8 @@
 .avatar-small { width: 30px; height: 30px; font-size: 13px; }
 
 .nav-profile { display: inline-flex; border-radius: 50%; }
+/* Touch: a 44px target around the 30px avatar. */
+@media (pointer: coarse) { .nav-profile { padding: 7px; margin-block: -7px; margin-right: -7px; } }
 .nav-profile:hover .avatar { box-shadow: 0 0 0 2px var(--orange); }
 
 .picker {
