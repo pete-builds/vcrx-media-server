@@ -40,8 +40,9 @@ For every server deploy and every TV APK. A box is ticked only when the step ran
 4. Check the served version and the smoke test, as above.
 
 Step 2 was drilled on 2026-11-01 against copies of real backups, never the live database: a pre-migration backup
-one schema version older started, migrated forward and kept every row. Step 3 needs two published releases
-before it can be drilled.
+one schema version older started, migrated forward and kept every row. Step 3 was drilled on 2026-11-02 on the
+live host with the first two releases (no migration between them): `--release v0.1.0` served v0.1.0 with the old
+stylesheet and passed the smoke test, then `--release v0.2.0` served v0.2.0 again and passed it too.
 
 ## TV APK
 

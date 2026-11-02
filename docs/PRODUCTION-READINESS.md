@@ -8,9 +8,9 @@ data exposure and no unrecoverable data loss? This is the honest answer as of 20
 | Area | Score | Why |
 |---|---|---|
 | Security | 7 | Authentication, the route gate, path containment and the web app hold up under review. A few deployment-hardening items are still open; they are tracked outside this repository until they are fixed. |
-| Data integrity | 7 | The library-wipe path (S1) and three partial-outage bugs are fixed. Backups are verified when taken (#87), and the restore procedure (#107) was drilled on copies of real backups. Still open: backups live on the same disk as the database. |
+| Data integrity | 7 | The library-wipe path (S1) and three partial-outage bugs are fixed. Backups are verified when taken (#87), and the restore procedure (#107) was drilled on copies of real backups. A copy of every nightly backup reaches the NAS each night (checked 2026-11-02). |
 | Playback | 7 | 17 file shapes decided correctly for three browser profiles; TS playback and seeking fixed. Open: no real-browser rendering run over the corpus, Safari HLS never fetched, Dolby Vision untested, TV checked by hand only. |
-| Operations | 4 | The deploy refuses when it cannot tell whether anyone is watching and checks the server came back on the new version. Still no rollback image, no resource limits, no tagged images, no versioned APK. |
+| Operations | 4 | The deploy refuses when it cannot tell whether anyone is watching and checks the server came back on the new version. Releases are tagged images on ghcr.io with a drilled rollback, and the container has resource limits (2026-11-02). Still no versioned APK. |
 | Tests and CI | 7 | Race-enabled Go tests with real ffmpeg, an access walk over every route, a headless Chrome smoke, gitleaks, govulncheck, shellcheck, a check that shipped migrations never change. Missing: dependency update bot, image scan, TV instrumented tests, the playback corpus in CI. |
 
 A 6 means it can run the household day to day while Plex stays installed as the fallback, but it cannot yet be the
@@ -22,11 +22,12 @@ only server: a bad deploy has no tested way back to the previous image.
 2. ~~Restore drill on a real backup.~~ Done 2026-11-01, on copies only, never the live database: the newest nightly
    backup restored with an intact database and every table's row count unchanged; a backup one schema version
    older was migrated forward at startup, copied aside first, and lost no rows.
-3. **Off-host backup copy.** The nightly copy goes to the NAS as well as the config folder.
-4. **Rollback.** Tag each built image with its commit and keep the previous one; document "previous tag plus the
-   `pre-migrate-vN` backup" as the way back.
-5. **Resource limits.** Measure one 4K transcode and one remux on the host, then set `mem_limit`, `cpus` and
-   `pids_limit` with headroom.
+3. ~~**Off-host backup copy.**~~ Done: the host's nightly backup copies the whole deploy folder, the nightly database
+   copies included, to the NAS and keeps eight days. Checked 2026-11-02: the newest nightly copy on the NAS matches
+   the host's byte for byte and passes `PRAGMA integrity_check`; a truncated copy fails it.
+4. ~~**Rollback.**~~ Done: releases v0.1.0 and v0.2.0 are on ghcr.io, the host runs v0.2.0 by version, and rolling
+   back to v0.1.0 and forward again was drilled on 2026-11-02 (`docs/RELEASE-CHECKLIST.md`, Rolling back).
+5. ~~**Resource limits.**~~ Done 2026-11-01: measured on the host, then set to 10 CPUs, 6 GiB and 512 processes.
 6. **Close the open deployment-hardening items** before the trial starts.
 
 ## Measured on the host (2026-11-01 00:00 ET, read only)
