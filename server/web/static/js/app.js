@@ -17,7 +17,7 @@ import { loginView } from "./views/login.js";
 import { searchSuggest } from "./suggest.js";
 import { installShortcuts } from "./shortcuts.js";
 import { musicLibraryView, musicArtistView, musicAlbumView } from "./views/music.js";
-import { installMusicPlayer } from "./music/player.js";
+import { installMusicPlayer, clear as clearMusic } from "./music/player.js";
 import { pickerView, drawProfileButton } from "./views/profiles.js";
 import { pairView, inviteView } from "./views/devices.js";
 import { lendView, rewindView } from "./views/lend.js";
@@ -281,9 +281,21 @@ function trackDepth() {
 }
 function navDepth() { return depth; }
 
-// signedIn loads who we are and the libraries, then draws the shell.
+// signedOut forgets who was signed in: their libraries, and their music,
+// which would otherwise play on with their queue on the bar for whoever
+// uses the device next (sign-out, an expired session, an ended loan).
+export function signedOut() {
+  state.me = null;
+  state.libraries = [];
+  clearMusic();
+}
+
+// signedIn loads who we are and the libraries, then draws the shell. A
+// switch to another profile stops the last one's music, as signing out does.
 export async function signedIn() {
+  const before = state.me && state.me.id;
   state.me = await api("/me");
+  if (before && before !== state.me.id) clearMusic();
   state.rewind = null;
   const libs = await api("/libraries");
   state.libraries = libs.libraries || [];
@@ -315,12 +327,12 @@ async function boot() {
   window.addEventListener("hashchange", trackDepth);
   whenSignedOut(() => {
     if (!state.me) return;
-    state.me = null;
+    signedOut();
     go(signInPath() + "?next=" + encodeURIComponent(parseHash().path));
   });
   whenRewound((data) => {
     const first = !state.rewind;
-    state.me = null;
+    signedOut();
     state.rewind = { title: data.title || "", message: data.message || "" };
     if (first || parseHash().path !== "/rewind") go("/rewind");
   });
