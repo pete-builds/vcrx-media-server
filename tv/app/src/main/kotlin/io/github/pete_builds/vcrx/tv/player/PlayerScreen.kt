@@ -42,7 +42,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.BrandDialog
 import io.github.pete_builds.vcrx.tv.ui.components.AppIcons
 import io.github.pete_builds.vcrx.tv.ui.components.BrandRow
 import io.github.pete_builds.vcrx.tv.ui.components.Label
-import io.github.pete_builds.vcrx.tv.ui.components.LoadingBar
+import io.github.pete_builds.vcrx.tv.ui.components.LoadingCursor
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
 import io.github.pete_builds.vcrx.tv.ui.components.Mark
 import io.github.pete_builds.vcrx.tv.ui.components.MessageView
@@ -50,7 +50,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import io.github.pete_builds.vcrx.tv.ui.details.formatTime
 import io.github.pete_builds.vcrx.tv.ui.theme.Black
 import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 
 @Composable
 fun PlayerScreen(controller: PlaybackController, onExit: () -> Unit) {
@@ -96,7 +96,7 @@ fun PlayerScreen(controller: PlaybackController, onExit: () -> Unit) {
         if (controller.phase == Phase.Playing && (controller.buffering || controller.reloading)) {
             // Keyed on the wait, so a short one shows nothing and each wait starts its own delay.
             androidx.compose.runtime.key(controller.reloading) {
-                LoadingBar(Modifier.align(Alignment.TopStart), description = "Loading")
+                LoadingCursor(Modifier.align(Alignment.TopStart), description = "Loading")
             }
         }
         if (controller.phase == Phase.Playing && controller.dialog == null) SkipButton(controller)
@@ -121,7 +121,7 @@ private fun Video(controller: PlaybackController) {
             PlayerView(context).apply {
                 useController = false
                 isFocusable = false
-                // No spinner: the loading bar shows instead (PlayerScreen).
+                // No spinner: the loading cursor shows instead (PlayerScreen).
                 setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                 setKeepContentOnPlayerReset(true)
                 setShutterBackgroundColor(Black.toArgb())
@@ -178,7 +178,7 @@ private fun Chrome(controller: PlaybackController) {
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 // Which kind of stream this is, as the web player's pill says it.
-                controller.streamLabel?.let { Label(it, style = MaterialTheme.typography.labelLarge, color = Orange) }
+                controller.streamLabel?.let { Label(it, style = MaterialTheme.typography.labelLarge, color = Accent) }
             }
         }
         Spacer(Modifier.weight(1f))
@@ -240,7 +240,7 @@ private fun status(controller: PlaybackController, target: Long?): String = when
     else -> controller.streamLabel.orEmpty()
 }
 
-/** Orange fill on a graphite track, and an orange scrubber at the playhead or seek target. */
+/** Accent fill on a graphite track, and a green scrubber at the playhead or seek target. */
 @Composable
 private fun Progress(positionMs: Long, targetMs: Long?, durationMs: Long) {
     BoxWithConstraints(Modifier.fillMaxWidth().height(22.dp)) {
@@ -253,14 +253,14 @@ private fun Progress(positionMs: Long, targetMs: Long?, durationMs: Long) {
                 .height(6.dp)
                 .background(Graphite, RoundedCornerShape(3.dp)),
         ) {
-            Box(Modifier.fillMaxWidth(fraction).height(6.dp).background(Orange, RoundedCornerShape(3.dp)))
+            Box(Modifier.fillMaxWidth(fraction).height(6.dp).background(Accent, RoundedCornerShape(3.dp)))
         }
         Box(
             Modifier
                 .align(Alignment.CenterStart)
                 .offset(x = (maxWidth - 18.dp) * head)
                 .size(18.dp)
-                .background(Orange, CircleShape),
+                .background(Accent, CircleShape),
         )
     }
 }

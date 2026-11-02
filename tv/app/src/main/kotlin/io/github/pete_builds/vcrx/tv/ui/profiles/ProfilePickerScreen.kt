@@ -66,7 +66,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.Wordmark
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
 import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 import io.github.pete_builds.vcrx.tv.ui.theme.White
 import kotlinx.coroutines.launch
 
@@ -192,7 +192,7 @@ private fun ProfileGrid(profiles: List<Profile>, step: PickerStep.Grid, vm: Prof
                 }
             }
         }
-        step.error?.let { Label(it, color = Orange, maxLines = 2) }
+        step.error?.let { Label(it, color = Accent, maxLines = 2) }
         // As wide as its widest row, so the rows sit centred under the profiles
         // rather than on the left of a fixed-width box.
         Column(Modifier.width(IntrinsicSize.Max), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -259,7 +259,7 @@ private fun PinPad(step: PickerStep.Pin, vm: ProfilePickerViewModel, nav: Profil
         Text(step.profile.name, style = MaterialTheme.typography.headlineSmall, color = White)
         Label(if (step.busy) "Checking" else "Enter the PIN", color = Gray)
         PinDots(step.digits.length)
-        Label(step.error ?: " ", color = Orange, maxLines = 2)
+        Label(step.error ?: " ", color = Accent, maxLines = 2)
         PAD_ROWS.forEachIndexed { r, keys ->
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 keys.forEachIndexed { c, key ->
@@ -283,8 +283,8 @@ private fun PinDots(count: Int) {
             val filled = i < count
             Box(
                 Modifier.size(18.dp).clip(CircleShape)
-                    .background(if (filled) Orange else Color.Transparent)
-                    .border(2.dp, if (filled) Orange else Gray, CircleShape),
+                    .background(if (filled) Accent else Color.Transparent)
+                    .border(2.dp, if (filled) Accent else Gray, CircleShape),
             )
         }
     }
@@ -311,7 +311,7 @@ private fun PasswordEntry(step: PickerStep.Password, vm: ProfilePickerViewModel,
             onImeAction = submit,
             modifier = Modifier.focusRequester(field),
         )
-        step.error?.let { Label(it, color = Orange, maxLines = 2) }
+        step.error?.let { Label(it, color = Accent, maxLines = 2) }
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             BrandButton(if (step.busy) "Checking" else "Continue", onClick = submit, primary = true)
             BrandButton("Back", onClick = { vm.back(nav) })

@@ -88,7 +88,7 @@ function spaced(secret) {
   return (secret.match(/.{1,4}/g) || []).join(" ");
 }
 
-// tapeCard is the printable card: a tape label in VCRX orange and black. It
+// tapeCard is the printable card: a tape label in VCRX green and black. It
 // fills 6 by 4 inches on paper and the page's width on screen; every size in
 // it is relative to the card, so the two look the same.
 function tapeCard(item, out) {

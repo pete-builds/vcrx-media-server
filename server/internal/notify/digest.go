@@ -118,7 +118,7 @@ const (
 	// the 6,000 shared by all ten.
 	digestMaxDescription = 1000
 	digestEpisodesShown  = 10
-	digestColor          = 0xff5f00
+	digestColor          = 0x008f11 // VCRX Green
 )
 
 // discordDigest builds one Discord message: an embed with a poster per movie

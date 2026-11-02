@@ -43,7 +43,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.EmptyView
 import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 
 /**
  * Now Playing: the cover, the track, a progress bar and the controls on the
@@ -74,7 +74,7 @@ fun NowPlayingScreen() {
                 Text(clock(s.positionMs), style = MaterialTheme.typography.labelSmall, color = Gray)
                 Text(clock(s.durationMs), style = MaterialTheme.typography.labelSmall, color = Gray)
             }
-            s.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Orange, maxLines = 2) }
+            s.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Accent, maxLines = 2) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 BrandButton("Back", onClick = player::previous, icon = MusicIcons.Previous)
                 BrandButton(
@@ -133,6 +133,6 @@ fun NowPlayingScreen() {
 private fun Progress(positionMs: Long, durationMs: Long) {
     val fraction = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
     Box(Modifier.fillMaxWidth().height(6.dp).background(Graphite, RoundedCornerShape(3.dp))) {
-        Box(Modifier.fillMaxWidth(fraction).height(6.dp).background(Orange, RoundedCornerShape(3.dp)))
+        Box(Modifier.fillMaxWidth(fraction).height(6.dp).background(Accent, RoundedCornerShape(3.dp)))
     }
 }

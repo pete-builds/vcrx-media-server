@@ -6,7 +6,7 @@
 // lists nothing, a C key or CC button that does not toggle captions, a
 // picture subtitle missing from the subtitle menu or choosable there, a
 // pre-roll that does not play before a movie or whose Skip does not start it, a
-// loading bar left showing once a page has loaded, a
+// loading cursor left showing once a page has loaded or not shown, a
 // Continue Watching Remove control that does not remove, a
 // keyboard shortcuts list that does not open, a Home feature whose Play does
 // not play, season tabs that do not switch, a phone menu that does not open,
@@ -246,12 +246,12 @@ async function main() {
       }
       const view = document.getElementById("view");
       const text = view ? view.innerText : "";
-      const bar = document.querySelector(".load-bar");
+      const bar = document.querySelector(".load-cursor");
       return { found: !!document.querySelector(${JSON.stringify(selector)}), text,
         error: !!document.querySelector("#view .error-box"), barStuck: !!bar && !bar.hidden };`);
     if (!res.found) fail(`#${path}`, `no ${selector}`);
     if (res.error) fail(`#${path}`, `shows an error box: ${res.text.slice(0, 160).replace(/\n/g, " ")}`);
-    if (res.barStuck) fail(`#${path}`, "the loading bar is still showing after the page loaded");
+    if (res.barStuck) fail(`#${path}`, "the loading cursor is still showing after the page loaded");
     const junk = res.text.match(/\b(null|undefined|NaN)\b|\[object \w+\]/);
     if (junk) {
       const at = res.text.slice(Math.max(0, junk.index - 60), junk.index + 20).replace(/\s+/g, " ");
@@ -311,6 +311,30 @@ async function main() {
     if (!/viewport-fit=cover/.test(man.fit)) fail("manifest", "viewport lacks viewport-fit=cover, so safe areas read 0");
     if (!man.capable) fail("manifest", "no apple-mobile-web-app-capable, so an iPhone opens it in Safari");
   }
+
+  // The loading sign: a blinking green block cursor in the top left corner,
+  // shown once a load passes 150 ms and gone when it ends.
+  console.log("loading cursor");
+  const cur = await evaluate(`
+    const { loadBar } = await import("/js/dom.js");
+    loadBar.show();
+    await new Promise((r) => setTimeout(r, 400));
+    const el = document.querySelector(".load-cursor");
+    const cs = el && getComputedStyle(el);
+    const r = el && el.getBoundingClientRect();
+    const out = el ? { shown: !el.hidden && cs.opacity === "1", left: r.left, top: r.top, w: r.width, h: r.height,
+      bg: cs.backgroundColor, anim: cs.animationName } : { shown: false };
+    loadBar.hide();
+    out.gone = !el || el.hidden;
+    return out;`);
+  if (!cur.shown) fail("loading cursor", "no cursor showed during a load");
+  else {
+    if (cur.left > 16 || cur.top > 16) fail("loading cursor", `cursor at ${cur.left},${cur.top}, not the top left corner`);
+    if (cur.h <= cur.w) fail("loading cursor", `cursor is ${cur.w}x${cur.h}, not a block taller than wide`);
+    if (cur.bg !== "rgb(0, 143, 17)") fail("loading cursor", `cursor colour ${cur.bg}, not VCRX Green`);
+    if (!/cursor-blink/.test(cur.anim)) fail("loading cursor", `cursor does not blink (animation ${cur.anim})`);
+  }
+  if (!cur.gone) fail("loading cursor", "the cursor stayed after the load ended");
 
   // Fonts: the page's faces load from WOFF2. A TrueType download means a WOFF2
   // file failed and the browser fell back to three times the bytes.

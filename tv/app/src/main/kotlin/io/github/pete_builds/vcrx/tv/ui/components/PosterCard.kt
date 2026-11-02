@@ -34,7 +34,7 @@ import io.github.pete_builds.vcrx.tv.ui.theme.Black
 import io.github.pete_builds.vcrx.tv.ui.theme.CornerRadius
 import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 import io.github.pete_builds.vcrx.tv.ui.theme.Shapes
 import io.github.pete_builds.vcrx.tv.ui.theme.White
 
@@ -44,7 +44,7 @@ enum class CardShape(val aspect: Float, val requestWidth: Int) {
 }
 
 /**
- * A focusable card for one item, framed in orange when focused. Without artwork, or
+ * A focusable card for one item, framed in green when focused. Without artwork, or
  * when the server answers 404, the placeholder beneath shows the title instead.
  */
 @Composable
@@ -140,7 +140,7 @@ fun Artwork(itemId: Long, kind: String, hasArt: Boolean, title: String, requestW
     }
 }
 
-/** Orange badges: a watched tick, an unplayed count, and a progress bar along the bottom. */
+/** Accent badges: a watched tick, an unplayed count, and a progress bar along the bottom. */
 @Composable
 private fun WatchBadge(item: Item) {
     val watch = item.watch ?: return
@@ -151,12 +151,12 @@ private fun WatchBadge(item: Item) {
                 Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp).background(Black.copy(alpha = 0.72f), Shapes.Circle),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Check, contentDescription = "Watched", tint = Orange, modifier = Modifier.size(16.dp))
+                Icon(Icons.Filled.Check, contentDescription = "Watched", tint = Accent, modifier = Modifier.size(16.dp))
             }
         }
         val unplayed = watch.unplayedCount
         if (unplayed != null && unplayed > 0 && (item.kind == "show" || item.kind == "season")) {
-            Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Orange, Shapes.Pill).padding(horizontal = 7.dp, vertical = 1.dp)) {
+            Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Accent, Shapes.Pill).padding(horizontal = 7.dp, vertical = 1.dp)) {
                 Text(unplayed.toString(), style = MaterialTheme.typography.labelMedium, color = Black)
             }
         }
@@ -168,7 +168,7 @@ private fun WatchBadge(item: Item) {
                 Modifier.align(Alignment.BottomStart).padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth().height(4.dp)
                     .background(White.copy(alpha = 0.3f), Shapes.Pill),
             ) {
-                Box(Modifier.fillMaxWidth(fraction).height(4.dp).background(Orange, Shapes.Pill))
+                Box(Modifier.fillMaxWidth(fraction).height(4.dp).background(Accent, Shapes.Pill))
             }
         }
     }

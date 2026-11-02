@@ -44,11 +44,11 @@ import androidx.tv.material3.Text
 import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.LiveChannel
 import io.github.pete_builds.vcrx.tv.ui.components.Label
-import io.github.pete_builds.vcrx.tv.ui.components.LoadingBar
+import io.github.pete_builds.vcrx.tv.ui.components.LoadingCursor
 import io.github.pete_builds.vcrx.tv.ui.theme.Black
 import io.github.pete_builds.vcrx.tv.ui.theme.BrandTheme
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 import io.github.pete_builds.vcrx.tv.ui.theme.White
 import java.util.Date
 import kotlinx.coroutines.Job
@@ -205,7 +205,7 @@ class LivePlayerActivity : ComponentActivity() {
                     },
                 )
             }
-            if (tuning) LoadingBar(Modifier.align(Alignment.TopStart), description = "Tuning")
+            if (tuning) LoadingCursor(Modifier.align(Alignment.TopStart), description = "Tuning")
             val c = shown
             if (c != null && (info || problem != null)) {
                 Column(
@@ -214,7 +214,7 @@ class LivePlayerActivity : ComponentActivity() {
                         .padding(horizontal = 48.dp, vertical = 32.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Label(LiveTv.label(c), style = MaterialTheme.typography.labelLarge, color = Orange)
+                    Label(LiveTv.label(c), style = MaterialTheme.typography.labelLarge, color = Accent)
                     Text(LiveTv.nowLine(c), style = MaterialTheme.typography.headlineSmall, color = White, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val next = LiveTv.nextLine(c) { DateFormat.getTimeFormat(this@LivePlayerActivity).format(Date(it)) }
                     if (next.isNotEmpty()) Text(next, style = MaterialTheme.typography.bodyLarge, color = Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)

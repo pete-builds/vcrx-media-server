@@ -8,7 +8,7 @@ Written 2026-10-30. `docs/REFERENCE.md` holds the verified facts and governs whe
 |---|---|
 | Name | VCRX, written in capitals. Renamed from Flex on 2026-10-30: "Flex Media Server" was already in use by an unrelated Plex middleware project, and Flex sat one letter from Plex. Not yet cleared as a trademark. |
 | Repo | `pete-builds/vcrx-media-server`, public. CLI `vcrx`, settings `VCRX_*`, TV app id `io.github.pete_builds.vcrx.tv` |
-| Brand | VCRX Orange `#FF5F00` on Black, Rajdhani and Inter (`brand/`). Android assets are generated from the kit by `brand/tools/make-assets.py`. |
+| Brand | VCRX Green `#008F11` on Black, Rajdhani and Inter (`brand/`). Android assets are generated from the kit by `brand/tools/make-assets.py`. |
 | Licence | AGPL-3.0-or-later |
 | Port | 3750 on nix1, `VCRX_PORT` to change it |
 | Test TV | Pete's TCL Google TV (model to be read off the device over ADB) |

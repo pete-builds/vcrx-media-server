@@ -39,7 +39,7 @@ import io.github.pete_builds.vcrx.tv.ui.details.formatTime
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
 import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -128,7 +128,7 @@ private fun SessionRow(s: NowSession, onStop: () -> Unit, modifier: Modifier) {
             val duration = s.durationMs?.takeIf { it > 0 }
             Box(Modifier.fillMaxWidth().height(4.dp).background(Gray.copy(alpha = 0.3f))) {
                 if (duration != null) {
-                    Box(Modifier.fillMaxWidth((s.positionMs.toFloat() / duration).coerceIn(0f, 1f)).height(4.dp).background(Orange))
+                    Box(Modifier.fillMaxWidth((s.positionMs.toFloat() / duration).coerceIn(0f, 1f)).height(4.dp).background(Accent))
                 }
             }
             Label(

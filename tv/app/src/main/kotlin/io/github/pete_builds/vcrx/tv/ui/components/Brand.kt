@@ -44,7 +44,7 @@ import io.github.pete_builds.vcrx.tv.ui.theme.Focus
 import io.github.pete_builds.vcrx.tv.ui.theme.FocusStroke
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
 import io.github.pete_builds.vcrx.tv.ui.theme.LabelSpacing
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 import io.github.pete_builds.vcrx.tv.ui.theme.Shapes
 import io.github.pete_builds.vcrx.tv.ui.theme.Surfaces
 import io.github.pete_builds.vcrx.tv.ui.theme.White
@@ -104,9 +104,9 @@ private val noGlow = Glow.None
 
 /**
  * The button. Three shapes, one focus: the main action is a pill, the rest
- * softly rounded, and every button the remote is on fills orange with black
+ * softly rounded, and every button the remote is on fills green with black
  * text and grows a little, so focus reads at a glance from the couch. At rest
- * they are a translucent wash; the main action's label rests orange.
+ * they are a translucent wash; the main action's label rests green.
  */
 @Composable
 fun BrandButton(
@@ -146,7 +146,7 @@ fun BrandButton(
 
 /**
  * An action that is only an icon, in a circle: Mark watched beside Play. The
- * name is for TalkBack; focus fills it orange like every button.
+ * name is for TalkBack; focus fills it green like every button.
  */
 @Composable
 fun BrandIconButton(
@@ -163,10 +163,10 @@ fun BrandIconButton(
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
         colors = ButtonDefaults.colors(
             containerColor = Surfaces.WashStrong,
-            contentColor = if (on) Orange else White,
-            focusedContainerColor = Orange,
+            contentColor = if (on) Accent else White,
+            focusedContainerColor = Accent,
             focusedContentColor = Black,
-            pressedContainerColor = Orange,
+            pressedContainerColor = Accent,
             pressedContentColor = Black,
         ),
         border = ButtonDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
@@ -183,7 +183,7 @@ fun BrandIconButton(
 
 /**
  * A pill to pick one of a few: a season, a filter. The chosen one rests white
- * with black text; focus fills orange.
+ * with black text; focus fills green.
  */
 @Composable
 fun BrandChip(
@@ -200,9 +200,9 @@ fun BrandChip(
         colors = ButtonDefaults.colors(
             containerColor = if (selected) White else Surfaces.Wash,
             contentColor = if (selected) Black else Gray,
-            focusedContainerColor = Orange,
+            focusedContainerColor = Accent,
             focusedContentColor = Black,
-            pressedContainerColor = Orange,
+            pressedContainerColor = Accent,
             pressedContentColor = Black,
         ),
         border = ButtonDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
@@ -218,17 +218,17 @@ fun BrandChip(
 @Composable
 private fun brandButtonColors(primary: Boolean) = ButtonDefaults.colors(
     containerColor = if (primary) Surfaces.WashStrong else Surfaces.Wash,
-    contentColor = if (primary) Orange else White,
-    focusedContainerColor = Orange,
+    contentColor = if (primary) Accent else White,
+    focusedContainerColor = Accent,
     focusedContentColor = Black,
-    pressedContainerColor = Orange,
+    pressedContainerColor = Accent,
     pressedContentColor = Black,
     disabledContainerColor = Surfaces.Wash,
     disabledContentColor = Gray,
 )
 
 /**
- * A focusable card for artwork: rounded corners, and when focused a 3dp orange
+ * A focusable card for artwork: rounded corners, and when focused a 3dp green
  * border and a slight scale. No glow or shadow.
  */
 @Composable
@@ -255,8 +255,8 @@ fun FrameCard(
         ),
         border = ClickableSurfaceDefaults.border(
             border = Border.None,
-            focusedBorder = Border(BorderStroke(FocusStroke, Orange), shape = shape),
-            pressedBorder = Border(BorderStroke(FocusStroke, Orange), shape = shape),
+            focusedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape),
+            pressedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape),
         ),
         glow = ClickableSurfaceDefaults.glow(noGlow, noGlow, noGlow),
         scale = ClickableSurfaceDefaults.scale(focusedScale = if (quiet) Focus.RowScale else Focus.CardScale),
@@ -266,8 +266,8 @@ fun FrameCard(
 }
 
 /**
- * A full-width row for menus, lists and dialogs. Focus fills it orange with black
- * text; a selected row reads white with a short orange mark at its leading edge.
+ * A full-width row for menus, lists and dialogs. Focus fills it green with black
+ * text; a selected row reads white with a short green mark at its leading edge.
  * [restColor] is the label colour of rows that are neither: the rail rests gray.
  */
 @Composable
@@ -287,9 +287,9 @@ fun BrandRow(
         colors = ClickableSurfaceDefaults.colors(
             containerColor = Color.Transparent,
             contentColor = if (selected) White else restColor,
-            focusedContainerColor = Orange,
+            focusedContainerColor = Accent,
             focusedContentColor = Black,
-            pressedContainerColor = Orange,
+            pressedContainerColor = Accent,
             pressedContentColor = Black,
         ),
         border = ClickableSurfaceDefaults.border(border = Border.None, focusedBorder = Border.None),
@@ -302,8 +302,8 @@ fun BrandRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // The mark is orange at rest and takes the label's black when focus fills the row orange.
-            val mark = if (LocalContentColor.current == Black) Black else Orange
+            // The mark is green at rest and takes the label's black when focus fills the row green.
+            val mark = if (LocalContentColor.current == Black) Black else Accent
             val marker = if (selected) Modifier.background(mark, Shapes.Pill) else Modifier
             Box(Modifier.width(3.dp).height(18.dp).then(marker))
             if (icon != null) Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))

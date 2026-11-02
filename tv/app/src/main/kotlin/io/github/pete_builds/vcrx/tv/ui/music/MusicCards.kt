@@ -28,7 +28,7 @@ import io.github.pete_builds.vcrx.tv.ui.theme.Black
 import io.github.pete_builds.vcrx.tv.ui.theme.CornerRadius
 import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 
 /** Square cards per row in the music grids. */
 const val MUSIC_COLUMNS = 6
@@ -79,7 +79,7 @@ fun MusicCard(
         FrameCard(onClick = onClick, modifier = Modifier.fillMaxWidth().then(focusModifier)) {
             SquareArt(imageUrl, title, round = round)
             if (badge != null) {
-                Box(Modifier.align(Alignment.TopStart).padding(6.dp).background(Orange, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                Box(Modifier.align(Alignment.TopStart).padding(6.dp).background(Accent, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                     Text(badge, style = MaterialTheme.typography.labelMedium, color = Black)
                 }
             }

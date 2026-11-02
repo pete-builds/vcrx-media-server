@@ -338,4 +338,4 @@ Design notes and the verified facts the build relies on: [docs/REFERENCE.md](doc
 
 ## Brand
 
-The VCRX wordmark, standalone V mark, app icons and TV tiles live in [brand/](brand/README.md): VCRX Orange `#FF5F00` on Black, Rajdhani for display type and Inter for interface text. The kit is raster artwork, so the logo is always the image, never retyped in a font. `brand/tools/make-assets.py` derives the Android launcher icons, TV banners and in-app logo files from it; rerun it after changing the kit.
+The VCRX wordmark, split V mark, app icons and TV tile live in [brand/](brand/README.md): VCRX Green `#008F11` on Black, Rajdhani for display type and Inter for interface text. The kit is raster artwork, so the logo is always the image, never retyped in a font. `brand/tools/make-assets.py` derives the Android launcher icons, TV banners, in-app logo files and the web app's icons from it; rerun it after changing the kit.

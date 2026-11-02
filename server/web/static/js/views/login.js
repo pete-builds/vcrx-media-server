@@ -31,7 +31,7 @@ export async function loginView({ params }) {
   const server = state.server || {};
   return {
     el: h("div", { class: "login" },
-      h("img", { src: "img/wordmark.png", alt: "VCRX", width: "220", height: "50" }),
+      h("img", { src: "img/wordmark.png", alt: "VCRX", width: "220", height: "44" }),
       h("p", { class: "muted" }, `Sign in to ${server.name || "VCRX"}`),
       form),
     title: "Sign in",

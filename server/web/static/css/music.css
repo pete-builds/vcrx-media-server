@@ -9,7 +9,7 @@
 .artist-card .title, .artist-card .sub { text-align: center; }
 .music-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .live-badge {
-  left: 6px; right: auto; background: var(--orange); color: #000; font-weight: 600; font-size: 11px;
+  left: 6px; right: auto; background: var(--accent); color: #000; font-weight: 600; font-size: 11px;
   letter-spacing: .04em; border-radius: 4px;
 }
 .music-art.round .placeholder { padding: 18%; }
@@ -30,10 +30,10 @@
 .music-info h1 { overflow-wrap: anywhere; }
 .music-info .kicker {
   display: flex; gap: 8px; align-items: center; font-family: Rajdhani, sans-serif; font-weight: 600; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--orange); margin-bottom: 6px;
+  text-transform: uppercase; color: var(--accent); margin-bottom: 6px;
 }
 .music-by { margin: 8px 0 2px; font-size: 18px; font-weight: 500; }
-.music-by a:hover { color: var(--orange); }
+.music-by a:hover { color: var(--accent); }
 .music-info .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
 .music-facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 10px 0 0; font-size: 14px; }
 .music-facts dt { color: var(--faint); }
@@ -56,11 +56,11 @@
 .track-title > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .track-artist { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .track-time { color: var(--muted); font-variant-numeric: tabular-nums; }
-.track.is-current .track-title > span:first-child, .track.is-current .track-no { color: var(--orange); }
+.track.is-current .track-title > span:first-child, .track.is-current .track-no { color: var(--accent); }
 .track.is-playing .track-no { visibility: hidden; position: relative; }
 .track.is-playing .track-no::after {
   content: ""; visibility: visible; position: absolute; right: 2px; top: 50%; width: 10px; height: 10px; margin-top: -5px;
-  border-radius: 50%; background: var(--orange); animation: music-pulse 1s ease-in-out infinite alternate;
+  border-radius: 50%; background: var(--accent); animation: music-pulse 1s ease-in-out infinite alternate;
 }
 @keyframes music-pulse { from { opacity: .35; transform: scale(.8); } to { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .track.is-playing .track-no::after { animation: none; } }
@@ -98,7 +98,7 @@ body.has-music-bar .toast { bottom: calc(var(--music-bar-h) + var(--tabbar-h) + 
 .mb-title, .mb-artist { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mb-title { font-weight: 600; }
 .mb-artist { color: var(--muted); font-size: 13px; }
-.mb-title:hover, .mb-artist:hover { color: var(--orange); }
+.mb-title:hover, .mb-artist:hover { color: var(--accent); }
 .mb-main { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
 .mb-buttons { display: flex; gap: 6px; align-items: center; }
 .mb-btn {
@@ -108,12 +108,12 @@ body.has-music-bar .toast { bottom: calc(var(--music-bar-h) + var(--tabbar-h) + 
 .mb-btn svg { width: 22px; height: 22px; fill: currentColor; }
 .mb-btn:hover { color: var(--text); background: rgba(255,255,255,.08); }
 .mb-btn[disabled] { opacity: .35; cursor: default; background: transparent; }
-.mb-btn.is-on { color: var(--orange); }
+.mb-btn.is-on { color: var(--accent); }
 .mb-play { width: 42px; height: 42px; background: var(--text); color: #000; }
 .mb-play:hover { background: #fff; color: #000; transform: scale(1.04); }
 .mb-progress { display: flex; gap: 10px; align-items: center; width: 100%; }
 .mb-time { flex: none; min-width: 3.2em; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: center; }
-.mb-seek { flex: 1; min-width: 0; accent-color: var(--orange); }
+.mb-seek { flex: 1; min-width: 0; accent-color: var(--accent); }
 .mb-side { display: flex; gap: 6px; justify-content: flex-end; }
 
 .mb-queue {
@@ -132,7 +132,7 @@ body.has-music-bar .toast { bottom: calc(var(--music-bar-h) + var(--tabbar-h) + 
 .mb-queue .q-title { grid-area: t; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mb-queue .q-artist { grid-area: a; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mb-queue .q-time { grid-area: d; align-self: center; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.mb-queue .is-current .q-title { color: var(--orange); }
+.mb-queue .is-current .q-title { color: var(--accent); }
 
 /* Phones: now playing and the main buttons on one row, the seek bar and
    the rest below. */
