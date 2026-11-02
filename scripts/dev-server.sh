@@ -60,6 +60,12 @@ if [ ! -d "$media" ]; then
   clip "$media/TV/Quiet Street/Season 02/Quiet Street - S02E01.mp4" 40 libx264 aac
 fi
 
+# A picture subtitle sidecar (PGS) beside Copper Valley, which a browser
+# cannot draw: the web player lists it greyed out. Its bytes are never read,
+# because the scan knows a .sup by its name and nothing converts it.
+sup="$media/Movies/Copper Valley (2015)/Copper Valley (2015).fr.sup"
+[ -f "$sup" ] || printf 'PG' > "$sup"
+
 # H.264 with AC-3 audio in Matroska, the common case browsers cannot play
 # directly: it plays as a converted stream (audio to AAC). Keyframes every 2 s
 # and an embedded English track, to exercise seeking and subtitle timing.
