@@ -35,33 +35,23 @@ unavoidable with a direct connection). Proxied: every byte passes through Cloudf
 video through a CDN whose terms are written for web pages, adds a hop, and hands TLS to Cloudflare. This guide uses
 DNS only.
 
-### API token for DNS-01
-
-My Profile > API Tokens > Create Token > Custom token:
-
-- Permissions: **Zone > DNS > Edit**. Nothing else (no Zone Read on all zones, no account permissions).
-- Zone Resources: **Include > Specific zone > example.com**.
-- Optional: Client IP Address Filtering to `PUBLIC_IP`; TTL (an end date) if you rotate tokens.
-
-The token goes only in `deploy/caddy/caddy.env` on the server (gitignored, `chmod 600`). It can change any record in
-that one zone, so treat it as a credential for that zone.
+No Cloudflare API token is needed: the certificate comes from the TLS-ALPN-01 challenge over the forwarded port
+(section 3), so the server holds no DNS credential at all.
 
 ### If your public IP changes
 
 Most fibre addresses are stable for months, but not guaranteed. Either run a DNS updater such as
 [favonia/cloudflare-ddns](https://github.com/favonia/cloudflare-ddns) (pin its image by digest, `PROXIED=false`,
-`DOMAINS=watch.example.com`, its own token scoped as above), or use the router's dynamic DNS if it supports
-Cloudflare. A second token keeps the two revocable separately.
+`DOMAINS=watch.example.com`, and a token with Zone > DNS > Edit on that one zone only), or use the router's dynamic
+DNS if it supports Cloudflare. That token is the only credential this design ever needs, and only if the IP moves.
 
 ## 2. Caddy
 
-`deploy/caddy/` holds a Dockerfile that builds Caddy with the
-[caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare) module (the stock image lacks it; the build fails if
-the module is missing), a compose file and the Caddyfile. What the Caddyfile does:
+`deploy/caddy/` holds a Dockerfile (the stock Caddy image, pinned by digest, plus the Caddyfile), a compose file and
+the Caddyfile. What the Caddyfile does:
 
-- HTTPS on `LAN_IP:3752` only, a Let's Encrypt certificate by DNS-01 (no port 80), automatic renewal.
-- TLS propagation checks are off in favour of a fixed 30 s wait, because a router that answers all DNS queries
-  makes Caddy's own check ask the wrong server.
+- HTTPS on `LAN_IP:3752` only, a Let's Encrypt certificate by TLS-ALPN-01 over the forwarded 443 (no port 80, no
+  DNS token), automatic renewal.
 - HSTS, `nosniff`, `X-Frame-Options`, `Referrer-Policy`, a closed `Permissions-Policy`; VCRX's own
   Content-Security-Policy passes through.
 - Refuses `/api/v1/admin*`, `/api/v1/hooks/*` and `/api/v1/federation/*` from the internet. VCRX refuses admin from
@@ -77,10 +67,9 @@ Install on the server:
 
 ```bash
 cd ~/docker/vcrx/deploy/caddy
-cp caddy.env.example caddy.env && chmod 600 caddy.env   # fill in the five values
+cp caddy.env.example caddy.env && chmod 600 caddy.env   # fill in the four values
 mkdir -p data config && chmod 700 data
 docker compose build
-docker compose run --rm caddy caddy list-modules | grep dns.providers.cloudflare   # must print the module
 docker compose run --rm caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 docker compose up -d
 ```
@@ -90,8 +79,12 @@ uses host networking so it reaches VCRX on loopback and VCRX sees it as `127.0.0
 
 ## 3. Certificates
 
-Caddy obtains the certificate on first start (watch `docker logs -f vcrx-caddy` for `certificate obtained
-successfully`) and renews about 30 days before expiry with no action. Check expiry:
+Let's Encrypt validates by connecting to `watch.example.com:443`, so **the certificate can only be issued once the
+router forward (section 5) exists**. Started before that, Caddy logs failed attempts and retries with a growing
+delay; that is harmless. Once the forward is on, watch `docker logs -f vcrx-caddy` for `certificate obtained
+successfully` (usually under a minute; the first visitors in that minute may see a certificate warning). Renewal
+happens about 30 days before expiry, over the same forward, so turning the forward off for weeks at a time lets the
+certificate lapse; Caddy renews again as soon as it is back. Check expiry:
 
 ```bash
 echo | openssl s_client -connect LAN_IP:3752 -servername watch.example.com 2>/dev/null | openssl x509 -noout -dates -issuer
@@ -182,7 +175,7 @@ Fastest first:
 
 1. Disable the router's `vcrx-https` forward. The server is off the internet.
 2. `cd deploy/caddy && docker compose down`.
-3. Delete the `watch` record in Cloudflare and revoke the API token.
+3. Delete the `watch` record in Cloudflare.
 4. Remove `allowed_hosts` and `trusted_proxies` from `vcrx.yaml` and restart VCRX.
 
 Step 1 alone is a full rollback of the exposure; the rest is tidying up.
