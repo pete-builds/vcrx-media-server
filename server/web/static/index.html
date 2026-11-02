@@ -23,7 +23,9 @@
 </head>
 <body>
 <a class="skip-link" href="#view">Skip to content</a>
-<header class="topbar" id="topbar" hidden>
+<!-- Shown from the start: a signed-in launch (the usual one) keeps it, and a
+     bar appearing after sign-in pushed the whole page down (layout shift). -->
+<header class="topbar" id="topbar">
   <button class="menu-btn" id="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="nav">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
   </button>
