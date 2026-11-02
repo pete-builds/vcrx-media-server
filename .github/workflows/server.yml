@@ -77,6 +77,17 @@ jobs:
         env:
           VCRX_MOVIES_DIR: /tmp
           VCRX_TV_DIR: /tmp
+      - name: Caddy image runs under its own compose security settings
+        # deploy/caddy runs as an unprivileged user with every capability
+        # dropped and no-new-privileges; a binary that needs more (the stock
+        # image's file capability) fails to exec only at start, so start it.
+        working-directory: deploy/caddy
+        run: |
+          sed 's/^CADDY_BIND=.*/CADDY_BIND=127.0.0.1/' caddy.env.example > caddy.env
+          mkdir -p data config && chmod 777 data config
+          docker compose build -q
+          docker compose run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tee "$RUNNER_TEMP/caddy.log"
+          grep -q 'Valid configuration' "$RUNNER_TEMP/caddy.log"
 
   # The web app in a real browser: every page renders without throwing or showing
   # "null", and a direct and a converted stream both play. Runs against
