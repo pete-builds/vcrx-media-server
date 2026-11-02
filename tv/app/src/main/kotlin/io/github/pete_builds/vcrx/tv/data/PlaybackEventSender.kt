@@ -97,9 +97,15 @@ class PlaybackEventSender(
 
 /** Which failed events are worth sending again, and when. Pure, so it is unit tested. */
 object EventRetry {
-    /** The server answered and will not take it: signed out, or a 4xx for this session. */
+    /**
+     * The server answered and will not take it: signed out, or a 4xx for this session.
+     * Not a 400: for an event that is a body the server could not read, such as a
+     * field an older server does not know yet. The event itself is fine, so a stop
+     * is kept and sent again; it goes through once the server or the app is updated
+     * (a stop kept on disk is encoded afresh on the next launch).
+     */
     fun permanent(e: ApiException): Boolean =
-        e is ApiException.Unauthorized || (e is ApiException.Http && e.status in 400..499)
+        e is ApiException.Unauthorized || (e is ApiException.Http && e.status in 401..499)
 
     /** 15 s, doubling to at most 10 minutes. */
     fun backoffMs(attempt: Int): Long = (FIRST_MS shl attempt.coerceIn(0, 6)).coerceAtMost(MAX_MS)

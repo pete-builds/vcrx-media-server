@@ -76,6 +76,7 @@ mkdir -p "$out_dir"
 docker buildx build \
   --progress=plain \
   --target apk \
+  --build-context openapi="$tv_dir/../server/api" \
   --secret id=release_keystore,src="$keystore" \
   --secret id=release_keystore_pass,src="$pass_file" \
   --build-arg VERSION_CODE="$version_code" \
