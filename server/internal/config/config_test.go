@@ -143,6 +143,22 @@ func TestTrustedNetworksHaveNoDefault(t *testing.T) {
 	}
 }
 
+// A trusted proxy of 0.0.0.0/0 or ::/0 lets any client name its own address in
+// X-Forwarded-For, so the server refuses to start with one.
+func TestTrustedProxiesRefuseEveryAddress(t *testing.T) {
+	t.Setenv("VCRX_CONFIG_DIR", t.TempDir())
+	for _, bad := range []string{"0.0.0.0/0", "::/0", "127.0.0.1, 0.0.0.0/0"} {
+		t.Setenv("VCRX_TRUSTED_PROXIES", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "trusts every address") {
+			t.Errorf("%q: %v, want a refusal", bad, err)
+		}
+	}
+	t.Setenv("VCRX_TRUSTED_PROXIES", "127.0.0.1/32, ::1")
+	if c, err := Load(); err != nil || len(c.TrustedProxies) != 2 {
+		t.Fatalf("loopback proxy: %v %v", c.TrustedProxies, err)
+	}
+}
+
 // YouTube trailers are off unless asked for, and need a TMDb key as well.
 func TestTrailersYouTubeIsOptIn(t *testing.T) {
 	t.Setenv("VCRX_CONFIG_DIR", t.TempDir())

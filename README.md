@@ -310,7 +310,7 @@ Any other media server on the same host keeps running untouched; VCRX only reads
 - LAN-first. Never forward VCRX's port on your router. Admin routes answer only from loopback and private addresses unless `VCRX_ADMIN_ALLOW_REMOTE=true`.
 - Passwords are hashed with argon2id. Tokens are random, stored only as SHA-256 hashes, and expire after 90 idle days. Failed sign-ins are limited per address (IPv6 per /64, Tailscale per peer): 10 in 15 minutes. They are also limited per username, in two separate counts: 10 for clients off the LAN (Tailscale included) and 50 for the LAN. Nobody on the internet can lock you out at home, and a guest or IoT device rotating addresses on the LAN still stops at 50.
 - Every file is reached through a version id; paths are resolved with symlinks evaluated and must stay inside their library root, which must sit under `VCRX_MEDIA_ROOTS`.
-- Remote access later: put VCRX behind a reverse proxy that terminates HTTPS (Caddy, nginx), add the proxy's address to `VCRX_TRUSTED_PROXIES` so client IPs are logged correctly, and keep admin routes LAN-only. Use a VPN rather than a port forward where you can.
+- Remote access: [docs/INTERNET-ACCESS.md](docs/INTERNET-ACCESS.md) puts VCRX behind Caddy (in [deploy/caddy/](deploy/caddy/)) with a DNS-only name and a Let's Encrypt certificate. List the proxy's address in `trusted_proxies`; a proxy left out makes every visitor unknown rather than local. Admin routes stay LAN-only. A VPN is still the smaller exposure where your viewers can use one.
 
 ## Privacy
 

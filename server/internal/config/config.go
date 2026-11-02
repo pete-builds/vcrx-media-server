@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -441,6 +442,13 @@ func (c *Config) validate() error {
 			if err := o.Validate(); err != nil {
 				errs = append(errs, fmt.Errorf("library %q: %w", l.Name, err))
 			}
+		}
+	}
+	for _, p := range c.TrustedProxies {
+		if pfx, err := netip.ParsePrefix(strings.TrimSpace(p)); err == nil && pfx.Bits() == 0 {
+			// Every address a proxy: any client on the internet could name
+			// itself a LAN address in X-Forwarded-For.
+			errs = append(errs, fmt.Errorf("trusted_proxies %q trusts every address; list only your reverse proxy's own address", p))
 		}
 	}
 	if h := c.LiveTV.RefreshHours; h < 0 || h > 168 {
