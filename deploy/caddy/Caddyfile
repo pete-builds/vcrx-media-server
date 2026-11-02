@@ -1,9 +1,9 @@
 # VCRX behind Caddy for access from the internet. See docs/INTERNET-ACCESS.md.
 #
 # The router forwards public TCP 443 to this host's HTTPS_PORT; Caddy serves the
-# one public name with a Let's Encrypt certificate obtained by DNS-01 through
-# Cloudflare (no port 80 needed, nothing proxied by Cloudflare), and passes
-# requests to VCRX on loopback. VCRX must list 127.0.0.1 and ::1 in
+# one public name with a Let's Encrypt certificate obtained by the TLS-ALPN-01
+# challenge over that same forward (no port 80, no DNS API token, the stock
+# Caddy image), and passes requests to VCRX on loopback. VCRX must list 127.0.0.1 and ::1 in
 # trusted_proxies and the public name in allowed_hosts.
 #
 # Values come from the environment (compose passes them from caddy.env):
@@ -11,7 +11,6 @@
 #   CADDY_BIND    this host's LAN address, the only address Caddy listens on
 #   HTTPS_PORT    the port the router forwards 443 to
 #   ACME_EMAIL    contact address for Let's Encrypt expiry mail
-#   CF_API_TOKEN  Cloudflare token: Zone > DNS > Edit on this one zone only
 {
 	# No admin API: the configuration changes only by restarting the container.
 	admin off
@@ -36,12 +35,14 @@
 	bind {$CADDY_BIND}
 
 	tls {
-		dns cloudflare {env.CF_API_TOKEN}
-		# The home LAN answers every port-53 query itself, so Caddy's check
-		# that the TXT record has propagated would ask the wrong server. Wait
-		# a fixed time instead and let Let's Encrypt do the looking.
-		propagation_delay 30s
-		propagation_timeout -1
+		issuer acme {
+			email {$ACME_EMAIL}
+			# Let's Encrypt connects to public 443, which the router forwards
+			# here: TLS-ALPN-01 is answered on this listener. Port 80 is not
+			# forwarded, so the HTTP challenge is never tried. Until the
+			# forward exists, issuance fails and Caddy retries with backoff.
+			disable_http_challenge
+		}
 	}
 
 	header {
