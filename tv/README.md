@@ -137,7 +137,7 @@ The settings for trailers and skip intro are stored already (`Preferences.traile
 
 | Where | Key | Does |
 |---|---|---|
-| Everywhere | D-pad, center | Move focus (an orange border on cards, an orange fill on buttons), select |
+| Everywhere | D-pad, center | Move focus (a green border on cards, a green fill on buttons), select |
 | Browse | Back | Content to the left rail, rail to Home, Home's rail out of the app |
 | Login | Back | Back to Connect |
 | Player, controls hidden | Center, Play/Pause | Play or pause |
@@ -157,7 +157,7 @@ The bar shows which kind it is: Audio converted, Repackaged, or Video converted.
 
 ## Brand
 
-Follows `brand/README.md` and `brand/reference/VCRX-brand-spec-board.png`. Black `#000000` is the ground everywhere; VCRX Orange `#FF5F00` marks the logo, focus, accents, primary actions and headings; body text is white and secondary text light gray. Display text, screen titles, row titles and labels are Rajdhani SemiBold and Bold, uppercase with wide tracking (0.15 em); interface and body text is Inter Regular and Medium. A focused card gets a 3dp orange border and a slight scale, a focused button fills orange, and nothing glows or casts a shadow. Corners are 6 to 8dp, matching the rounded icon. The Connect screen shows the wordmark and the tagline. In the player the chrome is black and the progress bar and scrubber are orange; subtitles follow the TV's own caption settings unless Settings, Subtitles, Style is Custom.
+Follows `brand/README.md` and `brand/reference/VCRX-green-brand-board-updated.png`. Black `#000000` is the ground everywhere; VCRX Green `#008F11` marks the logo, focus, accents, primary actions and headings; body text is white and secondary text light gray. Display text, screen titles, row titles and labels are Rajdhani SemiBold and Bold, uppercase with wide tracking (0.15 em); interface and body text is Inter Regular and Medium. A focused card gets a 3dp green border and a slight scale, a focused button fills green, and nothing glows or casts a shadow. Corners are 6 to 8dp, matching the rounded icon. The Connect screen shows the wordmark and the tagline. In the player the chrome is black and the progress bar and scrubber are green; subtitles follow the TV's own caption settings unless Settings, Subtitles, Style is Custom.
 
 Brand assets, copied unmodified from `brand/android/res/` (generated there by `brand/tools/make-assets.py`): the adaptive launcher icon with a monochrome layer (`mipmap-anydpi-v26/ic_launcher.xml`, `ic_launcher_round.xml`, and `ic_launcher_foreground.png` and `ic_launcher_monochrome.png` per density), legacy `ic_launcher.png` and `ic_launcher_round.png` for mdpi to xxxhdpi, `drawable-xhdpi/banner.png` and `drawable-xxxhdpi/banner.png` (the TV banner), `drawable-nodpi/brand_wordmark.png` and `brand_mark.png`, and `values/brand_colors.xml`. The wordmark is raster artwork shown at its own aspect ratio; the name is never re-typed in a font as the logo.
 

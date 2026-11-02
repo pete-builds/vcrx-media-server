@@ -181,7 +181,7 @@ func contains(list []string, v string) bool {
 
 // styleVersion goes into every signature. Change it whenever the drawing
 // changes (sizes, colours, fonts), or cached posters keep the old look.
-const styleVersion = "style-2"
+const styleVersion = "style-3"
 
 // Signature is a short key for a set of badges, so a cached poster is redrawn
 // when a rating moves or a 4K version arrives. Empty means no badges.
@@ -331,14 +331,14 @@ func (s *Service) Draw(img *image.RGBA, bs []Badge) error {
 var (
 	ink    = color.RGBA{0xf2, 0xf2, 0xf4, 0xff}
 	muted  = color.RGBA{0xb4, 0xb4, 0xbc, 0xff}
-	orange = color.RGBA{0xff, 0x5f, 0x00, 0xff}
+	accent = color.RGBA{0x00, 0x8f, 0x11, 0xff} // VCRX Green, brand/colors.json
 	gold   = color.RGBA{0xf5, 0xc5, 0x18, 0xff}
 	panel  = color.NRGBA{0x08, 0x08, 0x0a, 0xd8}
 	black  = color.RGBA{0, 0, 0, 0xff}
 )
 
 // pill draws a rounded dark badge: a star and score with the source for a
-// rating, or the resolution with an orange HDR tag.
+// rating, or the resolution with a green HDR tag.
 func (s *Service) pill(img *image.RGBA, b Badge, k, margin float64) error {
 	h := 92 * k
 	big, err := s.face(64 * k)
@@ -362,7 +362,7 @@ func (s *Service) pill(img *image.RGBA, b Badge, k, margin float64) error {
 	}
 	tagPad := 0.0
 	if b.Kind == "resolution" && b.Sub != "" {
-		tagPad = 14 * k // the HDR tag sits in its own orange chip
+		tagPad = 14 * k // the HDR tag sits in its own green chip
 	}
 	width := pad + star + mainW + pad
 	if b.Sub != "" {
@@ -380,7 +380,7 @@ func (s *Service) pill(img *image.RGBA, b Badge, k, margin float64) error {
 	cx += mainW + gap
 	if b.Sub != "" {
 		if b.Kind == "resolution" {
-			roundRect(img, cx, y+18*k, subW+2*tagPad, h-36*k, 8*k, orange)
+			roundRect(img, cx, y+18*k, subW+2*tagPad, h-36*k, 8*k, accent)
 			text(img, small, cx+tagPad, y+h/2+12*k, b.Sub, black)
 		} else {
 			text(img, small, cx, y+h/2+12*k, b.Sub, muted)
@@ -389,7 +389,7 @@ func (s *Service) pill(img *image.RGBA, b Badge, k, margin float64) error {
 	return nil
 }
 
-// ribbon draws a diagonal orange band across a corner.
+// ribbon draws a diagonal green band across a corner.
 func (s *Service) ribbon(img *image.RGBA, b Badge, k float64) error {
 	face, err := s.face(40 * k)
 	if err != nil {
@@ -398,7 +398,7 @@ func (s *Service) ribbon(img *image.RGBA, b Badge, k float64) error {
 	bandH := 70 * k
 	bandW := 520 * k
 	band := image.NewRGBA(image.Rect(0, 0, int(bandW), int(bandH)))
-	draw.Draw(band, band.Bounds(), &image.Uniform{orange}, image.Point{}, draw.Src)
+	draw.Draw(band, band.Bounds(), &image.Uniform{accent}, image.Point{}, draw.Src)
 	tw := measure(face, b.Text)
 	text(band, face, (bandW-tw)/2, bandH/2+14*k, b.Text, black)
 

@@ -44,11 +44,11 @@ fun <T> LoadStateContent(
     }
 }
 
-/** A screen still loading: the loading bar top left, nothing else (no spinner, no word). */
+/** A screen still loading: the loading cursor top left, nothing else (no spinner, no word). */
 @Composable
 fun LoadingView(modifier: Modifier = Modifier, message: String = "Loading") {
     Box(modifier.fillMaxSize()) {
-        LoadingBar(Modifier.align(Alignment.TopStart), description = message)
+        LoadingCursor(Modifier.align(Alignment.TopStart), description = message)
     }
 }
 

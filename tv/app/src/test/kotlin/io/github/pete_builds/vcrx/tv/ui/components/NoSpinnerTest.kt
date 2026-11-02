@@ -6,8 +6,8 @@ import org.junit.Test
 import java.io.File
 
 /**
- * Pete, 2026-10-31: "i don't like the spinning loading logo". The loading bar
- * (LoadingBar) is the one loading sign; this fails if a spinner comes back,
+ * Pete, 2026-10-31: "i don't like the spinning loading logo". The loading cursor
+ * (LoadingCursor) is the one loading sign; this fails if a spinner comes back,
  * Compose's or Media3's buffering wheel.
  */
 class NoSpinnerTest {

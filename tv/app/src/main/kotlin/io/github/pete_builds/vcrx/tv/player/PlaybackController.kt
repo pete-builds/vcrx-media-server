@@ -161,7 +161,7 @@ class PlaybackController(
     var reloading by mutableStateOf(false)
         private set
 
-    /** The player is waiting for data: the loading bar shows (never a spinner). */
+    /** The player is waiting for data: the loading cursor shows (never a spinner). */
     var buffering by mutableStateOf(false)
         private set
 

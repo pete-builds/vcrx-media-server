@@ -47,7 +47,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 import kotlinx.coroutines.launch
 
 class MusicAlbumViewModel(private val graph: AppGraph, private val albumId: Long) : ViewModel() {
@@ -99,7 +99,7 @@ fun MusicAlbumScreen(albumId: Long) {
             Column(Modifier.width(300.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 SquareArt(if (album.hasCover) graph.api.albumCoverUrl(album.id, 640) else null, album.title)
                 Spacer(Modifier.height(10.dp))
-                Label(if (album.live) "Live recording" else if (album.compilation) "Compilation" else "Album", color = Orange)
+                Label(if (album.live) "Live recording" else if (album.compilation) "Compilation" else "Album", color = Accent)
                 Text(album.title, style = MaterialTheme.typography.headlineSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 Text(album.artistName, style = MaterialTheme.typography.titleMedium, color = Gray, maxLines = 1)
                 val facts = listOfNotNull(
@@ -116,7 +116,7 @@ fun MusicAlbumScreen(albumId: Long) {
                         album.taper?.let { "Taper: $it" },
                     ).forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = Gray, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                 }
-                error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Orange) }
+                error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Accent) }
                 Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     BrandButton("Play", onClick = { play() }, primary = true, icon = Icons.Filled.PlayArrow, modifier = Modifier.focusRequester(playButton))
                     BrandButton("Shuffle", onClick = { play(shuffle = true) }, icon = MusicIcons.Shuffle)

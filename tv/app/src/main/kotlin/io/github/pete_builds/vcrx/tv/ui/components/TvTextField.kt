@@ -36,11 +36,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import io.github.pete_builds.vcrx.tv.ui.theme.Black
 import io.github.pete_builds.vcrx.tv.ui.theme.FocusStroke
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 import io.github.pete_builds.vcrx.tv.ui.theme.White
 
 /**
- * A single-line field for the TV keyboard: a 1dp gray outline at rest, a 3dp orange
+ * A single-line field for the TV keyboard: a 1dp gray outline at rest, a 3dp green
  * one when focused. Compose moves focus out of a
  * text field on D-pad arrows only for remotes that report a D-pad source; some TV
  * remotes report a plain keyboard, which would trap focus in the field. So up and
@@ -70,7 +70,7 @@ fun TvTextField(
             onValueChange = onValueChange,
             singleLine = true,
             textStyle = MaterialTheme.typography.titleMedium.copy(color = White),
-            cursorBrush = SolidColor(Orange),
+            cursorBrush = SolidColor(Accent),
             visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(
                 keyboardType = if (password) KeyboardType.Password else keyboardType,
@@ -99,7 +99,7 @@ fun TvTextField(
                     Modifier
                         .fillMaxWidth()
                         .background(Black, fieldShape)
-                        .border(if (focused) FocusStroke else 1.dp, if (focused) Orange else Gray, fieldShape)
+                        .border(if (focused) FocusStroke else 1.dp, if (focused) Accent else Gray, fieldShape)
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
                     if (value.isEmpty() && placeholder != null) {

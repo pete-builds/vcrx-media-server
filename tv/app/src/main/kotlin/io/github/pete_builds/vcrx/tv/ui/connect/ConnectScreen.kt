@@ -38,7 +38,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.TvTextField
 import io.github.pete_builds.vcrx.tv.ui.components.Wordmark
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 import kotlinx.coroutines.launch
 
 /** The contract's fixed product id in GET /api/v1/server, not a display name. */
@@ -152,7 +152,7 @@ fun ConnectScreen() {
             Text(
                 "Connect to your server".uppercase(),
                 style = MaterialTheme.typography.headlineSmall,
-                color = Orange,
+                color = Accent,
                 modifier = Modifier.padding(top = 12.dp),
             )
             TvTextField(

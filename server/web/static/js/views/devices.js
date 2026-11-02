@@ -224,7 +224,7 @@ export async function inviteView({ match }) {
     }
   });
   root.replaceChildren(
-    h("img", { class: "picker-mark", src: "img/wordmark.png", alt: "VCRX", width: "160", height: "36" }),
+    h("img", { class: "picker-mark", src: "img/wordmark.png", alt: "VCRX", width: "178", height: "36" }),
     h("h1", {}, "You're invited"),
     h("p", { class: "muted" }, `${server.name || "A VCRX server"} has invited this device. Join to watch what it shares with you: `,
       "no account, no password. The invite works once."),

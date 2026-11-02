@@ -23,10 +23,10 @@ import androidx.tv.material3.Typography
 import androidx.tv.material3.darkColorScheme
 import io.github.pete_builds.vcrx.tv.R
 
-// The brand palette (brand/README.md): black is the ground, orange marks the logo,
+// The brand palette (brand/README.md): black is the ground, green marks the logo,
 // focus, accents, primary actions and headings. Body text is white and secondary
 // text light gray, as on the brand spec board. No other hues.
-val Orange = Color(0xFFFF5F00)
+val Accent = Color(0xFF008F11) // VCRX Green, brand/colors.json
 val Black = Color(0xFF000000)
 val White = Color(0xFFFFFFFF)
 val Gray = Color(0xFFA3A3A3)
@@ -50,16 +50,16 @@ val Inter = FontFamily(
 val LabelSpacing: TextUnit = 0.15.em
 
 private val colors = darkColorScheme(
-    primary = Orange,
+    primary = Accent,
     onPrimary = Black,
-    primaryContainer = Orange,
+    primaryContainer = Accent,
     onPrimaryContainer = Black,
     inversePrimary = Black,
     secondary = Gray,
     onSecondary = Black,
     secondaryContainer = Graphite,
     onSecondaryContainer = White,
-    tertiary = Orange,
+    tertiary = Accent,
     onTertiary = Black,
     background = Black,
     onBackground = White,
@@ -68,11 +68,11 @@ private val colors = darkColorScheme(
     surfaceVariant = Graphite,
     onSurfaceVariant = Gray,
     surfaceTint = Black,
-    inverseSurface = Orange,
+    inverseSurface = Accent,
     inverseOnSurface = Black,
-    error = Orange,
+    error = Accent,
     onError = Black,
-    border = Orange,
+    border = Accent,
     borderVariant = Gray,
     scrim = Black,
 )
@@ -106,7 +106,7 @@ private val typography = Typography(
     labelSmall = label(13, 18),
 )
 
-private val selection = TextSelectionColors(handleColor = Orange, backgroundColor = Orange.copy(alpha = 0.4f))
+private val selection = TextSelectionColors(handleColor = Accent, backgroundColor = Accent.copy(alpha = 0.4f))
 
 @Composable
 fun BrandTheme(content: @Composable () -> Unit) {

@@ -42,7 +42,7 @@ object Space {
 }
 
 /**
- * Surfaces step up from black by lightness alone. Neutral grays, no hue: orange
+ * Surfaces step up from black by lightness alone. Neutral grays, no hue: green
  * stays the only colour.
  */
 object Surfaces {
@@ -51,7 +51,7 @@ object Surfaces {
     val WashStrong = Color.White.copy(alpha = 0.16f)
 }
 
-/** Focus: orange marks where the remote is, everywhere. Small growth, no glow. */
+/** Focus: green marks where the remote is, everywhere. Small growth, no glow. */
 object Focus {
     const val ButtonScale = 1.05f
     const val CardScale = 1.05f

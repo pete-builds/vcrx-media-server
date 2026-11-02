@@ -204,15 +204,16 @@ export function errorBox(title, message, action) {
   return h("div", { class: "error-box", role: "alert" }, h("h2", {}, title), h("p", { class: "muted" }, message), action || null);
 }
 
-// loadBar is the one loading sign in place of a spinner: a thin VCRX Orange
-// bar top left (app.css .load-bar), shown only once a load passes 150 ms. Each
-// show is matched by one hide; it stays while any load is running.
+// loadBar is the one loading sign in place of a spinner: a blinking green block
+// cursor in the top left corner (app.css .load-cursor), shown only once a load
+// passes 150 ms. Each show is matched by one hide; it stays while any load is
+// running.
 let loads = 0;
 let barEl = null;
 export const loadBar = {
   show() {
     if (!barEl) {
-      barEl = h("div", { class: "load-bar", role: "progressbar", "aria-label": "Loading", hidden: true });
+      barEl = h("div", { class: "load-cursor", role: "progressbar", "aria-label": "Loading", hidden: true });
       document.body.append(barEl);
     }
     if (loads++ === 0) barEl.hidden = false;

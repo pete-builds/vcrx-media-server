@@ -46,7 +46,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
 import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 import kotlinx.coroutines.launch
 
 class LiveViewModel(private val graph: AppGraph) : ViewModel() {
@@ -119,7 +119,7 @@ private fun ChannelRow(c: LiveChannel, now: Long, time: (Long) -> String) {
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Label(c.number.orEmpty(), style = MaterialTheme.typography.titleMedium, color = Orange, modifier = Modifier.width(56.dp))
+        Label(c.number.orEmpty(), style = MaterialTheme.typography.titleMedium, color = Accent, modifier = Modifier.width(56.dp))
         Box(Modifier.size(width = 72.dp, height = 40.dp), contentAlignment = Alignment.Center) {
             val logo = if (c.hasLogo) api.liveLogoUrl(c.id) else null
             if (logo != null) {
@@ -133,7 +133,7 @@ private fun ChannelRow(c: LiveChannel, now: Long, time: (Long) -> String) {
             Text(LiveTv.nowLine(c), style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             c.now?.let { p ->
                 Box(Modifier.fillMaxWidth().height(3.dp).background(Gray.copy(alpha = 0.3f), RoundedCornerShape(2.dp))) {
-                    Box(Modifier.fillMaxWidth(LiveTv.progress(p, now)).height(3.dp).background(Orange, RoundedCornerShape(2.dp)))
+                    Box(Modifier.fillMaxWidth(LiveTv.progress(p, now)).height(3.dp).background(Accent, RoundedCornerShape(2.dp)))
                 }
             }
             val next = LiveTv.nextLine(c, time)

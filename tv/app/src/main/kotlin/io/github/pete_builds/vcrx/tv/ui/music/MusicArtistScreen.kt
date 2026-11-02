@@ -43,7 +43,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
-import io.github.pete_builds.vcrx.tv.ui.theme.Orange
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
 import kotlinx.coroutines.launch
 
 class MusicArtistViewModel(private val graph: AppGraph, private val artistId: Long) : ViewModel() {
@@ -83,14 +83,14 @@ fun MusicArtistScreen(artistId: Long) {
                 Row(horizontalArrangement = Arrangement.spacedBy(32.dp), verticalAlignment = Alignment.CenterVertically) {
                     SquareArt(if (artist.hasImage) graph.api.artistImageUrl(artist.id, 480) else null, artist.name, Modifier.width(180.dp), round = true)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Label("Artist", color = Orange)
+                        Label("Artist", color = Accent)
                         Text(artist.name, style = MaterialTheme.typography.headlineMedium)
                         Text(
                             "${artist.albumCount} albums · ${artist.trackCount} tracks",
                             style = MaterialTheme.typography.bodyMedium,
                             color = Gray,
                         )
-                        error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Orange) }
+                        error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Accent) }
                         BrandButton(
                             "Shuffle play",
                             onClick = {

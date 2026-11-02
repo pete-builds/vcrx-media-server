@@ -11,7 +11,7 @@
 .nav-profile { display: inline-flex; border-radius: 50%; }
 /* Touch: a 44px target around the 30px avatar. */
 @media (pointer: coarse) { .nav-profile { padding: 7px; margin-block: -7px; margin-right: -7px; } }
-.nav-profile:hover .avatar { box-shadow: 0 0 0 2px var(--orange); }
+.nav-profile:hover .avatar { box-shadow: 0 0 0 2px var(--accent); }
 
 .picker {
   min-height: calc(100vh - 88px); display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -25,7 +25,7 @@
   padding: 8px; border-radius: 12px; width: clamp(104px, 26vw, 160px); color: var(--muted);
 }
 .profile .avatar { outline: 3px solid transparent; outline-offset: 3px; transition: outline-color .12s, transform .12s; }
-.profile:hover .avatar, .profile:focus-visible .avatar { outline-color: var(--orange); transform: scale(1.04); }
+.profile:hover .avatar, .profile:focus-visible .avatar { outline-color: var(--accent); transform: scale(1.04); }
 .profile:focus-visible { outline: none; }
 .profile:hover, .profile:focus-visible, .profile.current { color: var(--text); }
 .profile-name { font-weight: 500; overflow-wrap: anywhere; }
@@ -41,14 +41,14 @@
 .pin-pad p { margin: 0; }
 .pin-dots { display: flex; gap: 12px; min-height: 16px; }
 .pin-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--faint); }
-.pin-dots i.on { background: var(--orange); border-color: var(--orange); }
+.pin-dots i.on { background: var(--accent); border-color: var(--accent); }
 .pin-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; }
 .pin-key {
   height: 56px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer;
   font: 600 24px/1 Rajdhani, Inter, sans-serif;
 }
-.pin-key:hover, .pin-key:focus-visible { border-color: var(--orange); }
-.pin-ok { background: var(--orange); color: #000; border-color: var(--orange); }
+.pin-key:hover, .pin-key:focus-visible { border-color: var(--accent); }
+.pin-ok { background: var(--accent); color: #000; border-color: var(--accent); }
 .pin-password { display: grid; gap: 12px; width: 100%; text-align: left; }
 .pin-error { min-height: 1.5em; }
 

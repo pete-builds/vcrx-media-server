@@ -48,7 +48,7 @@ export async function pickerView({ params }) {
       return b;
     });
     root.replaceChildren(
-      h("img", { class: "picker-mark", src: "img/wordmark.png", alt: "VCRX", width: "160", height: "36" }),
+      h("img", { class: "picker-mark", src: "img/wordmark.png", alt: "VCRX", width: "178", height: "36" }),
       h("h1", {}, "Who's watching?"),
       h("div", { class: "profiles" }, buttons),
       signedInNow ? h("div", { class: "picker-actions" }, h("a", { class: "btn", href: "#" + next }, "Cancel")) :

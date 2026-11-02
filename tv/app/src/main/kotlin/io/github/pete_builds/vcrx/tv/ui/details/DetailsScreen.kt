@@ -487,7 +487,7 @@ private fun VersionPicker(versions: List<Version>, selected: Long, onPick: (Long
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
 }
 
-/** Mark watched beside Play: a tick in a circle, orange once watched. */
+/** Mark watched beside Play: a tick in a circle, green once watched. */
 @Composable
 private fun WatchedButton(played: Boolean, onClick: () -> Unit) {
     BrandIconButton(

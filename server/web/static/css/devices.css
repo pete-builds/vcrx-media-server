@@ -1,7 +1,7 @@
 /* Settings > Devices and Invites, and the invite and pairing pages. */
 .scope-form { display: grid; gap: 14px; }
 .scope-form .field input { max-width: 24em; }
-.invite-card { display: grid; gap: 12px; justify-items: start; margin-top: 16px; border-color: var(--orange); }
+.invite-card { display: grid; gap: 12px; justify-items: start; margin-top: 16px; border-color: var(--accent); }
 .invite-card p { margin: 0; }
 /* The QR code is drawn at 6 px a module; keep the modules sharp and on white. */
 .qr { width: min(220px, 70vw); height: auto; background: #fff; border-radius: 8px; image-rendering: pixelated; }
@@ -24,7 +24,7 @@
 }
 .pair-page { display: grid; gap: 16px; }
 .pair-who p { margin: 4px 0; }
-.pair-code { font: 700 clamp(28px, 8vw, 40px)/1.1 Rajdhani, Inter, sans-serif; letter-spacing: .12em; color: var(--orange); }
+.pair-code { font: 700 clamp(28px, 8vw, 40px)/1.1 Rajdhani, Inter, sans-serif; letter-spacing: .12em; color: var(--accent); }
 .invite-page h1 { margin: 0; }
 .invite-page p { max-width: 34em; margin: 0; }
 .who .btn { padding: 0 8px; }
@@ -34,10 +34,10 @@
 .source-badge {
   position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); padding: 2px 7px; border-radius: 10px;
   background: rgba(0,0,0,.8); color: #fff; font-size: 11px; font-weight: 600; line-height: 15px;
-  overflow-wrap: anywhere; box-shadow: 0 0 0 1px var(--orange);
+  overflow-wrap: anywhere; box-shadow: 0 0 0 1px var(--accent);
 }
 .peer-states { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
 .peer-state { color: var(--faint); }
-.source-line { color: var(--orange); }
+.source-line { color: var(--accent); }
 .peer-row .device-head .pill.peer-online { color: var(--good); border-color: var(--good); }
 .link-form .field input, .scope-form .address-field input { width: 100%; max-width: 40em; }
