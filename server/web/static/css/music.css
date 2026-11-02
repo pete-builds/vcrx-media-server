@@ -77,13 +77,14 @@
 .checksums .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* The player bar: fixed to the bottom, outside the routed view. */
-body.has-music-bar main { padding-bottom: calc(var(--music-bar-h) + 48px); }
-body.has-music-bar .toast { bottom: calc(var(--music-bar-h) + 20px); }
+/* On a phone it rides on the tab bar, which then keeps the home indicator's room. */
+body.has-music-bar main { padding-bottom: calc(var(--music-bar-h) + var(--tabbar-h) + var(--safe-bottom) + 48px); }
+body.has-music-bar .toast { bottom: calc(var(--music-bar-h) + var(--tabbar-h) + var(--safe-bottom) + 20px); }
 .music-bar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar-h) + var(--tabbar-safe, 0px)); z-index: 30;
   background: rgba(12, 12, 14, .94); border-top: 1px solid var(--line);
   -webkit-backdrop-filter: saturate(150%) blur(14px); backdrop-filter: saturate(150%) blur(14px);
-  padding: 10px var(--pad) calc(10px + env(safe-area-inset-bottom));
+  padding: 10px var(--pad) calc(10px + var(--music-safe, var(--safe-bottom)));
 }
 .mb-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; align-items: center; }
 .mb-now { display: flex; gap: 12px; align-items: center; min-width: 0; }

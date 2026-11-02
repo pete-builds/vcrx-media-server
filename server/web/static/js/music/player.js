@@ -520,6 +520,18 @@ function positionState() {
   }
 }
 
+// reclaimMediaSession hands the lock screen back to music once the video
+// player, which sets its own handlers and title, closes.
+export function reclaimMediaSession() {
+  if (!("mediaSession" in navigator)) return;
+  installMediaSession();
+  sessionTrack = null;
+  try { navigator.mediaSession.metadata = null; } catch { /* read-only here */ }
+  const t = current();
+  if (t) mediaSession(t);
+  else navigator.mediaSession.playbackState = "none";
+}
+
 function installMediaSession() {
   if (!("mediaSession" in navigator)) return;
   const set = (action, fn) => {

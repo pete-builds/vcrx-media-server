@@ -179,7 +179,11 @@ async function main() {
     await evaluate(`${wait(`document.querySelector("#view .row")`)}
       const i = document.querySelector("#search input");
       i.value = "";
-      i.focus();`);
+      // A phone keeps the box behind the tab bar's Search, which focuses it.
+      const tab = document.querySelector('#tabbar a[href="#/search"]');
+      if (tab && tab.getClientRects().length) tab.click();
+      else i.focus();
+      ${wait(`document.activeElement === i && !document.querySelector("#view .row")`)}`);
     for (const ch of text) {
       await s("Input.insertText", { text: ch });
       await sleep(60);
@@ -269,6 +273,45 @@ async function main() {
     }
   }
 
+  // Installable: the page names a manifest whose start page is in its scope,
+  // which opens standalone, with a 192 and a 512 icon and a maskable one, every
+  // icon a PNG of the size it claims; and an iPhone gets its touch icon.
+  console.log("manifest");
+  const man = await evaluate(`
+    const link = document.querySelector('link[rel="manifest"]');
+    if (!link) return { why: "no manifest link in the page" };
+    const r = await fetch(link.href);
+    let m;
+    try { m = await r.json(); } catch { return { why: "manifest is not JSON (" + r.headers.get("content-type") + ")" }; }
+    const icons = [];
+    for (const i of m.icons || []) {
+      const res = await fetch(new URL(i.src, link.href));
+      const blob = await res.blob();
+      let size = "";
+      try { const b = await createImageBitmap(blob); size = b.width + "x" + b.height; } catch { size = "unreadable"; }
+      icons.push({ src: i.src, status: res.status, type: res.headers.get("content-type"), claimed: i.sizes, size, purpose: i.purpose || "any" });
+    }
+    const touch = document.querySelector('link[rel="apple-touch-icon"]');
+    const t = touch ? await fetch(touch.href) : null;
+    const start = new URL(m.start_url, link.href).href, scope = new URL(m.scope || ".", link.href).href;
+    return { m: { display: m.display, name: m.name, short: m.short_name, bg: m.background_color, theme: m.theme_color }, inScope: start.startsWith(scope), icons,
+      touch: t ? t.status + " " + t.headers.get("content-type") : "none", fit: (document.querySelector('meta[name="viewport"]') || {}).content || "",
+      capable: !!document.querySelector('meta[name="apple-mobile-web-app-capable"][content="yes"]') };`);
+  if (man.why) fail("manifest", man.why);
+  else {
+    if (man.m.display !== "standalone") fail("manifest", `display is ${man.m.display}`);
+    if (!man.m.name || !man.m.short || !man.m.bg || !man.m.theme) fail("manifest", `missing a name or colour: ${JSON.stringify(man.m)}`);
+    if (!man.inScope) fail("manifest", "start_url is outside scope");
+    for (const i of man.icons) {
+      if (i.status !== 200 || i.type !== "image/png" || i.size !== i.claimed) fail("manifest", `icon ${i.src}: ${i.status} ${i.type} ${i.size}, claims ${i.claimed}`);
+    }
+    for (const want of ["192x192", "512x512"]) if (!man.icons.some((i) => i.claimed === want && i.purpose.includes("any"))) fail("manifest", `no ${want} icon`);
+    if (!man.icons.some((i) => i.purpose.includes("maskable"))) fail("manifest", "no maskable icon");
+    if (!/^200 image\/png/.test(man.touch)) fail("manifest", `apple-touch-icon: ${man.touch}`);
+    if (!/viewport-fit=cover/.test(man.fit)) fail("manifest", "viewport lacks viewport-fit=cover, so safe areas read 0");
+    if (!man.capable) fail("manifest", "no apple-mobile-web-app-capable, so an iPhone opens it in Safari");
+  }
+
   // The same pages on a phone: nothing may be wider than the screen.
   await s("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   for (const [path, selector] of pages) {
@@ -287,23 +330,50 @@ async function main() {
   console.log("phone menu");
   exceptions = [];
   await s("Page.navigate", { url: `${base}/#/` });
+  // The phone's tab bar: Home, libraries, Search and More along the bottom,
+  // within the screen; More opens a sheet with Settings; the top bar's Back
+  // returns from a page opened inside the app.
   const menu = await evaluate(`${wait(`document.querySelector("#view .row")`)}
-    const btn = document.getElementById("menu-btn");
     const shown = (el) => !!el && el.getClientRects().length > 0;
-    const link = () => document.querySelector('#nav a[href="#/settings"]');
-    const before = { btn: shown(btn), nav: shown(link()) };
-    if (btn) btn.click();
+    const bar = document.getElementById("tabbar");
+    const tabs = [...bar.querySelectorAll(".tab")].filter(shown);
+    const r = bar.getBoundingClientRect();
+    const btn = document.getElementById("more-btn");
+    const link = () => document.querySelector('#more-sheet a[href="#/settings"]');
+    const before = { bar: shown(bar), tabs: tabs.map((t) => t.textContent), bottom: Math.round(r.bottom), height: innerHeight,
+      small: tabs.filter((t) => t.getBoundingClientRect().height < 44 || t.getBoundingClientRect().width < 44).length,
+      topNav: shown(document.querySelector('#nav a[href="#/settings"]')), sheet: shown(link()), home: !!document.querySelector('#tabbar a.active[href="#/"]') };
+    if (!btn) return { before, after: {}, noMore: true };
+    btn.click();
     await new Promise((r) => setTimeout(r, 100));
-    const after = { nav: shown(link()), expanded: btn && btn.getAttribute("aria-expanded") };
+    const after = { sheet: shown(link()), expanded: btn.getAttribute("aria-expanded") };
     if (link()) link().click();
-    ${wait(`location.hash === "#/settings" && !shown(link())`)}
-    return { before, after, hash: location.hash, closed: !shown(link()) };`);
-  if (!menu.before.btn) fail("phone menu", "no menu button in the top bar");
-  if (menu.before.nav) fail("phone menu", "the library links show before the menu is opened");
-  if (!menu.after.nav || menu.after.expanded !== "true") fail("phone menu", "the menu button did not open the links");
-  if (menu.hash !== "#/settings") fail("phone menu", `Settings in the menu went to ${menu.hash}`);
-  if (!menu.closed) fail("phone menu", "the menu stayed open after choosing a page");
-  if (exceptions.length) fail("phone menu", `threw: ${exceptions[0]}`);
+    ${wait(`location.hash === "#/settings" && !shown(link()) && document.querySelector("#view .settings")`)}
+    const moreLit = btn.classList.contains("active");
+    const back = document.getElementById("back-btn");
+    const backShown = shown(back);
+    if (back) back.click();
+    ${wait(`location.hash === "#/" && document.querySelector("#view .row")`)}
+    return { before, after, moreLit, backShown, hash: location.hash, closed: !shown(link()), backHome: location.hash === "#/" };`);
+  if (!menu.before.bar) fail("phone tab bar", "no tab bar along the bottom");
+  if (!menu.before.tabs.some((t) => t === "Search") || !menu.before.tabs.some((t) => t === "More") || menu.before.tabs[0] !== "Home") {
+    fail("phone tab bar", `tabs are ${JSON.stringify(menu.before.tabs)}, expected Home first, then Search and More`);
+  }
+  if (menu.before.tabs.length > 5) fail("phone tab bar", `${menu.before.tabs.length} tabs, more than five`);
+  if (menu.noMore) fail("phone tab bar", "no More button, so Settings and the other pages are out of reach");
+  else {
+  if (menu.before.bottom > menu.before.height + 1) fail("phone tab bar", `the bar ends at ${menu.before.bottom}px on a ${menu.before.height}px screen`);
+  if (menu.before.small) fail("phone tab bar", `${menu.before.small} tabs smaller than 44px`);
+  if (!menu.before.home) fail("phone tab bar", "Home is not marked as the current tab on Home");
+  if (menu.before.topNav) fail("phone tab bar", "the top bar's links still show on a phone");
+  if (menu.before.sheet) fail("phone tab bar", "the More sheet shows before More is pressed");
+  if (!menu.after.sheet || menu.after.expanded !== "true") fail("phone tab bar", "More did not open its sheet");
+  if (!menu.closed) fail("phone tab bar", "the More sheet stayed open after choosing a page");
+  if (!menu.moreLit) fail("phone tab bar", "More is not lit on Settings, a page it holds");
+  if (!menu.backShown) fail("phone back", "no Back button in the top bar on Settings");
+  if (!menu.backHome) fail("phone back", `Back from Settings went to ${menu.hash}, not Home`);
+  }
+  if (exceptions.length) fail("phone tab bar", `threw: ${exceptions[0]}`);
   const phoneSuggest = await typeSearch("riv");
   if (!phoneSuggest.n) fail("search as you type on a phone", "no suggestions");
   if (phoneSuggest.right > phoneSuggest.width + 1 || phoneSuggest.scroll > phoneSuggest.width + 1) {
@@ -627,12 +697,16 @@ async function main() {
       // All the player's text, hidden controls included: they show on the next
       // mouse move, so a "null" there is one the viewer will see.
       const shell = v.closest(".player");
-      const mute = shell && [...shell.querySelectorAll(".pc-btn")].find((b) => /^(Mute|Unmute)$/.test(b.textContent));
+      const mute = shell && shell.querySelector('.pc-icon[aria-label="Mute"], .pc-icon[aria-label="Unmute"]');
+      const play = shell && shell.querySelector(".pc-main");
       const bar = shell && shell.querySelector(".pc-bar");
+      await new Promise((r) => setTimeout(r, 100));
       return { ok: v.currentTime > 1.5, t: v.currentTime, err: v.error && v.error.code, converted: !v.controls, pill: pill ? pill.textContent : null,
         text: shell ? shell.textContent : "",
         focus: document.activeElement === document.body ? "body" : (document.activeElement && (document.activeElement.id || document.activeElement.tagName)),
-        muteName: mute ? (mute.getAttribute("aria-label") || mute.textContent) : null, muteText: mute ? mute.textContent : null,
+        muteName: mute ? mute.getAttribute("aria-label") : null, muteText: mute ? (v.muted ? "Unmute" : "Mute") : null,
+        playName: play ? play.getAttribute("aria-label") : null, playWant: v.paused ? "Play" : "Pause",
+        skips: shell ? shell.querySelectorAll(".pc-skip").length : 0,
         valuetext: bar ? bar.getAttribute("aria-valuetext") : null,
         why: document.querySelector(".player .overlay:not([hidden])") ? document.querySelector(".player .overlay").innerText : "" };`);
     if (!res.ok) fail(`play ${label}`, `video did not advance (t=${res.t}, media error ${res.err}) ${res.why || ""}`);
@@ -643,7 +717,10 @@ async function main() {
     if (res.focus === "body") fail(`play ${label}`, "keyboard focus was left on the page body after navigating");
     if (wantDecision === "converted") {
       // The converted player's own controls: names a screen reader can use.
-      if (!res.muteText || res.muteName !== res.muteText) fail(`play ${label}`, `the mute button is announced as "${res.muteName}" while it shows "${res.muteText}"`);
+      // Icon buttons are named for what a press does now.
+      if (!res.muteText || res.muteName !== res.muteText) fail(`play ${label}`, `the mute button is announced as "${res.muteName}", expected "${res.muteText}"`);
+      if (res.playName !== res.playWant) fail(`play ${label}`, `the play button is announced as "${res.playName}", expected "${res.playWant}"`);
+      if (res.skips !== 2) fail(`play ${label}`, `${res.skips} skip buttons, expected back and forward`);
       if (!/^\d+:\d\d(:\d\d)? of \d+:\d\d(:\d\d)?$/.test(res.valuetext || "")) fail(`play ${label}`, `the position slider reads "${res.valuetext}", not a time`);
     }
     if (exceptions.length) fail(`play ${label}`, `threw: ${exceptions[0]}`);
@@ -1618,6 +1695,6 @@ if (failures.length) {
   process.exit(1);
 }
 console.log("\nweb-smoke: every page, every playback path (HLS included), Continue Watching removal, search as you type, the shortcuts list, " +
-  "the Home feature and rows, Customize Home, season tabs and the phone menu, the History section, the trailer, extras and theme music, " +
+  "the Home feature and rows, Customize Home, season tabs, the manifest and icons, the phone tab bar and Back, the History section, the trailer, extras and theme music, " +
   "Skip Intro and Next Episode, the invite and pairing loop, lending a tape, music (playing across pages, gapless hand-over, Space)" +
   (peer ? ", and linking, badging, playing and unlinking a friend's server" : "") + " passed");
