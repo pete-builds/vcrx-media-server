@@ -42,6 +42,8 @@ export async function libraryView({ match, params }) {
       more.hidden = loaded >= page.total || page.items.length === 0;
     } finally {
       moreBtn.disabled = false;
+      // Observing afresh reports at once if the end is still in reach.
+      if (watcher && !more.hidden) { watcher.unobserve(more); watcher.observe(more); }
     }
   });
 
@@ -78,9 +80,21 @@ export async function libraryView({ match, params }) {
     })) : null;
   const colLink = cols.collections.length ? h("a", { class: "btn btn-small", href: `#/library/${id}/collections` }, `Collections (${cols.collections.length})`) : null;
 
+  // The filters sit in the toolbar's line on a wide screen and scroll in one
+  // row of their own on a phone, so the posters start near the top.
   const el = h("div", {},
-    h("div", { class: "toolbar" }, h("h1", {}, lib ? lib.name : "Library"), count, colLink, sortSel, genreSel, decadeSel, resSel, unwatchedBox),
+    h("div", { class: "toolbar" }, h("h1", {}, lib ? lib.name : "Library"), count, colLink,
+      h("div", { class: "filters" }, sortSel, genreSel, decadeSel, resSel, unwatchedBox)),
     first.total ? grid : h("div", { class: "empty" }, "No titles match these filters."),
     more);
-  return { el, title: lib ? lib.name : "Library" };
+  // The next page loads as the grid's end comes near; the button stays for
+  // keyboards, and for browsers without IntersectionObserver.
+  let watcher = null;
+  if ("IntersectionObserver" in window) {
+    watcher = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting) && !more.hidden && !moreBtn.disabled) moreBtn.click();
+    }, { rootMargin: "800px 0px" });
+    watcher.observe(more);
+  }
+  return { el, title: lib ? lib.name : "Library", cleanup: () => watcher && watcher.disconnect() };
 }

@@ -1,4 +1,5 @@
-import { api, ApiError } from "../api.js";
+import { api, ApiError, artUrl } from "../api.js";
+import { reclaimMediaSession } from "../music/player.js";
 import { h, icon, errorBox, episodeCode, clock, toast, loadBar } from "../dom.js";
 import { capabilities } from "../caps.js";
 import { skipButtons } from "./skip.js";
@@ -74,11 +75,24 @@ export async function playerView({ match, params }) {
   const dur = () => (converted ? totalMs || null : Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null);
 
   // An iPhone puts only a <video> full screen, with its own controls.
+  // A phone that allows it (Android Chrome, only while full screen) turns to
+  // landscape for a wide picture, and back when full screen ends.
   const fullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else if (shell.requestFullscreen) shell.requestFullscreen().catch(() => {});
-    else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+    else if (shell.requestFullscreen) {
+      shell.requestFullscreen().then(() => {
+        const o = screen.orientation;
+        if (o && o.lock && video.videoWidth > video.videoHeight) o.lock("landscape").catch(() => {});
+      }).catch(() => {});
+    } else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
   };
+  const onFullscreenChange = () => {
+    const o = screen.orientation;
+    if (!document.fullscreenElement && o && o.unlock) {
+      try { o.unlock(); } catch { /* not locked */ }
+    }
+  };
+  document.addEventListener("fullscreenchange", onFullscreenChange);
 
   // "Loading" is the loading bar, not a word in the middle of the picture;
   // other notes ("Preparing subtitles") still show as text.
@@ -239,32 +253,50 @@ export async function playerView({ match, params }) {
   // Converted-stream controls.
   let controls = null;
   let seekTo = null;
+  // A converted stream restarts on every seek, so its skip is 30 s, as its keys.
+  const skipMs = converted ? 30000 : 10000;
+  let playBtn = null;
   if (converted) {
-    const playBtn = h("button", { class: "pc-btn", type: "button", "aria-label": "Play or pause" });
+    // Round icon buttons, each named for what it does now, so a screen reader
+    // hears "Pause" while playing and "Mute" while the sound is on.
+    playBtn = h("button", { class: "pc-icon pc-main", type: "button", "aria-label": "Play" });
+    const iconBtn = (name, label, extra = null) => h("button", { class: "pc-icon" + (extra ? " pc-skip" : ""), type: "button", "aria-label": label, title: label }, icon(name), extra);
+    const backBtn10 = iconBtn("replay", `Back ${skipMs / 1000} seconds`, h("small", { "aria-hidden": "true" }, String(skipMs / 1000)));
+    const fwdBtn = iconBtn("forward", `Forward ${skipMs / 1000} seconds`, h("small", { "aria-hidden": "true" }, String(skipMs / 1000)));
     const timeLbl = h("span", { class: "pc-time" });
     const bar = h("input", { class: "pc-bar", type: "range", min: "0", max: String(totalMs || 1), step: "1000", value: "0", "aria-label": "Position" });
-    // No aria-label: the visible text (Mute or Unmute) is the button's name,
-    // so a screen reader hears the state that a click would change to.
-    const muteBtn = h("button", { class: "pc-btn", type: "button" }, "Mute");
-    const fsBtn = h("button", { class: "pc-btn", type: "button", "aria-label": "Full screen" }, "Full screen");
+    const muteBtn = iconBtn("volume", "Mute");
+    const fsBtn = iconBtn("fullscreen", "Full screen");
     let dragging = false;
+    let drawnPaused = null, drawnMuted = null;
     const draw = () => {
-      playBtn.textContent = video.paused ? "Play" : "Pause";
+      // Icons change only when the state does, not on every timeupdate.
+      if (drawnPaused !== video.paused) {
+        drawnPaused = video.paused;
+        playBtn.replaceChildren(icon(video.paused ? "play" : "pause"));
+        playBtn.setAttribute("aria-label", video.paused ? "Play" : "Pause");
+      }
+      if (drawnMuted !== video.muted) {
+        drawnMuted = video.muted;
+        muteBtn.replaceChildren(icon(video.muted ? "muted" : "volume"));
+        muteBtn.setAttribute("aria-label", video.muted ? "Unmute" : "Mute");
+        muteBtn.title = muteBtn.getAttribute("aria-label");
+      }
       if (!dragging) bar.value = String(pos());
       timeLbl.textContent = `${clock(dragging ? Number(bar.value) : pos())} / ${clock(totalMs)}`;
       // A screen reader reads the position as a time, not as milliseconds.
       bar.setAttribute("aria-valuetext", `${clock(Number(bar.value))} of ${clock(totalMs)}`);
-      muteBtn.textContent = video.muted ? "Unmute" : "Mute";
     };
     playBtn.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
+    backBtn10.addEventListener("click", () => seekTo(Math.max(0, pos() - skipMs)));
+    fwdBtn.addEventListener("click", () => seekTo(pos() + skipMs));
     muteBtn.addEventListener("click", () => { video.muted = !video.muted; draw(); });
     fsBtn.addEventListener("click", fullscreen);
     bar.addEventListener("input", () => { dragging = true; draw(); });
     bar.addEventListener("change", () => { dragging = false; seekTo(Number(bar.value)); });
     for (const ev of ["timeupdate", "play", "pause", "volumechange"]) video.addEventListener(ev, draw);
     video.addEventListener("dblclick", () => fsBtn.click());
-    video.addEventListener("click", () => playBtn.click());
-    controls = h("div", { class: "pc" }, playBtn, timeLbl, bar, muteBtn, fsBtn);
+    controls = h("div", { class: "pc" }, backBtn10, playBtn, fwdBtn, timeLbl, bar, muteBtn, fsBtn);
     draw();
   }
 
@@ -364,6 +396,14 @@ export async function playerView({ match, params }) {
       if (r.status === 410) return terminated();
     } catch { /* fall through */ }
     const code = video.error ? video.error.code : 0;
+    // A file played directly: a dropped connection (a phone between Wi-Fi and
+    // mobile data, a tunnel) loads it again where it stopped, three times,
+    // waiting longer each time, before giving up.
+    if (!converted && code === 2 && recoveries < 3) {
+      recoveries++;
+      reconnect(recoveries * 1500);
+      return;
+    }
     // An HLS stream can lose a segment the server already deleted (a seek
     // far back in the native player); starting again there recovers.
     if (hls && code !== 4 && recoveries < 2) {
@@ -381,6 +421,24 @@ export async function playerView({ match, params }) {
     overlay.replaceChildren(errorBox("Playback failed", msg + " The TV app may still play it.", h("button", { class: "btn", type: "button", onclick: back }, "Back")));
     overlay.hidden = false;
   });
+
+  let reconnectTimer = 0;
+  function reconnect(waitMs) {
+    const at = lastPos;
+    showStatus("Reconnecting");
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      if (ended) return;
+      video.addEventListener("loadedmetadata", () => { video.currentTime = at / 1000; }, { once: true });
+      video.src = session.stream.url;
+      video.play().catch(() => {});
+    }, waitMs);
+  }
+  // Back online after a drop that left a direct stream stuck: try at once.
+  const onOnline = () => {
+    if (!converted && !ended && started && video.readyState < 3 && !video.paused) reconnect(0);
+  };
+  window.addEventListener("online", onOnline);
 
   if (converted) {
     loadAt(session.resume_position_ms || 0).catch((e) => {
@@ -404,7 +462,65 @@ export async function playerView({ match, params }) {
   };
   shell.addEventListener("mousemove", wake);
   shell.addEventListener("keydown", wake);
+  // Touch: a tap on the picture shows the controls, or hides them if they are
+  // showing; it never pauses, which a stray tap on a phone would. The mouse
+  // keeps click to pause. Native controls (a file played directly) handle
+  // their own taps; the tap still brings back the top bar.
+  let touchTap = false;
+  shell.addEventListener("pointerdown", (e) => {
+    touchTap = e.pointerType !== "mouse";
+    if (!touchTap) return;
+    const wasIdle = shell.classList.contains("idle");
+    if (e.target === video && converted && !wasIdle && !video.paused) {
+      clearTimeout(idleTimer);
+      shell.classList.add("idle");
+    } else wake();
+  }, true);
+  if (converted) {
+    video.addEventListener("click", () => {
+      if (!touchTap) playBtn.click();
+    });
+  }
   wake();
+
+  // Lock screen, notification and headphone controls, as the music player has.
+  const ms = "mediaSession" in navigator ? navigator.mediaSession : null;
+  const sessionPosition = () => {
+    const d = dur();
+    if (!ms || !ms.setPositionState || !(d > 0)) return;
+    try { ms.setPositionState({ duration: d / 1000, position: Math.min(d, pos()) / 1000, playbackRate: video.playbackRate || 1 }); } catch { /* past the end mid-seek */ }
+  };
+  if (ms) {
+    // An episode shows its show's poster.
+    const posterId = item.kind === "episode" && item.show_id ? item.show_id : item.has_poster ? item.id : null;
+    const art = posterId ? [240, 480].map((w) => ({ src: new URL(artUrl(posterId, "poster", w, base), location.href).href,
+      sizes: `${w}x${Math.round(w * 1.5)}`, type: "image/jpeg" })) : [];
+    try {
+      ms.metadata = new MediaMetadata({ title: playingExtra ? playingExtra.title : item.title || "",
+        artist: item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)}`.trim() : item.year ? String(item.year) : "",
+        album: playingExtra ? item.title : "", artwork: art });
+    } catch (e) { console.warn("media session", e); }
+    const set = (action, fn) => { try { ms.setActionHandler(action, fn); } catch { /* not supported here */ } };
+    set("play", () => video.play().catch(() => {}));
+    set("pause", () => video.pause());
+    set("seekbackward", (d) => seekTo(Math.max(0, pos() - (d.seekOffset ? d.seekOffset * 1000 : skipMs))));
+    set("seekforward", (d) => seekTo(pos() + (d.seekOffset ? d.seekOffset * 1000 : skipMs)));
+    set("seekto", (d) => seekTo(d.seekTime * 1000));
+    set("previoustrack", null);
+    set("nexttrack", item.kind === "episode" && item.next_episode ? () => {
+      location.hash = peerId ? `#/peer/${peerId}/play/${item.next_episode.id}` : `#/play/${item.next_episode.id}`;
+    } : null);
+    for (const ev of ["play", "pause", "seeked", "loadedmetadata"]) video.addEventListener(ev, sessionPosition);
+    video.addEventListener("play", () => { ms.playbackState = "playing"; });
+    video.addEventListener("pause", () => { ms.playbackState = "paused"; });
+  }
+
+  // A phone may suspend or close a page it hides, without pagehide: report
+  // where playback is as the page goes out of sight, so Resume is exact.
+  const onHidden = () => {
+    if (document.visibilityState === "hidden" && started && !ended) report("progress", {}, true);
+  };
+  document.addEventListener("visibilitychange", onHidden);
 
   const onKey = (e) => {
     if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
@@ -433,12 +549,18 @@ export async function playerView({ match, params }) {
       clearInterval(beat);
       clearInterval(upNextTimer);
       clearTimeout(idleTimer);
+      clearTimeout(reconnectTimer);
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("visibilitychange", onHidden);
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
       window.removeEventListener("pagehide", stop);
+      window.removeEventListener("online", onOnline);
       video.pause();
       video.removeAttribute("src");
       video.load();
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch { /* not locked */ }
+      reclaimMediaSession();
     },
   };
 }

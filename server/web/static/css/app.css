@@ -60,10 +60,16 @@
   --t-slow: 320ms;
 
   --gap: 16px;
-  --pad: clamp(16px, 3vw, 48px);
+  /* The page's side margin, never less than a notched phone's safe area in
+     landscape (viewport-fit=cover lets art run under the notch; text may not). */
+  --pad: max(clamp(16px, 3vw, 48px), env(safe-area-inset-left), env(safe-area-inset-right));
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
   --topbar-h: 64px;
   /* Pages with a hero pull it up under the top bar by this much. */
-  --under-bar: calc(-24px - var(--topbar-h));
+  --under-bar: calc(-24px - var(--topbar-h) - var(--safe-top));
+  /* The phone tab bar; 0 where there is none. */
+  --tabbar-h: 0px;
   --poster-w: clamp(128px, 12.5vw, 184px);
   --still-w: clamp(232px, 23vw, 340px);
 }
@@ -90,7 +96,7 @@ h3 { font-size: var(--fs-h3); font-weight: 600; }
 /* Top bar: solid once the page scrolls, see-through over a hero. */
 .topbar {
   position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 24px;
-  height: var(--topbar-h); padding: 0 var(--pad);
+  height: calc(var(--topbar-h) + var(--safe-top)); padding: var(--safe-top) var(--pad) 0;
   background: rgba(8, 8, 10, .9); border-bottom: 1px solid rgba(255,255,255,.06);
   -webkit-backdrop-filter: saturate(150%) blur(14px); backdrop-filter: saturate(150%) blur(14px);
   transition: background-color .3s, border-color .3s;
@@ -149,6 +155,9 @@ body.over-hero:not(.scrolled) .search input { background-color: rgba(20,20,24,.5
 .suggest-empty { padding: 10px 8px; color: var(--muted); }
 
 main { padding: 24px var(--pad) 64px; outline: none; }
+/* The page takes focus after each navigation (so Tab continues from it); it is
+   not a control, so it gets no ring, which otherwise framed the whole page. */
+main:focus-visible { outline: none; }
 #view > :not(.skeleton) { animation: view-in .28s ease-out; }
 @keyframes view-in { from { opacity: 0; transform: translateY(6px); } }
 .loading, .empty { color: var(--muted); padding: 48px 0; text-align: center; }
@@ -550,7 +559,7 @@ table.list td.num, table.list th.num { text-align: right; font-variant-numeric: 
 /* Touch screens cannot drag a list row; the buttons do the moving there. */
 @media (hover: none) { .layout-grip { display: none; } }
 
-.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface-2); padding: 10px 20px; border-radius: var(--r-pill); box-shadow: 0 10px 30px rgba(0,0,0,.6); z-index: 60; }
+.toast { position: fixed; bottom: calc(24px + var(--tabbar-h) + var(--safe-bottom)); left: 50%; transform: translateX(-50%); background: var(--surface-2); padding: 10px 20px; border-radius: var(--r-pill); box-shadow: 0 10px 30px rgba(0,0,0,.6); z-index: 60; }
 
 .chart-box { width: 100%; min-height: 40px; }
 
@@ -613,24 +622,18 @@ kbd {
 .shortcuts-foot { display: flex; justify-content: flex-end; margin-top: 20px; }
 
 @media (max-width: 720px) {
-  /* One line: the menu button, the wordmark and the search box. The libraries
-     and Settings drop down from the menu button. */
+  /* The top bar keeps Back, the wordmark and the profile; the libraries,
+     Search and More sit in the tab bar along the bottom. On the Search page the
+     search box takes the wordmark's place. */
   :root { --topbar-h: 56px; }
   .topbar { gap: 10px; }
-  .menu-btn { display: inline-flex; }
   .brand img { height: 22px; }
-  .nav {
-    position: absolute; top: 100%; left: 0; right: 0; display: none; flex-direction: column; gap: 2px; padding: 8px var(--pad) 12px;
-    background: rgba(10,10,12,.97); border-bottom: 1px solid var(--line); box-shadow: 0 16px 32px rgba(0,0,0,.6);
-  }
-  .topbar.menu-open .nav { display: flex; }
-  .nav-link { padding: 12px 10px; font-size: 17px; }
-  .nav-link.active::after { left: 0; top: 50%; bottom: auto; width: 3px; height: 16px; margin: -8px 0 0; }
-  .nav-phone-only { display: block; }
-  .nav-settings { display: none; }
+  .nav, .nav-settings { display: none; }
+  .search { display: none; position: static; flex: 1; min-width: 0; margin-left: 0; }
+  body.route-search .search { display: block; }
+  body.route-search .brand { display: none; }
+  .search input { width: 100%; height: 40px; font-size: 16px; }
   /* The suggestions hang from the whole bar, not the narrow box. */
-  .search { position: static; flex: 1; min-width: 0; margin-left: 0; }
-  .search input { width: 100%; }
   .suggest { left: 8px; right: 8px; width: auto; max-width: none; }
   .session { grid-template-columns: 72px minmax(0, 1fr); }
   .s-foot { flex-wrap: wrap; }
@@ -770,4 +773,121 @@ kbd {
 @media (max-width: 720px) {
   .live-row { grid-template-columns: 40px 48px 1fr; }
   .live-now, .live-next { display: none; }
+}
+
+/* ---- Phones and the installed app (docs/plans/2026-11-01-web-mobile-pwa.md) ---- */
+
+/* Back, in the top bar: shown on a phone and in the installed app, which has
+   no browser back button; a desktop browser has its own. */
+.back-btn {
+  display: none; flex: none; align-items: center; justify-content: center; width: 40px; height: 40px; margin-left: -8px;
+  padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text); cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease);
+}
+.back-btn svg { width: 28px; height: 28px; fill: currentColor; }
+.back-btn:hover { background: var(--wash); }
+body.over-hero:not(.scrolled) .back-btn { background: rgba(0,0,0,.35); }
+@media (display-mode: standalone) { .back-btn { display: inline-flex; } }
+
+/* The library filters: in the toolbar's line on a wide screen. */
+.filters { display: contents; }
+
+/* The tab bar and its More sheet exist only on a phone. */
+.tabbar, .more-sheet { display: none; }
+
+@media (max-width: 720px) {
+  body.has-tabbar { --tabbar-h: 56px; --tabbar-safe: var(--safe-bottom); --music-safe: 0px; }
+  main { padding-bottom: calc(64px + var(--tabbar-h) + var(--safe-bottom)); }
+  .back-btn { display: inline-flex; }
+  .nav-profile { margin-left: auto; }
+
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 31; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+    height: calc(var(--tabbar-h) + var(--safe-bottom)); padding: 0 env(safe-area-inset-right) var(--safe-bottom) env(safe-area-inset-left);
+    background: rgba(8, 8, 10, .94); border-top: 1px solid rgba(255,255,255,.06);
+    -webkit-backdrop-filter: saturate(150%) blur(14px); backdrop-filter: saturate(150%) blur(14px);
+  }
+  .tab {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 0; padding: 4px 2px;
+    border: 0; background: none; color: var(--muted); font-size: 11px; font-weight: 500; line-height: 1.2; cursor: pointer;
+    -webkit-tap-highlight-color: transparent; transition: color var(--t-fast) var(--ease);
+  }
+  .tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab svg { width: 24px; height: 24px; fill: currentColor; }
+  .tab.active, .tab[aria-expanded="true"] { color: var(--text); }
+  .tab.active svg { fill: var(--orange); }
+  .tab:focus-visible { outline-offset: -4px; border-radius: var(--r-control); }
+
+  .more-sheet {
+    position: fixed; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right));
+    bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 8px); z-index: 32; display: block; padding: 6px;
+    max-height: calc(100dvh - var(--tabbar-h) - var(--safe-bottom) - var(--topbar-h) - var(--safe-top) - 24px); overflow-y: auto;
+    background: var(--surface); border-radius: var(--r-panel); box-shadow: 0 -8px 40px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.06);
+    animation: sheet-in var(--t) var(--ease);
+  }
+  .more-sheet nav { display: grid; gap: 2px; }
+  .sheet-link {
+    display: flex; align-items: center; gap: 14px; min-height: 48px; padding: 0 14px; border-radius: var(--r-control);
+    font-size: var(--fs-lead); font-weight: 500;
+  }
+  .sheet-link svg { flex: none; width: 22px; height: 22px; fill: var(--muted); }
+  .sheet-link:active, .sheet-link:hover { background: var(--wash); }
+  .sheet-link.active { color: var(--text); }
+  .sheet-link.active svg { fill: var(--orange); }
+
+  /* The filters scroll sideways in a row of their own under the title. */
+  .toolbar .filters {
+    display: flex; flex: 1 0 100%; gap: 8px; order: 10; overflow-x: auto; scrollbar-width: none;
+    margin: 0 calc(-1 * var(--pad)); padding: 2px var(--pad); scroll-padding-inline: var(--pad);
+  }
+  .toolbar .filters::-webkit-scrollbar { display: none; }
+  .toolbar .filters > * { flex: none; }
+  .toolbar .filters select { max-width: none; }
+}
+@keyframes sheet-in { from { opacity: 0; transform: translateY(12px); } }
+
+/* Touch: controls at least 44px, the size a fingertip hits reliably. */
+@media (pointer: coarse) {
+  .btn-small { min-height: 40px; padding-inline: 14px; }
+  .toolbar select, .toolbar label { min-height: 40px; }
+  .player .top .btn, .player .top select { min-height: 44px; }
+}
+
+/* The player clears a notch in landscape and the home indicator below. */
+.player .top {
+  padding-top: max(18px, calc(var(--safe-top) + 8px));
+  padding-left: max(24px, env(safe-area-inset-left)); padding-right: max(24px, env(safe-area-inset-right));
+}
+.player .pc {
+  padding-bottom: max(16px, calc(var(--safe-bottom) + 6px));
+  padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right));
+}
+.player .skip-btn { right: max(32px, calc(env(safe-area-inset-right) + 16px)); bottom: calc(96px + var(--safe-bottom)); }
+.player.preroll .preroll-bar { right: max(32px, calc(env(safe-area-inset-right) + 16px)); bottom: calc(40px + var(--safe-bottom)); }
+
+/* Converted-stream controls as round icon buttons: skip back, play or pause,
+   skip forward, the position, sound, full screen. */
+.pc-icon {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: #fff; cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease);
+}
+.pc-icon svg { width: 26px; height: 26px; fill: currentColor; }
+.pc-icon:hover { background: var(--wash-strong); }
+.pc-icon.pc-main { width: 52px; height: 52px; background: rgba(255,255,255,.14); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.pc-icon.pc-main svg { width: 30px; height: 30px; }
+.pc-skip { position: relative; }
+.pc-skip small { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 3px; font-size: 9px; font-weight: 600; pointer-events: none; }
+.player .pc { gap: 8px; }
+.player .pc .pc-bar { min-width: 60px; height: 28px; }
+@media (max-width: 720px) {
+  .player .top {
+    padding-top: max(12px, calc(var(--safe-top) + 6px));
+    padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right));
+  }
+  .player .pc { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+  /* A phone: the buttons in a row, the position bar above them. */
+  .player .pc { flex-wrap: wrap; justify-content: center; row-gap: 4px; }
+  .player .pc .pc-bar { order: -2; flex: 1 0 70%; }
+  .player .pc .pc-time { order: -1; }
 }

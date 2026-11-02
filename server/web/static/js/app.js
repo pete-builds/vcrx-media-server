@@ -3,7 +3,7 @@
 // function that runs when the user leaves it.
 
 import { api, autoSignIn, whenSignedOut, whenRewound, ApiError } from "./api.js";
-import { h, errorBox, skeleton, loadBar } from "./dom.js";
+import { h, icon, errorBox, skeleton, loadBar } from "./dom.js";
 import { homeView } from "./views/home.js";
 import { libraryView } from "./views/library.js";
 import { libraryCollectionsView, collectionView } from "./views/collections.js";
@@ -92,9 +92,15 @@ async function render() {
     if (match) { viewFn = fn(); break; }
   }
   const playing = /^\/(peer\/\d+\/)?play\//.test(path) || /^\/live\/\d+$/.test(path);
-  document.getElementById("topbar").hidden = !state.me || playing || path === "/profiles" || path === "/rewind" || isInvite(path);
+  const chrome = !!state.me && !playing && path !== "/profiles" && path !== "/rewind" && !isInvite(path);
+  document.getElementById("topbar").hidden = !chrome;
+  document.getElementById("tabbar").hidden = !chrome;
+  document.body.classList.toggle("has-tabbar", chrome);
+  document.body.classList.toggle("route-search", path === "/search");
+  document.getElementById("back-btn").hidden = path === "/";
   markNav(path);
   setMenu(false);
+  setSheet(false);
   // While a page with a hero loads, its skeleton already sits under the
   // translucent top bar, so the bar does not flash solid and back.
   setHero(path === "/" || path.startsWith("/item/") || /^\/peer\/\d+\/item\//.test(path));
@@ -134,10 +140,18 @@ async function render() {
 }
 
 function markNav(path) {
-  for (const a of document.querySelectorAll("#nav a, #nav-user")) {
+  for (const a of document.querySelectorAll("#nav a, #nav-user, #tabbar a, #more-sheet a")) {
     const target = a.getAttribute("href").slice(1);
-    a.classList.toggle("active", target === "/" ? path === "/" : path.startsWith(target));
+    const on = target === "/" ? path === "/" : path === target || path.startsWith(target + "/") || path.startsWith(target + "?");
+    a.classList.toggle("active", on);
+    if (a.closest("#tabbar")) {
+      if (on) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    }
   }
+  // More is lit while one of its pages is open.
+  const more = document.getElementById("more-btn");
+  if (more) more.classList.toggle("active", !!document.querySelector("#more-sheet a.active"));
 }
 
 export function drawNav() {
@@ -149,6 +163,47 @@ export function drawNav() {
   // On a phone the top bar has no room for Settings, so the menu carries it.
   links.push(h("a", { class: "nav-link nav-phone-only", href: "#/settings" }, "Settings"));
   nav.replaceChildren(...links);
+  drawTabs();
+}
+
+// drawTabs fills the phone's tab bar: Home, the first movie and the first TV
+// library (else the first two libraries), Search, and More, a sheet with every
+// other place. Five at most, so each tab stays a comfortable thumb's width.
+function drawTabs() {
+  const libs = state.libraries;
+  const picked = [libs.find((l) => l.kind === "movie"), libs.find((l) => l.kind === "show")].filter(Boolean);
+  for (const l of libs) if (picked.length < 2 && !picked.includes(l)) picked.push(l);
+  const libIcon = (l) => icon(l.kind === "show" ? "tv" : l.kind === "music" ? "music" : "movie");
+  const tab = (href, ic, label) => h("a", { class: "tab", href }, ic, h("span", {}, label));
+  const search = tab("#/search", icon("search"), "Search");
+  // Focus the box inside the tap itself: an iPhone opens the keyboard only for
+  // focus given during the tap, not after the page changes.
+  search.addEventListener("click", () => {
+    document.body.classList.add("route-search");
+    document.querySelector("#search input").focus();
+  });
+  const more = h("button", { class: "tab", id: "more-btn", type: "button", "aria-expanded": "false", "aria-controls": "more-sheet" },
+    icon("more"), h("span", {}, "More"));
+  more.addEventListener("click", () => setSheet(document.getElementById("more-sheet").hidden));
+  document.getElementById("tabbar").replaceChildren(tab("#/", icon("home"), "Home"),
+    ...picked.map((l) => tab(libraryHref(l), libIcon(l), l.name)), search, more);
+  const rest = libs.filter((l) => !picked.includes(l)).map((l) => h("a", { class: "sheet-link", href: libraryHref(l) }, libIcon(l), l.name));
+  if (state.me && state.me.live_tv) rest.push(h("a", { class: "sheet-link", href: "#/live" }, icon("tv"), "Live TV"));
+  if (state.me && state.me.is_admin) rest.push(h("a", { class: "sheet-link", href: "#/activity" }, icon("activity"), "Activity"));
+  rest.push(h("a", { class: "sheet-link", href: "#/settings" }, icon("settings"), "Settings"));
+  document.querySelector("#more-sheet nav").replaceChildren(...rest);
+}
+
+// The phone's More sheet rises above the tab bar.
+function setSheet(open) {
+  const sheet = document.getElementById("more-sheet");
+  const btn = document.getElementById("more-btn");
+  sheet.hidden = !open;
+  if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    const first = sheet.querySelector("a");
+    if (first) first.focus();
+  }
 }
 
 // A music library has its own pages.
@@ -187,6 +242,22 @@ function installChrome() {
   });
   document.addEventListener("click", (e) => {
     if (bar.classList.contains("menu-open") && !bar.contains(e.target)) setMenu(false);
+    const sheet = document.getElementById("more-sheet");
+    if (!sheet.hidden && !sheet.contains(e.target) && !e.target.closest("#more-btn")) setSheet(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    const sheet = document.getElementById("more-sheet");
+    if (e.key === "Escape" && !sheet.hidden) {
+      setSheet(false);
+      document.getElementById("more-btn").focus();
+    }
+  });
+  // Back: an app on a Home Screen has no browser back button. It steps back
+  // through VCRX's own pages, and from a page opened directly (a shared link,
+  // a fresh launch) goes Home rather than out of the app.
+  document.getElementById("back-btn").addEventListener("click", () => {
+    if (navDepth() > 0) history.back();
+    else go("/");
   });
   // The skip link moves focus to the page without touching the hash, which is the route.
   document.querySelector(".skip-link").addEventListener("click", (e) => {
@@ -194,6 +265,21 @@ function installChrome() {
     document.getElementById("view").focus();
   });
 }
+
+// navDepth counts VCRX pages behind this one in the tab's history. Each entry
+// carries its depth in history.state: an entry without one is new (a link or
+// go()), one above its predecessor; an entry with one was returned to by Back
+// or Forward and keeps it.
+let depth = 0;
+function trackDepth() {
+  const st = history.state;
+  if (st && typeof st.vcrxDepth === "number") depth = st.vcrxDepth;
+  else {
+    depth += 1;
+    history.replaceState({ ...(st || {}), vcrxDepth: depth }, "");
+  }
+}
+function navDepth() { return depth; }
 
 // signedIn loads who we are and the libraries, then draws the shell.
 export async function signedIn() {
@@ -224,6 +310,9 @@ function signInPath() {
 }
 
 async function boot() {
+  if (!history.state || typeof history.state.vcrxDepth !== "number") history.replaceState({ ...(history.state || {}), vcrxDepth: 0 }, "");
+  else depth = history.state.vcrxDepth;
+  window.addEventListener("hashchange", trackDepth);
   whenSignedOut(() => {
     if (!state.me) return;
     state.me = null;
