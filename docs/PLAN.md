@@ -108,4 +108,4 @@ Server: #3, #4, #5, #6, #7, #8, #10, #11, #12, #13, each based on the one before
 
 ## Acceptance test
 
-On nix1: `docker compose up -d`, two read-only library mounts, a scan of the real Movies and TV folders. Build and sideload the APK, connect over the LAN, browse movies and shows, direct play a file, seek, stop, and resume from the saved position. Plex keeps running untouched. Steps: `README.md`, "Acceptance test".
+On nix1: `docker compose up -d`, two read-only library mounts, a scan of the real Movies and TV folders. Build and sideload the APK, connect over the LAN, browse movies and shows, direct play a file, seek, stop, and resume from the saved position. Plex keeps running untouched. Steps: `docs/INSTALL.md`, "Acceptance test".

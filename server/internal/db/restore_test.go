@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// The restore drill, as README "Restoring a backup" describes it: a backup
+// The restore drill, as docs/INSTALL.md "Restoring a backup" describes it: a backup
 // copied in as vcrx.db, with no -wal or -shm beside it, opens and migrates
 // forward. The backup here is one taken before a migration, at an older
 // schema, as after an upgrade that went wrong.
