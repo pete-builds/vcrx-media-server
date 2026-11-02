@@ -171,7 +171,7 @@ From a phone on mobile data (not your Wi-Fi):
 ## 10. Backup and recovery
 
 Back up `deploy/data/config` (the database, `vcrx.yaml`, the federation key) as for any VCRX install, plus
-`deploy/caddy/caddy.env`. `deploy/caddy/data` is replaceable. Restoring is the README's restore procedure, then
+`deploy/caddy/caddy.env`. `deploy/caddy/data` is replaceable. Restoring is the restore procedure in [INSTALL.md](INSTALL.md#configuration), then
 `docker compose up -d` in `deploy/caddy`.
 
 ## 11. Rollback

@@ -4,11 +4,12 @@
 
 **Your media. Your hardware. Your rules.**
 
-A self-hosted media server and a native Google TV app, built from scratch. No subscriptions, no ads, no telemetry, no vendor accounts and no required cloud service: it starts, scans and plays on a LAN with the internet unplugged. Your media, your server, your accounts, your data.
+VCRX is a self-hosted media server with its own Google TV app, built from scratch. Point it at your movies, shows and music, and watch them in a browser or on your TV.
 
-VCRX exists for the things other servers need add-ons and scripts for: per-version access rules (a friend sees the 1080p copy, never the 4K one), built-in activity history and playback policy, and collections defined in files you own. Those land milestone by milestone; see [docs/PLAN.md](docs/PLAN.md).
-
-Licence: AGPL-3.0-or-later. If you run a modified VCRX as a service, share your changes.
+- **Nothing phones home.** No subscriptions, ads, telemetry or vendor accounts, and no required cloud service. It starts, scans and plays with the internet unplugged.
+- **Access rules down to the file.** A friend can see the 1080p copy of a film and never the 4K one. Limit each person by library, resolution, content rating and label, and every route enforces it.
+- **The add-ons are built in.** Activity history and stats, poster overlays, smart collections written as YAML files you own, Skip Intro, a weekly newsletter, and Radarr and Sonarr webhooks. No second program to run.
+- **Share without accounts.** Invite a device with a link or a QR code, link a friend's VCRX server to yours, or lend one title for a few days. Everything streams; nothing is copied.
 
 <table>
   <tr>
@@ -23,26 +24,31 @@ Licence: AGPL-3.0-or-later. If you run a modified VCRX as a service, share your 
 
 <sub>The web app with a demo library of <a href="https://studio.blender.org/films/">Blender Studio open movies</a> (CC BY) and US public-domain films. Artwork and plots from TMDb.</sub>
 
+## What it does
+
+| | |
+|---|---|
+| **Libraries** | Movies, TV and music. Incremental scans that trust your NFO files and local artwork first; TMDb and IMDb ratings if you want them. Automatic franchise collections. |
+| **Playback** | Direct play whenever the device can. Otherwise the server converts on the fly: audio to AAC, video to H.264, HLS for Safari. Subtitles from the file, beside it, or OpenSubtitles. |
+| **Home** | Rows built for each person: Continue Watching, Recently Added, Because You Watched, seasonal picks, Top Rated and more. Rearrange them and the layout follows you to the TV. |
+| **Skip Intro and Credits** | Found overnight by matching each season's audio, or read from chapters and NFO markers. |
+| **People** | Local accounts, household profiles with PINs, kids' profiles, invited devices, linked friends' servers. |
+| **Activity** | Now playing, history, stats, stop a stream, webhooks and Discord messages. |
+| **Music** | Albums and compilations from tags, live recordings with venue, source and checksums, gapless playback, a Music section on the TV. |
+| **Live TV** (in progress) | Your own M3U playlists and XMLTV guides, with one shared pull per channel. |
+| **Clients** | A web app built into the server, the Google TV app, and a REST API described by an OpenAPI 3.1 spec. |
+
+Every feature in detail: [docs/FEATURES.md](docs/FEATURES.md).
+
 ## Status
 
-Milestones 1 to 8 of [docs/PLAN.md](docs/PLAN.md), plus the first parts of 9 and 10: invited devices with no account, friends' servers linked to each other, and lending a tape. There is no tagged release yet; `main` is what runs.
+Milestones 1 to 8 of [the plan](docs/PLAN.md) are done, plus the first parts of 9 and 10. There is no tagged release yet: `main` is what runs.
 
-| Works now | Comes later |
-|---|---|
-| Movie and TV libraries, incremental scans with ffprobe, NFO and filename metadata, local artwork, TMDb enrichment (optional, your own key), IMDb ratings (optional), Kometa-style poster overlays, automatic franchise collections, smart collections and hidden labels from YAML rules, genre and decade filters | Online lists (IMDb Top 250 and the like), playlists, automatic director and studio collections |
-| Local accounts and per-user access: library grants, a resolution ceiling, a content-rating ceiling, label allow and deny lists, converting allowed or not, all edited in Settings > Users and enforced on every route (a test walks them all) | Access settings in the TV app |
-| Direct play over HTTP with Range; converted streams for clients that ask for them (fragmented MP4, or HLS for Safari: video copied, or transcoded to H.264 when the client cannot decode it; audio copied or converted to AAC); sidecar and embedded text subtitles (also as WebVTT for browsers), subtitle search and download from OpenSubtitles (optional), a per-user subtitle delay | Picture subtitle burn-in, VA-API hardware acceleration |
-| Skip Intro and Skip Credits (web and TV): intros and end credits found from each season's audio at night, chapter titles and Plex-style NFO markers honoured, an admin editor, and a per-user choice of button, automatic or off | Skip markers for movies other than by hand |
-| Every playback logged with its decision and reason, resume positions, Continue Watching. Activity API: now playing, history, per-title history, stats, per-user totals, stop a stream, webhooks, a watch state export for cleanup tools; Activity screens in the web app and the TV app | Taste signals from friends' watching (opt-in) |
-| Household profiles with optional PINs, invited devices that need no account (a link or a QR code with its own libraries, resolution and expiry), friends' servers linked to each other with per-friend limits and streaming only, never copying, and lending one title to a friend for a day to a week (three days by default) | Playing from whichever friend's copy is fastest, direct connections between friends' servers with no relay |
-| Music libraries: artists, albums and compilations from tags, live shows (date, venue, source, the taper's info file and checksums), covers, direct play or AAC/Opus conversion, play queues, a web player that keeps playing across pages, and a TV Music section | Setlists and per-song chapters, tape trading |
-| Web app at `/`: browse, details, search, play in the browser with subtitles (including files whose video the browser cannot decode, transcoded on the server), Activity screens. REST API under `/api/v1`, OpenAPI 3.1 spec checked against the routes in CI | Other TV platforms |
+Still to come: online lists such as the IMDb Top 250, playlists, VA-API hardware acceleration, burned-in picture subtitles, setlists and tape trading, and TV platforms beyond Google TV.
 
-A file the TV cannot play directly is converted on the server, as for the web app, in a fragmented MP4 stream: the container rewrapped, the audio converted to AAC, or the video transcoded to H.264, under the same policy and limits. It is refused, with a message saying why, only when the account may not use converted streams or the server cannot convert it (for example, with transcoding turned off).
+## Quick start
 
-## Run the server
-
-Needs Docker with Compose on a Linux host that can read your media.
+You need Docker with Compose on a Linux host that can read your media.
 
 ```bash
 git clone https://github.com/pete-builds/vcrx-media-server.git
@@ -55,287 +61,32 @@ docker compose exec vcrx vcrx user add -username you -admin
 docker compose logs -f vcrx                # watch the first scan
 ```
 
-The container runs as `VCRX_UID:VCRX_GID` (1000 by default), which must be able to read the media and write `data/`. Media is mounted read-only. The server listens on port 3750 on the host's network.
+Then open `http://<server-ip>:3750/` in a browser and sign in. Your media is mounted read-only, so VCRX never changes it, and any other media server on the same host keeps running untouched.
 
-Check it:
+**On the TV:** build the APK with one command and sideload it with ADB, as [tv/README.md](tv/README.md) describes, then enter `http://<server-ip>:3750` and sign in.
 
-```bash
-curl -s http://<server-ip>:3750/readyz     # {"status":"ok", "checks": {...}}
-docker compose exec vcrx vcrx library list # item counts and the last scan
-```
+Adding users, backups, updates and the optional services (TMDb, OpenSubtitles, Radarr and Sonarr): [docs/INSTALL.md](docs/INSTALL.md).
 
-Update later with `deploy/deploy.sh`, run on the server from this clone. It refuses a checkout with local changes or commits origin does not have, refuses while someone is watching (checked as an admin whose password you keep in `deploy/.flexbot-password`; `--force` overrides), fast-forwards to `origin/main`, builds with the commit as the version, waits for the server and runs `scripts/smoke-api.sh`.
+## Documentation
 
-### More users
-
-```bash
-docker compose exec vcrx vcrx user add -username friend
-docker compose exec vcrx vcrx user grant -username friend -libraries Movies,TV
-```
-
-A new user sees nothing until granted a library. Admins see everything. Set what each user sees in the web app under Settings > Users (from the local network): libraries, a highest resolution (a friend capped at 1080p never sees, streams or gets artwork from the 4K version), a highest content rating (PG-13 also allows TV-14; while one is set, titles with no rating are hidden), labels to hide or to require, and whether the server may convert streams for them. Each user gets a one-line summary such as "Sees Movies and TV, up to 1080p and PG-13, never titles labelled horror." The same settings are in the API:
-
-```bash
-curl -X PUT http://<server-ip>:3750/api/v1/admin/users/<id>/policy \
-  -H "Authorization: Bearer <admin token>" -H "Content-Type: application/json" \
-  -d '{"max_resolution": "1080p", "max_content_rating": "PG-13", "deny_labels": ["horror"], "allow_transcode": true}'
-```
-
-### CLI
-
-Inside the container (`docker compose exec vcrx vcrx ...`):
-
-```
-vcrx migrate                  back up the database, apply migrations, exit
-vcrx user add|grant|passwd|list
-vcrx library add|list|scan
-vcrx metadata refresh [-all]  fetch posters and plots from TMDb now
-vcrx metadata status          matched and unmatched counts, and why each miss was skipped
-vcrx watch export [-library NAME] [-unplayed-days N]
-                              every movie and show with its files and watch state, as JSON lines
-vcrx healthcheck              what the container HEALTHCHECK runs
-```
-
-`vcrx library scan -name Movies -path "Some Folder"` rescans one folder. A scan refuses to mark files missing when the library root is unreachable or suddenly empty, or when more than half the library would be missing, counting files earlier scans already marked missing (so a share that loses folders a scan at a time is caught too); `-force` overrides the last two after you have checked the mount.
-
-### Configuration
-
-Environment variables (`deploy/.env.example`) and `/config/vcrx.yaml` (`deploy/vcrx.example.yaml`). The database, its backups (before every migration, and a nightly snapshot kept for seven days, in `/config/backups`) and the settings file live in `/config`, as does `peer-token.key` once a friend's server is linked (see Friends' servers below: it is kept out of the database backups on purpose); resized artwork, Safari's HLS segments while they play, and other caches live in `/cache` and can be deleted at any time.
-
-**Restoring a backup.** Each backup is a complete database. From `deploy/`, with `/config` being `${VCRX_DATA_DIR:-./data}/config` on the host:
-
-1. `docker compose stop vcrx`.
-2. Move `vcrx.db`, `vcrx.db-wal` and `vcrx.db-shm` out of `/config`. Never leave an old `-wal` or `-shm` beside a restored database: SQLite would replay it into the restored file.
-3. Copy the backup you want (for example `backups/vcrx-nightly-20261031T201000Z.db`) to `/config/vcrx.db`.
-4. `docker compose start vcrx`. A backup from before an upgrade is migrated forward at startup, and copied to `backups` first.
-
-Anything written after the backup was taken is gone, so pick the newest one from before the problem. `TestRestoreDrill` in `server/internal/db` runs these steps against a backup taken at an older schema.
-
-### TMDb posters and plots (optional)
-
-Set `VCRX_TMDB_API_KEY` in `.env` to your own [TMDb](https://www.themoviedb.org/settings/api) API key or API Read Access Token, then `docker compose up -d`. Two minutes after startup, and every 15 minutes after that, the server fills new movies and shows with plot, tagline, genres, cast, studio or network, content rating, TMDb rating, poster and backdrop, and episodes with titles, plots and stills. The first pass over a large library takes a while; `vcrx metadata refresh` runs it in the foreground.
-
-- **Your own data wins.** A value from an NFO, a local poster, or a field an admin locked is never replaced. Enrichment only writes a field that is empty or still holds what it wrote last time.
-- **No guessing.** A movie or show is matched by the TMDb or IMDb id in its NFO, or else by title and year, and only when exactly one result has that title in that year (or one year off). Anything doubtful is left alone and listed by `vcrx metadata status` with the reason; a year in the folder name usually fixes it.
-- Images are kept in `/config/metadata/tmdb`. `VCRX_TMDB_LANGUAGE` (default `en-US`) and `VCRX_TMDB_COUNTRY` (default `US`, for content ratings) are optional.
-
-**Fix Match:** when matching found nothing or the wrong title, an admin opens the title in the web app, presses Fix match, searches TMDb and picks. The item fills from that title at once and later passes keep the choice. Settings, Libraries lists every unmatched title with the reason and a link straight to its Fix Match. As everywhere, values from an NFO or set by hand are kept.
-
-This product uses the TMDB API but is not endorsed or certified by TMDB.
-
-### Subtitles from OpenSubtitles (optional)
-
-Set `VCRX_OPENSUBTITLES_API_KEY` in `.env` to a consumer key from [OpenSubtitles](https://www.opensubtitles.com/consumers) and the player's subtitle menu gets **Search for subtitles…**: it searches by the file's OpenSubtitles hash first (a subtitle made for that exact file), then by the IMDb or TMDb id (the show's, with season and episode, for an episode), then by title and year. Results list a hash match first, then trusted uploaders, then by download count, with badges for the language, a hash match and hearing-impaired. One click downloads a subtitle and switches to it.
-
-- **Downloads** need `VCRX_OPENSUBTITLES_USERNAME` and `VCRX_OPENSUBTITLES_PASSWORD` too, because the daily quota belongs to an account (20 a day on a free one, shared by everyone on the server). Admins may download; for anyone else tick **May download subtitles** in Settings, Users. Anyone who can play a title can search and use subtitles already downloaded for it.
-- **Where they go:** under `/config/subtitles/<version id>/`, never beside the media, which is mounted read-only. Each becomes a subtitle track every client lists, the TV app included, and scans leave it alone. An admin sees them on the movie or episode page with the quota left and can delete them.
-- **Automatic:** with `subtitle_auto_fetch: true`, files added from then on that have no subtitle in `subtitle_languages` (default `en`) get the best hash or id match, once per file. Nothing found is retried after 6 hours, a day, 4 days and 16 days, then left alone. It stops for the day when the quota runs out.
-- **Offline:** search says OpenSubtitles cannot be reached; nothing else changes.
-
-**Subtitle timing:** in the player, Subtitle timing moves subtitles 250 ms earlier (−) or later (+), and Reset puts them back. The delay is kept per user and per file on the server, which shifts the WebVTT cues it serves, and the playback start response carries it as `subtitle_offset_ms` for players that read the subtitle files themselves.
-
-### Web app
-
-Open `http://<server>:3750/` in a browser. It is part of the server: no separate install, no build step, nothing loaded from the internet.
-
-- **Browse** Home (see below), each library with sort and filters, search, and details pages for movies, shows, seasons and episodes. Mark things watched or unwatched.
-- **Continue Watching** cards have a Remove button (on hover, always on touch screens, and reachable with Tab), and a details page with a resume position has Remove from Continue Watching. Either forgets your resume position without marking the title watched, and only for you (`DELETE /api/v1/items/{id}/progress`).
-- **Search as you type:** after two characters the search box lists up to eight matching titles with poster, year or episode, and kind. Arrow keys and Enter open one; Enter with none highlighted shows every result; Escape closes the list.
-- **Keyboard:** press `?` anywhere outside a text field for the list of shortcuts, `/` to jump to search. In the player: Space or K to play or pause, the arrow keys to skip back or forward, F for full screen, M to mute, Escape to leave.
-- **Play** in the browser, resuming where any device left off. The browser tells the server what it can decode. A file it cannot play directly because of its container or its audio (most often E-AC-3, AC-3 or DTS, which browsers do not decode) plays as a converted stream: the video is copied untouched and only the audio is converted to AAC, a fraction of one CPU core, with VCRX's own seek bar. Video the browser cannot decode at all (HEVC in Firefox, AV1 on older machines, VC-1 or MPEG-4 Part 2 anywhere) is transcoded to H.264 with libx264 in the same kind of stream: scaled down to the browser's reported size and to 1080p at most (`max_transcode_height` in `vcrx.yaml` or `VCRX_MAX_TRANSCODE_HEIGHT`, default 1080, fits the picture inside a 16:9 box that tall; 0 removes the cap), never up, with a keyframe every 2 seconds, and HDR tone mapped to SDR for a screen without HDR when the server's ffmpeg has the zscale filter (the Docker image's does; without it HDR looks washed out). A seek starts the new stream exactly where you asked. Each transcode takes one or more CPU cores, so only `VCRX_MAX_TRANSCODES` (default 2, 0 turns it off) run at once and the next viewer is told the server is busy; the server logs at startup whether its ffmpeg can transcode. The usual policy applies: a non-admin needs "May use converted streams", and "Including 4K" for a 4K file. Safari (on a Mac, iPhone or iPad, and every browser on an iPhone or iPad) plays video only from a server that answers byte ranges, which a stream made on the fly cannot, so it gets the same conversions as HLS, which it plays natively: segments of about 4 seconds written under `/cache/hls` while the session plays, with the same limits and policy. The server keeps each Safari stream's files to about 1.5 GB by pausing ffmpeg when it is two minutes ahead of the player and deleting segments a minute behind it, and deletes them all when playback stops, after two idle minutes, and at startup. Subtitles: pick any text track, sidecar or inside the file; picture subtitles (PGS, VobSub, DVB) are listed greyed out with "Picture subtitles need the TV app", because a browser cannot draw them; "Search for subtitles…" finds more on OpenSubtitles; Subtitle timing moves them 250 ms at a time when they are out of sync.
-- **Activity** for admins: now playing with a Stop button, history, stats and users. A movie, show or episode page also shows admins its own History: the latest 20 plays with who, when, device, how much was watched and how far it got, and the totals.
-- **Profiles,** like Plex Home: "Who's watching?" from the avatar in the top bar, or on opening when the server shows the picker. Each household member has their own Continue Watching and watched state, an optional 4 to 8 digit PIN, and an uploaded picture or their initials. Admins add kids' profiles (no password, a content-rating limit, PG unless set) and manage PINs in Settings > Users > Household. The TV app has the same picker, run with the remote.
-- **Invited devices,** with no account: Settings > Devices mints an invite (a link and a QR code) for chosen libraries, a highest resolution, whether converting is allowed, and an expiry. The device that opens it joins with no username or password, sees only that, never the profile picker, and streams but cannot download. A TV chooses "Pair with a phone" and shows a code; scan it with a phone signed in as an admin, or type it under Settings > Devices, and approve it with a scope. Each device is revoked on its own, from Devices or from its stream in Activity.
-- **Friends' servers:** each friend runs their own VCRX, and two servers link with a server invite. Under Settings > Friends, "Share with a friend's server" mints one with the same scope as a device's (libraries, highest resolution, converting, expiry) plus a bandwidth cap covering everything that server streams at once; the friend's admin pastes the link into "Watch a friend's server" on theirs. Their titles then show on your Home in a "From friends' servers" row, each badged with where it lives ("on Mark's server, 4K"), and play from their server through yours: your server relays the stream, and nothing is ever copied to it. Only your household (admins and profiles) sees them, under its own policy; invited devices and accounts outside the household never do. A server that is down shows as such and never holds Home up. Either side revokes or unlinks at any time, and anything playing stops. Friends' servers must be reachable from yours, on the LAN or over Tailscale: there is no relay or NAT traversal yet.
-- **Sign-in:** with `auto_sign_in_user` set, a browser on a trusted network is signed straight in; otherwise it shows a sign-in form. The session is an HttpOnly cookie, and every change the page makes carries a header a cross-site page cannot send.
-
-### Music
-
-A library with `kind: music` (see `deploy/vcrx.example.yaml`) holds FLAC, MP3, AAC and ALAC in M4A, Opus, Ogg Vorbis, WAV, AIFF, WavPack and SHN. Scans read the tags with ffprobe (artist, album artist, album, track and disc, date, genre, MusicBrainz ids, ReplayGain) and group tracks into albums by album artist and title, or by MusicBrainz release when tagged. Files with no album artist that name several artists under one album title in one folder, or carry the compilation flag, are a Various Artists compilation. Covers come from `cover.jpg`, `folder.jpg` or `front.jpg` beside the tracks, else from a picture inside a track; an artist's picture from `artist.jpg` or `folder.jpg` in their own folder. Scans are incremental, and a file that vanishes is hidden and kept for 30 days, as for video.
-
-**Live recordings** are albums of their own: a folder with a show date in its name (`Artist - 2024-06-14 - Venue, City [SBD]`, or the etree shape `gh2024-06-14.sbd.miller.flac16`) and an info `.txt`, an `.ffp` or `.md5` file, or a source word (SBD, AUD, matrix, FM). The date, venue, place and source come from the folder name and the info file (Source, Lineage and Taper lines, and the usual artist, date, venue, place header), and every checksum the `.md5` and `.ffp` files declare is stored per file for checking copies later. Disc and set folders (`CD1`, `Set 2`) are part of their show.
-
-**Playing:** a browser or the TV plays the file directly with byte ranges when it decodes it, and otherwise gets it converted on the fly to AAC (or Opus) through the same ffmpeg and policy as video: an account without "May use converted streams" is refused. Chrome does not decode ALAC, and nothing plays SHN, so those convert. Every track played is a listen in Activity. In the web app the player sits at the bottom of the window and keeps playing while you browse; Space plays and pauses anywhere outside a text field, and phones show the track on the lock screen (Media Session). The next track is loaded while the current one plays, so a live set flows from one track into the next without a gap you can hear. On the TV, a Music library shows artists, albums and live shows, an album screen, and Now Playing with the queue.
-
-### Home
-
-Home is built per user on the server, under their access policy, so the web app and the TV app show the same rows. In order: Continue Watching, Recently Added Movies and Recently Added TV (one row per library; several new episodes of a show are one card, "3 new episodes"), holiday and seasonal picks, New Seasons of shows you watch, Because You Watched (titles sharing a director, franchise, lead actors or genres with what you finished last, never ones you have finished), Trending on This Server (plays by everyone in the last week, recent plays weighing more), Recently Released, Top Rated Movies and Shows (IMDb, or TMDb when IMDb has too few votes), Unwatched Gems, three genres of the day, collections marked for Home, Most Watched, Most Watched by You, Rediscover (highly rated titles you watched over a year ago) and a Best of a decade. A row with fewer than four titles is left out (Continue Watching excepted), and each row's See all opens it as a grid of up to 100.
-
-**Customize Home** (Settings > Home, or the button at the bottom of Home) shows or hides each row and moves it up or down, by keyboard or by dragging, and saves at once. The layout is stored on the server (`GET`, `PUT` and `DELETE /api/v1/layout/home`), so it follows you to the TV. An admin can make their layout the default for everyone without their own (`/api/v1/admin/layout/home`).
-
-**Seasons** are matched offline from genres, titles, taglines, plots and NFO tags, by the server's local date: Halloween (October; horror, thriller and the supernatural, plus a family Halloween row, which is the only one a profile with a PG or lower rating ceiling gets), Thanksgiving week, Christmas and the holidays (Nov 25 to Dec 31), Valentine's week and summer blockbusters. `seasons.yaml` in the config directory changes them:
-
-```yaml
-seasons:
-  - id: halloween          # an id from the table turns it off...
-    enabled: false
-  - id: christmas          # ...or replaces it
-    title: Holiday Classics
-    start: "12-01"         # MM-DD, or thanksgiving+N / thanksgiving-N
-    end: "12-25"
-    keywords: [christmas, santa]
-  - id: hockey             # a new id adds a season
-    title: Playoff Hockey
-    start: "04-15"
-    end: "06-15"
-    genres: [Sport]
-    keywords: [hockey]
-```
-
-**TMDb rows** (optional, off by default): `tmdb_home_lists: true` with a TMDb key adds Trending on TMDb and Popular on TMDb, limited to what is in your libraries. The lists refresh every six hours; offline, the last good copy stays.
-
-### Poster overlays (Kometa style)
-
-List `overlays` under a library in `vcrx.yaml` and the server draws badges onto that library's posters, the way Kometa does for Plex. Because the badges are part of the poster image, the TV app, the web app and anything else that shows posters get them with no change. `?overlays=0` on an artwork URL returns the clean poster.
-
-| Type | Draws | Options |
-|---|---|---|
-| `rating` | A star and score with its source, top left by default | `sources`: preference order, default `[imdb, tmdb]` |
-| `resolution` | The best version's resolution with an HDR, DV, DV HDR or HDR10+ tag, bottom right | `resolutions`: which get a badge, default `[4K]` |
-| `ribbon` | A diagonal corner ribbon, default `TOP RATED` | `min_rating` (8.0), `min_votes` (25,000 for IMDb), `text` |
-
-All three take `position`: `top_left`, `top_right`, `bottom_left` or `bottom_right`. Badges are VCRX's own lettering, not copies of third-party logos. Kometa's `ribbon` default draws on IMDb Top 250 and Rotten Tomatoes lists that VCRX has no source for, so VCRX's ribbon is a rule on the IMDb rating and vote count instead.
-
-**IMDb ratings:** set `imdb_ratings: true` and the server downloads IMDb's public ratings file once a day (and only when it changed) and keeps the rating and vote count for every title with an IMDb id. NFO files and TMDb enrichment supply the ids. `vcrx metadata imdb` runs the sync now. IMDb licenses the file for personal, non-commercial use, so it is off by default.
-
-### Trailers and extras
-
-Extras laid out the way Plex reads them work with no internet: `<name>-trailer.mkv` beside a film, and the folders `Trailers`, `Featurettes`, `Behind The Scenes`, `Deleted Scenes`, `Interviews`, `Scenes`, `Shorts` and `Other` inside a film's or show's folder (a season's folder works too and attaches to the show). They never become titles of their own. Each film or show page gets a Trailer button and an Extras row; they play in the VCRX player through the same decision and access rules as the film, so a friend who cannot see a film cannot play its trailer either, and a trailer never moves the film's resume point. A show's `theme.mp3` plays quietly on its TV page (and on the web page when you press Theme music). Like any file, an extra that disappears is kept for 30 days before it is forgotten.
-
-**YouTube trailers (optional):** with a TMDb key, `trailers_youtube: true` (or `VCRX_TRAILERS_YOUTUBE=true`) looks up each title's official trailer on TMDb and offers it when there is no local one. The web app plays it in YouTube's no-cookie player (the only outside frame the web app's security policy then allows, and only with this setting on); the TV app opens the YouTube app. Before keeping a trailer, the server asks YouTube's public oEmbed endpoint whether it still plays in another site's player, and passes over one that is gone or has embedding turned off for TMDb's next best, so a Trailer button is never dead. Off by default, because playing one needs the internet and YouTube then sees the request.
-
-**Before a movie (optional, per profile):** each profile can choose up to three local trailers for other movies it may see and has not watched, and a pre-roll clip, to play before a movie. Pre-rolls come from `preroll_dir`, a folder of short clips mounted read-only (`VCRX_PREROLL_DIR` in `.env`). Off by default. Trailers come only from local trailer files, never YouTube, and follow the profile's access rules, so a kids' profile never sees a trailer for a title it cannot see. Nothing that plays first counts as watched.
-
-**Live TV (in progress, optional):** channels from M3U playlists you list under `live_tv` in `vcrx.yaml`, read at startup and every 12 hours. VCRX ships no playlist and suggests none; play what you have the right to watch. A playlist URL with an account's password goes in a file named by `m3u_url_file`, and neither it nor any stream URL ever reaches a client. Viewers need the Live TV grant in Settings > Users; admins always have it. Each playlist can name an XMLTV guide (`xmltv`, a URL or file, gzipped or not), read every 6 hours and matched to channels by tvg-id or name: channels list what is on now and next (`GET /api/v1/live/channels`) and `GET /api/v1/live/guide` gives the grid. To watch, `POST /api/v1/live/channels/{id}/watch` returns VCRX's own live HLS playlist: one pull per channel, shared by everyone watching it, video copied and audio converted to AAC, at most `max_streams` (4) channels at once. The web app has a Live TV page with the guide's now and next and a player with channel up and down, and the TV app has the same in a Live TV row (`docs/plans/2026-10-31-live-tv.md`).
-
-### Collections
-
-Every film series (a TMDb collection) with two or more of its films in a movie library becomes a collection there, in release order, like Kometa's `franchise` default. The membership is rebuilt every 30 minutes, so a new sequel joins on its own; a series that drops to one film goes away. Names come from TMDb once, so this needs `VCRX_TMDB_API_KEY`; without it, series wait rather than get a made-up name. `vcrx metadata collections` builds them now. The web app shows them under a library's Collections button and links each film's page to its series. Libraries also filter by genre and decade.
-
-### Smart collections and hidden labels (Kometa style)
-
-Write collections as YAML files in `/config/collections/` (`collections_dir` in `vcrx.yaml` or `VCRX_COLLECTIONS_DIR` moves it); `deploy/collections.example.yaml` is a commented start. The files are the source of truth: the database copy is rebuilt from them after every scan, every TMDb pass and every 15 minutes, so losing the database loses nothing.
-
-```yaml
-collections:
-  - name: R-Rated Horror
-    library: Movies
-    smart:
-      all:                  # every rule matches; any: at least one does; lists nest
-        - genre: Horror
-        - content_rating: R
-    label: horror           # stamped on every match, taken off when a title stops matching
-    visible: { library: false, home: false, shared: false }   # label only, never listed
-```
-
-Rules use local metadata only: genre, studio, director, writer, actor, country, network, decade, year or a year range, resolution (of any present version), HDR, content rating, label and `added_within_days`. A list of values means any of them. A file with a mistake is refused whole, with the file and line in the log, in `vcrx metadata collections` (which builds everything now) and in `GET /api/v1/admin/collections`; its collections keep building from the last good copy, and nothing else changes. An empty, comment-only or cut-short file counts as a mistake, because editors and sync tools leave one mid-save; to empty a file on purpose, write `collections: []`. Deleting a file removes its collections and labels once it has stayed gone for a minute and a later build still finds it gone. If the directory itself is missing, nothing changes at all.
-
-Rebuilds also follow TMDb: after each enrichment pass that matched anything and after a Fix Match, a rebuild runs within seconds, so a deny label lands as soon as the genre or rating that triggers it arrives.
-
-`label:` is how friends' access follows your rules: deny `horror` in a user's policy and a title disappears for them as soon as a rebuild finds it matches, and comes back when it stops matching. VCRX only ever takes off labels it stamped. A label you set by hand or that an NFO file carries is never removed, and an NFO naming a stamped label takes it over. Collections with `visible.library: false` are left out of library collection lists, title pages and Home; `visible.home: true` gives a collection its own row on Home, and `shared` (on unless set false) decides whether that row also reaches users other than admins.
-
-### Skip Intro and Skip Credits
-
-A season's episodes share their theme song and usually their end credits. VCRX compares the first 10 minutes of each episode with its neighbours' by audio fingerprint, and the last 8 minutes likewise: the stretch heard in most of them is the intro (or the credits). A cold open before the theme is fine, and a recap ("previously on") is not mistaken for the intro because it repeats only one other episode. Credits followed by a scene end before the scene, so Skip Credits lands on it; credits that run to the end of the file become Next Episode, straight into Up Next. When nothing matches, a final stretch of black picture (5 s or more) or silence (15 s or more) counts as credits. A season that shares nothing gets no markers: a wrong Skip button is worse than none.
-
-How it stays out of the way: one season at a time, ffmpeg and the matching at `nice 19`, only between `marker_hours` (01:00 to 06:00 local time by default; set `TZ`), never in a library being scanned, and only for episodes it has not seen (fingerprints are cached under `/cache/markers`, about 30 KB per episode). It resumes after a restart. The existing library is backfilled the same way; Settings, Intros shows progress show by show (`GET /api/v1/admin/markers`). `detect_markers: false` turns it off.
-
-Markers from the file win over detection: a chapter titled Intro, Opening, Credits, End Credits and the like, or Plex-style `<Marker type="intro" startTimeOffset="0" endTimeOffset="51000"/>` elements (milliseconds) in the episode's NFO. An admin's own markers win over everything: on an episode's page, set or clear each one, copy it to the rest of the season (VCRX finds the same audio in each episode), or detect the season again. Cleared stays cleared.
-
-Each person chooses in Settings: show a Skip button (default), skip automatically, or off (`GET`/`PUT /api/v1/me/playback-settings`, field `skip_markers`: `button`, `auto` or `off`; the TV app reads the same value from each playback session). Skipping automatically acts only on intros detection is sure of (confidence 0.75 or more, or markers from the file or an admin); credits always wait for a press, so a scene after them is never skipped.
-
-Check detection against your own library without storing anything: `docker compose exec vcrx vcrx markers detect --dry-run "/media/TV/Some Show"` prints each season folder's episodes with the intro and credits it finds.
-
-### Radarr and Sonarr
-
-New imports can show up in seconds instead of at the next scan. Set `VCRX_ARR_WEBHOOK_TOKEN` in `.env` (16 characters or more), restart, then in Radarr and in Sonarr add Settings, Connect, Webhook:
-
-- URL: `http://<server-ip>:3750/api/v1/hooks/arr`, method POST
-- Password: the token (the username can be anything), or put `?token=<token>` on the URL
-- Triggers: On Import, On Upgrade, On Rename, and the delete triggers
-
-VCRX scans just that movie's or series' folder; for a delete (a movie, a series or a file removed) it scans the folder's parent instead, usually the whole library, because the folder itself may be gone. It finds the folder by its name inside a library of the right kind; if Radarr or Sonarr see the NAS at a different path and the names differ, map the prefix with `arr_path_map` in `vcrx.yaml`. Webhooks are accepted only from the LAN. A Test from Radarr or Sonarr answers 200.
-
-### Activity and notifications
-
-Like Tautulli, without a second program. Every play request is logged with the device, address, version, decision and reason, and the admin API reads it back (admin account, from the LAN):
-
-| Endpoint | What it gives |
+| Guide | What it covers |
 |---|---|
-| `GET /api/v1/admin/activity/now` | What is playing now: who, what, where, progress, direct play or not, bitrate, and the total bandwidth |
-| `GET /api/v1/admin/activity/history` | Finished plays, newest first, by user or by title (a show includes its episodes) |
-| `GET /api/v1/admin/items/{id}/history` | One title's plays, newest first, with its totals: plays, people, watch time. What the details page shows |
-| `GET /api/v1/admin/watch/export` | Every movie and show with its file paths, size, when it was added and last played, play count and who finished it, for a cleanup tool (see below) |
-| `GET /api/v1/admin/activity/stats?days=30` | Plays and watch time, top movies, shows, users, clients, devices and platforms, plays by day, hour and weekday, direct play against converted, and the most streams at once |
-| `GET /api/v1/admin/activity/users` | Every account with its totals and when and where it was last seen |
-| `POST /api/v1/admin/activity/sessions/{id}/terminate` | Stop a stream now, with a message the viewer sees |
+| [Installing and running](docs/INSTALL.md) | Setup, users and access, the CLI, configuration, backups and restore, updating, optional services |
+| [Features](docs/FEATURES.md) | The web app, playback, Home, music, collections, overlays, trailers, Skip Intro, activity and notifications |
+| [Security and privacy](docs/SECURITY-AND-PRIVACY.md) | Sign-in, invites, linked servers, and exactly what leaves your network |
+| [Internet access](docs/INTERNET-ACCESS.md) | Reaching VCRX from outside your home through Caddy |
+| [Playback compatibility](docs/PLAYBACK-COMPATIBILITY.md) | What happens to each kind of file on each kind of client, and what has been tested |
+| [TV app](tv/README.md) | Building, installing and using the Google TV app |
+| [Development](docs/DEVELOPMENT.md) | Building and testing the server and the web app |
 
-A play counts in stats once 30 seconds have actually played, and is watched at 90%. Days and hours follow the container's `TZ`. Each chart on the Stats page has a "Show as a table" view with the same numbers.
+## Security and privacy in brief
 
-Addresses are labelled by the kind of network they are on: This server, Local network, Tailscale (100.64.0.0/10 and its IPv6 prefix) or Internet. That works offline; public addresses are not placed on a map.
+- **LAN first.** Never forward port 3750 on your router. For access from outside, follow the [internet access guide](docs/INTERNET-ACCESS.md) or use a VPN. Admin routes answer only from your own network unless you allow otherwise.
+- **Locked down by default.** Passwords and PINs are hashed with argon2id, tokens and invites are stored only as hashes, and sign-in attempts are rate limited.
+- **Quiet.** No telemetry, usage reports or update checks. VCRX contacts TMDb, OpenSubtitles or YouTube only if you turn them on, and who watched what stays in your own database.
 
-**Watch state for cleanup tools:** a script that deletes watched or never-played media needs to know, per title, whether anyone watched it and when. `GET /api/v1/admin/watch/export` answers that for every movie and show still on disk, a show rolled up from its episodes: `item_id`, `kind`, `title`, `year`, `library`, `paths` (absolute, as the server sees them), `size_bytes`, `added_at`, `last_played_at` (any user, a stream in progress included; `null` if never), `play_count` (times finished, all users), `finished_by` (usernames), and for shows `episodes_total` and `episodes_watched`. `?library_id=` narrows it to one library, and `?unplayed_days=30` keeps only titles nobody has played in 30 days, never-played ones included. On the host, `vcrx watch export -library Movies -unplayed-days 30` prints the same rows as JSON lines. The paths are the container's; map them to the host's before deleting anything.
+## Licence
 
-**Webhooks:** set `VCRX_WEBHOOK_URLS` in `.env` to one or more URLs, comma separated. Each gets a JSON post for `play`, `stop`, `refused`, `terminated` and `added` (new titles after a scan, such as `＋ New in Movies: The Film (2024), Show (3 new episodes)`; narrow the events with `webhook_events` in `vcrx.yaml`). A Discord webhook URL gets a plain Discord message instead, such as `▶ pete started The Film on Living Room TV (direct play)`.
+AGPL-3.0-or-later. If you run a modified VCRX as a service, share your changes.
 
-**Newsletter:** Settings > Newsletter sends a weekly digest of what was added in the last seven days (new movies, and new episodes grouped by show) to the same webhooks, on a weekday and hour you pick in the server's time zone. It lists only what its audience may see: by default, titles every friend (non-admin) account can see, so a library only some are granted and a title with a label any of them is denied stay out; or pick one friend account whose view it uses. Add `newsletter` to `webhook_events` if you narrow the events. Discord gets a card per title with its TMDb poster (posters that exist only on disk have no public link), cut to fit Discord's limits with "and N more"; other URLs get the full list as JSON (`event: newsletter`). It is off by default, sends nothing in a week when nothing was added, and remembers the last week it sent, so a restart never sends it twice. "Send a preview now" posts the last seven days straight away.
-
-## Run the TV app
-
-Build the APK with one command and sideload it with ADB: [tv/README.md](tv/README.md). On the TV, enter `http://<server-ip>:3750` and sign in.
-
-## Acceptance test
-
-The MVP is done when this passes end to end on real hardware:
-
-1. On the server: `docker compose up -d --build` with read-only media mounts, then `vcrx library list` shows both libraries scanned with nonzero item counts.
-2. Build the APK (`tv/build-apk.sh`) and sideload it (`adb install -r tv/build/out/vcrx-tv-release.apk`).
-3. On the TV: connect to `http://<server-ip>:3750`, sign in, see Recently Added on Home.
-4. Browse Movies and TV, open a show, pick a season and an episode.
-5. Play a file that direct plays. Seek forward. Press Back to stop.
-6. Open the same item again: it offers Resume at the position you stopped at, and Home shows it under Continue Watching.
-7. The activity log has the session: `GET /api/v1/admin/activity/sessions` lists the device, the decision (`direct_play`), its reason, and the positions.
-
-Any other media server on the same host keeps running untouched; VCRX only reads the media folders.
-
-## Security
-
-- Optional password-free sign-in on your own networks: set `auto_sign_in_user` and `trusted_networks` in `vcrx.yaml` and clients on those networks are signed in as that user, each device with its own session. Off by default. There is no default network list on purpose: "every private range" on a server host also covers its Docker and Incus bridges, so a compromised container could sign in. List your LAN subnets and your Tailscale devices, and leave out loopback unless nothing on the host proxies to VCRX. Whoever is on those networks gets that user's access, admin included if the user is an admin. With `auto_sign_in_picker: true` they get the profile picker instead, which counts as restricted: an admin's profile there needs its PIN or password.
-- Invites are 160-bit random secrets kept only as a SHA-256 hash, shown once, and spent on first use. An invited device is checked on every request: past its expiry or revoked, it is refused, and its open streams stop. Wrong invites count against the address like wrong passwords. TV pairing codes last ten minutes, work once, are approved only by an admin on the local network, and are limited per address (ten starts, ten unknown polls, ten wrong codes per 15 minutes). Invited devices can never mint, approve, switch profiles or reach the picker, and their scope cannot be widened after minting.
-- Friends' servers stream to each other and never copy files: a linked server reaches a file only inside its own playback session, as an invited device does, and a test walks every route it can call and fails if any serves a whole file for storage. A server invite is stored only as a hash and works once; the token the linked server gets is stored only as a hash on the sharing side, and its scope is enforced by the same policy path as a user's. A linked server is never an admin. On the watching side, the peer's address must be plain `http://host:port` or `https://...`, loopback, link-local (cloud metadata), multicast and unspecified addresses are refused when entered and again on every connection after DNS, redirects are never followed, and only VCRX's own API paths are requested from it. Everything a peer sends is size-limited and checked: catalog and page JSON is rebuilt from known fields and cleaned, artwork must be an image by its bytes, streams must be video or audio, HLS playlists may name only their own segments, and none of it is served as HTML. The watching server has to present the friend's token, so it cannot keep a hash: it keeps the token sealed (AES-256-GCM) with a key in `/config/peer-token.key`, made the first time a server is linked and readable by the server's user only. The key is never written into the database or `/config/backups`, so a database backup carries no usable token. Back the key up separately if you want a restored database to keep its links; without it, each link shows as unusable ("Link token unreadable") until you restore the key or unlink and link that server again. Tokens stored before sealing are sealed at startup.
-- Profile PINs are argon2id hashes like passwords. Wrong PINs are counted before the PIN is checked, per 15 minutes: 5 per device, and per profile 25 shared by every device at home or 5 from away, so one device guessing locks only itself and failures from away never lock a profile at home. A password offered instead counts against the sign-in limits, so an admin can always get in with it while their PIN is locked. Switching from a restricted profile to an admin's always needs the admin's PIN or password, on any network. A switch ends the device's old session, so the profile it left cannot be reopened without its PIN.
-- The server answers only to IP addresses, `localhost` and the names in `allowed_hosts`. That stops DNS rebinding, where a web page points its own domain at your server and calls it from your browser. Add a MagicDNS or local name there if you use one.
-- Stopping a stream in Activity ends that session; it does not lock the user out. Disable the account to do that.
-- Browsers scope cookies by host, not port: every other web app on the same host and address receives the web app's session cookie. Give VCRX its own host name if other apps there are not trusted.
-- LAN-first. Never forward VCRX's port on your router. Admin routes answer only from loopback and private addresses unless `VCRX_ADMIN_ALLOW_REMOTE=true`.
-- Passwords are hashed with argon2id. Tokens are random, stored only as SHA-256 hashes, and expire after 90 idle days. Failed sign-ins are limited per address (IPv6 per /64, Tailscale per peer): 10 in 15 minutes. They are also limited per username, in two separate counts: 10 for clients off the LAN (Tailscale included) and 50 for the LAN. Nobody on the internet can lock you out at home, and a guest or IoT device rotating addresses on the LAN still stops at 50.
-- Every file is reached through a version id; paths are resolved with symlinks evaluated and must stay inside their library root, which must sit under `VCRX_MEDIA_ROOTS`.
-- Remote access: [docs/INTERNET-ACCESS.md](docs/INTERNET-ACCESS.md) puts VCRX behind Caddy (in [deploy/caddy/](deploy/caddy/)) with a DNS-only name and a Let's Encrypt certificate. List the proxy's address in `trusted_proxies`; a proxy left out makes every visitor unknown rather than local. Admin routes stay LAN-only. A VPN is still the smaller exposure where your viewers can use one.
-
-## Privacy
-
-VCRX sends nothing anywhere unless you add a TMDb key or an OpenSubtitles key. No telemetry, no usage reports, no update checks. With a key, the server sends TMDb the titles and years it searches for and the TMDb ids it looks up, and downloads images from TMDb; it sends nothing about users or what they watch. With an OpenSubtitles key, searching sends OpenSubtitles the file's hash (a number computed from its size and first and last 64 KiB), its IMDb or TMDb id, or its title and year, and the languages asked for; downloading signs in with the account you configured. With `trailers_youtube` on, the server sends YouTube's oEmbed endpoint the id of each trailer it considers (nothing else, and no key), and pressing a YouTube trailer's button makes that browser or TV fetch it from YouTube, which then sees that device's address; the web app sends YouTube only its own origin as the referrer, never the page. Activity history (who played what, from which device and IP) stays in your database.
-
-## Development
-
-The server is Go 1.26 with a pure-Go SQLite driver; no cgo.
-
-```bash
-cd server
-go test -race ./...      # includes the OpenAPI drift test
-go vet ./...
-golangci-lint run
-govulncheck ./...
-```
-
-To work on the web app or the API against a few generated test clips: `./scripts/dev-server.sh`, then open http://127.0.0.1:3751/. It builds the clips with ffmpeg on first run, serves the web files from `server/web/static` so an edit shows on reload, and signs the local browser in. `server/web/check-js.sh` is the web app's compile check, and `node scripts/web-smoke.mjs` drives every page (at desktop and phone width), all three playback paths (direct, audio converted, video transcoded, and HLS for Safari), Continue Watching removal, search as you type, the shortcuts list, Home's rows and Customize Home in headless Chrome against the dev server; CI runs both. The dev server is a development build (`-tags vcrxdev`): it pins Home's date to `VCRX_DEV_HOME_DATE` (default 2026-10-31, so the Halloween row shows whatever the day) and seeds a play history with `vcrx dev-seed`. Neither exists in a normal build or the image.
-
-`VCRX_HOME_PERF=1 go test ./internal/catalog -run HomePerformance -v` times Home on a generated library of 5,000 films, 500 shows and 20,000 plays.
-
-On NixOS, run `nix-shell` at the repo root first: [shell.nix](shell.nix) provides these tools, plus the Docker client and adb for the TV app. The API contract is [server/api/openapi.yaml](server/api/openapi.yaml), served at `/api/v1/openapi.yaml`; a test fails when it and the registered routes disagree. Migrations are forward-only SQL files in `server/internal/db/migrations`.
-
-Design notes and the verified facts the build relies on: [docs/REFERENCE.md](docs/REFERENCE.md).
-
-## Brand
-
-The VCRX wordmark, split V mark, app icons and TV tile live in [brand/](brand/README.md): VCRX Green `#008F11` on Black, Rajdhani for display type and Inter for interface text. The kit is raster artwork, so the logo is always the image, never retyped in a font. `brand/tools/make-assets.py` derives the Android launcher icons, TV banners, in-app logo files and the web app's icons from it; rerun it after changing the kit.
+This product uses the TMDB API but is not endorsed or certified by TMDB. The VCRX name and artwork live in [brand/](brand/README.md).
