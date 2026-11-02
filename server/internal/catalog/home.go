@@ -347,9 +347,15 @@ func (q *homeQuery) build(kind, arg string, forHome bool) (*builtRow, error) {
 	case "because_you_watched":
 		return q.becauseYouWatched(arg)
 	case "trending":
+		if err := q.householdOnly(); err != nil {
+			return nil, err
+		}
 		ids, err := q.plays(q.now.Add(-trendingWindow), 0)
 		return row("Trending on This Server", ids, err)
 	case "most_watched":
+		if err := q.householdOnly(); err != nil {
+			return nil, err
+		}
 		ids, err := q.plays(time.Time{}, 0)
 		return row("Most Watched", ids, err)
 	case "most_watched_by_you":
@@ -756,10 +762,24 @@ func (q *homeQuery) becauseYouWatched(arg string) (*builtRow, error) {
 		Title: "Because You Watched " + title, SeeAll: true}, ids: ids}, nil
 }
 
+// householdOnly gates the rows that add up more than one person's plays.
+// Only a household member sees them: anyone else (a friend's account, an
+// invited device) would learn from them what the household watches.
+func (q *homeQuery) householdOnly() error {
+	var member bool
+	err := q.c.DB.QueryRowContext(q.ctx, `SELECT household FROM users WHERE id = ?`, q.user).Scan(&member)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !member) {
+		return ErrNotFound
+	}
+	return err
+}
+
 // plays ranks movies and shows (an episode counts for its show) by plays
 // that actually played, since a time (zero for all time) and for one user
-// (zero for everyone). Recent plays weigh more inside a window: a play today
-// counts 1, one at the window's start a quarter.
+// (zero for the whole household: plays from outside it never count, so a
+// friend's viewing does not show up on the family's Home). Recent plays weigh
+// more inside a window: a play today counts 1, one at the window's start a
+// quarter.
 func (q *homeQuery) plays(since time.Time, user int64) ([]int64, error) {
 	weight := "1.0"
 	where := []string{"ps.item_id IS NOT NULL", "ps.decision <> 'refused'", "ps.played_ms >= ?"}
@@ -775,6 +795,8 @@ func (q *homeQuery) plays(since time.Time, user int64) ([]int64, error) {
 	if user > 0 {
 		where = append(where, "ps.user_id = ?")
 		args = append(args, user)
+	} else {
+		where = append(where, "ps.user_id IN (SELECT id FROM users WHERE household = 1)")
 	}
 	key := fmt.Sprintf("%d:%d", since.UnixMilli()/int64(playsCacheTTL/time.Millisecond), user)
 	if since.IsZero() {

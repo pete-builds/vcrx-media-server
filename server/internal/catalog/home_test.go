@@ -28,8 +28,9 @@ type homeFx struct {
 	now                time.Time
 	movies, tv         int64
 	adminID, friendID  int64
-	kidID              int64
+	kidID, outsiderID  int64
 	admin, friend, kid policy.Policy
+	outsider           policy.Policy
 	ids                map[string]int64
 	hidden             []int64
 	n                  int
@@ -67,13 +68,19 @@ func newHomeFx(t *testing.T) *homeFx {
 	ms := now.UnixMilli()
 	f.movies = f.exec(`INSERT INTO libraries (name, kind, root_path, created_at, updated_at) VALUES ('Movies', 'movie', '/m', ?, ?)`, ms, ms)
 	f.tv = f.exec(`INSERT INTO libraries (name, kind, root_path, created_at, updated_at) VALUES ('TV', 'show', '/t', ?, ?)`, ms, ms)
-	user := func(name string, admin bool) int64 {
-		return f.exec(`INSERT INTO users (username, password_hash, is_admin, created_at, updated_at) VALUES (?, 'x', ?, ?, ?)`, name, admin, ms, ms)
+	// admin, friend and kid are one household; outsider is an account from
+	// outside it, which must neither see the household's play totals nor
+	// add to them.
+	user := func(name string, admin, household bool) int64 {
+		return f.exec(`INSERT INTO users (username, password_hash, is_admin, household, created_at, updated_at) VALUES (?, 'x', ?, ?, ?, ?)`,
+			name, admin, household, ms, ms)
 	}
-	f.adminID, f.friendID, f.kidID = user("admin", true), user("friend", false), user("kid", false)
+	f.adminID, f.friendID, f.kidID = user("admin", true, true), user("friend", false, true), user("kid", false, true)
+	f.outsiderID = user("outsider", false, false)
 	f.admin = policy.Policy{UserID: f.adminID, IsAdmin: true}
 	f.friend = policy.Policy{UserID: f.friendID, LibraryIDs: []int64{f.movies, f.tv}, MaxResolution: "1080p", DenyLabels: []string{"secret"}}
 	f.kid = policy.Policy{UserID: f.kidID, LibraryIDs: []int64{f.movies, f.tv}, MaxContentRating: "PG"}
+	f.outsider = policy.Policy{UserID: f.outsiderID, LibraryIDs: []int64{f.movies, f.tv}}
 	return f
 }
 
@@ -396,6 +403,37 @@ func TestHomeRowsNeverShowAFriendHiddenTitles(t *testing.T) {
 		if _, err := f.c.HomeRowItems(ctx, f.friend, f.friendID, id); !errors.Is(err, ErrNotFound) {
 			t.Errorf("See all %s: err = %v, want not found", id, err)
 		}
+	}
+}
+
+func TestHomePlayTotalsStayInTheHousehold(t *testing.T) {
+	f := newHomeFx(t)
+	f.seed()
+	// The outsider binges Alpha Night: by plays alone it would top both rows.
+	f.play(f.outsiderID, f.ids["Alpha Night"], 1*day, 40)
+
+	rows := f.home(f.friend)
+	if got := titles(rowByID(rows, "trending")); len(got) == 0 || got[0] != "Iron Coast" {
+		t.Errorf("household trending = %v, want the outsider's plays left out", got)
+	}
+	if got := titles(rowByID(rows, "most_watched")); len(got) == 0 || got[0] == "Alpha Night" {
+		t.Errorf("household most watched = %v, want the outsider's plays left out", got)
+	}
+
+	// The outsider gets neither row, on Home or as See all, but keeps their own.
+	for _, r := range f.home(f.outsider) {
+		if r.ID == "trending" || r.ID == "most_watched" {
+			t.Errorf("outsider's Home has %s: %v", r.ID, titles(&r))
+		}
+	}
+	for _, id := range []string{"trending", "most_watched"} {
+		if _, err := f.c.HomeRowItems(context.Background(), f.outsider, f.outsiderID, id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("outsider's See all %s: err = %v, want not found", id, err)
+		}
+	}
+	own, err := f.c.HomeRowItems(context.Background(), f.outsider, f.outsiderID, "most_watched_by_you")
+	if err != nil || len(titles(&own)) == 0 || titles(&own)[0] != "Alpha Night" {
+		t.Errorf("outsider's most watched by you = %v, %v", titles(&own), err)
 	}
 }
 
