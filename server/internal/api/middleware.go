@@ -71,6 +71,14 @@ func (s *Server) clientIP(r *http.Request) string {
 	}
 	peer = peer.Unmap()
 	if !s.trusted(peer) {
+		if h := forwardingHeader(r); h != "" {
+			// A proxy that is not in trusted_proxies: its own address is not
+			// the client's, and reading it as the client would give everyone
+			// behind it the proxy's LAN rights (auto sign-in, admin). Nobody
+			// on the LAN needs these headers, so failing closed costs nothing.
+			s.warnUntrustedProxy(peer, h)
+			return unknownClient
+		}
 		return peer.String()
 	}
 	// Every X-Forwarded-For header, in order; the right-most untrusted hop is
@@ -99,6 +107,32 @@ func (s *Server) clientIP(r *http.Request) string {
 // unknownClient stands in for a client address that cannot be known. It
 // parses as no address, so it is never LAN and never trusted.
 const unknownClient = "unknown"
+
+// proxyHeaders are the headers a reverse proxy adds. Only X-Forwarded-For is
+// ever read for the client's address, and only from a trusted proxy; the rest
+// just mark a request as having come through one.
+var proxyHeaders = []string{"X-Forwarded-For", "X-Real-Ip", "Forwarded", "X-Forwarded-Proto", "X-Forwarded-Host"}
+
+// forwardingHeader names the first proxy header the request carries, or "".
+func forwardingHeader(r *http.Request) string {
+	for _, h := range proxyHeaders {
+		if len(r.Header.Values(h)) > 0 {
+			return h
+		}
+	}
+	return ""
+}
+
+// warnUntrustedProxy logs, once per address, that an unlisted peer sent proxy
+// headers, so a missing trusted_proxies entry shows up in the logs rather than
+// only as every visitor being asked for a password.
+func (s *Server) warnUntrustedProxy(peer netip.Addr, header string) {
+	if _, seen := s.proxyWarned.LoadOrStore(peer, struct{}{}); seen || s.Log == nil {
+		return
+	}
+	s.Log.Warn("request has proxy headers from an address not in trusted_proxies; its clients are treated as unknown (not LAN, not trusted)",
+		"peer", peer.String(), "header", header)
+}
 
 // checkHost refuses requests for a host name the server does not answer to.
 // IP addresses and localhost always pass; other names must be in AllowedHosts.

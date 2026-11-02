@@ -1,0 +1,41 @@
+# Caddy in front of VCRX for access from the internet. See
+# docs/INTERNET-ACCESS.md before starting it: it does nothing useful (and
+# nothing harmful) until the router forwards a port to it.
+#   cp caddy.env.example caddy.env    (then fill it in; chmod 600)
+#   docker compose build && docker compose up -d
+name: vcrx-caddy
+
+services:
+  caddy:
+    build: .
+    image: vcrx-caddy:local
+    container_name: vcrx-caddy
+    # Host networking so Caddy reaches VCRX on loopback, and VCRX sees the
+    # proxy as 127.0.0.1, the only address it is told to believe. Caddy binds
+    # CADDY_BIND:HTTPS_PORT only, never the Tailscale address (whose 443 is
+    # taken by tailscale serve) and never port 80.
+    network_mode: host
+    # HTTPS_PORT is above 1024, so Caddy needs no capability at all.
+    user: "${CADDY_UID:-1000}:${CADDY_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    env_file: caddy.env
+    environment:
+      XDG_DATA_HOME: /data
+      XDG_CONFIG_HOME: /config
+    volumes:
+      # Certificates and the ACME account key; keep this directory 700.
+      - ./data:/data
+      - ./config:/config
+    tmpfs:
+      - /tmp:size=16m
+    mem_limit: 256m
+    pids_limit: 128
+    cpus: 1
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }

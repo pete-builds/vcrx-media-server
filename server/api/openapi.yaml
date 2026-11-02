@@ -33,7 +33,7 @@ paths:
   /readyz:
     get:
       operationId: readyz
-      summary: Readiness. 503 when the database or a library root is unreachable.
+      summary: Readiness. 503 when the database or a library root is unreachable. The per-check detail is sent to LAN clients only.
       security: []
       responses:
         "200": { description: Ready, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }

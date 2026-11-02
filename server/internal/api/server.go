@@ -101,6 +101,9 @@ type Server struct {
 	// switchLocks serializes password checks per profile (*sync.Mutex by id),
 	// so the sign-in limiter's check and its count cannot be raced.
 	switchLocks sync.Map
+	// proxyWarned holds peers already logged for sending proxy headers
+	// without being in TrustedProxies (netip.Addr keys).
+	proxyWarned sync.Map
 	// Invites are invited devices (the invite is the account); Pairings are
 	// TVs waiting for a phone to approve them. PairLimiter counts pairing
 	// starts, polls with unknown codes, and wrong codes typed by an admin.

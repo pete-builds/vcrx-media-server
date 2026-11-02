@@ -334,6 +334,10 @@ func serve() error {
 	if err != nil {
 		return fmt.Errorf("trusted networks: %w", err)
 	}
+	if len(cfg.AllowedHosts) > 0 && len(proxies) == 0 {
+		log.Warn("allowed_hosts is set but trusted_proxies is empty: behind a reverse proxy every visitor is treated as unknown (no LAN rights, one shared sign-in limit) until the proxy's address is listed",
+			"allowed_hosts", cfg.AllowedHosts)
+	}
 	switch {
 	case cfg.AutoSignInUser != "" && len(trustedNets) == 0:
 		log.Warn("auto_sign_in_user is set but trusted_networks is empty, so nobody is signed in without a password; list your LAN and Tailscale networks")

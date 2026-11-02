@@ -1,0 +1,87 @@
+# VCRX behind Caddy for access from the internet. See docs/INTERNET-ACCESS.md.
+#
+# The router forwards public TCP 443 to this host's HTTPS_PORT; Caddy serves the
+# one public name with a Let's Encrypt certificate obtained by DNS-01 through
+# Cloudflare (no port 80 needed, nothing proxied by Cloudflare), and passes
+# requests to VCRX on loopback. VCRX must list 127.0.0.1 and ::1 in
+# trusted_proxies and the public name in allowed_hosts.
+#
+# Values come from the environment (compose passes them from caddy.env):
+#   VCRX_DOMAIN   the public name, e.g. watch.example.com
+#   CADDY_BIND    this host's LAN address, the only address Caddy listens on
+#   HTTPS_PORT    the port the router forwards 443 to
+#   ACME_EMAIL    contact address for Let's Encrypt expiry mail
+#   CF_API_TOKEN  Cloudflare token: Zone > DNS > Edit on this one zone only
+{
+	# No admin API: the configuration changes only by restarting the container.
+	admin off
+	email {$ACME_EMAIL}
+	https_port {$HTTPS_PORT}
+	# Port 80 is not forwarded, so there is no plain-HTTP listener to redirect.
+	auto_https disable_redirects
+	servers {
+		# HTTP/3 would need UDP forwarded as well; TCP only.
+		protocols h1 h2
+		timeouts {
+			read_header 10s
+			idle 2m
+			# No read_body or write timeout: a film streams for hours.
+		}
+		# Nothing in front of Caddy is trusted: X-Forwarded-For from the
+		# internet is replaced with the real client address, never appended.
+	}
+}
+
+{$VCRX_DOMAIN} {
+	bind {$CADDY_BIND}
+
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+		# The home LAN answers every port-53 query itself, so Caddy's check
+		# that the TXT record has propagated would ask the wrong server. Wait
+		# a fixed time instead and let Let's Encrypt do the looking.
+		propagation_delay 30s
+		propagation_timeout -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		Referrer-Policy "same-origin"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		-Server
+		# VCRX sends its own Content-Security-Policy; it is not replaced here.
+	}
+
+	request_body {
+		max_size 10MB
+	}
+
+	# Never reachable from the internet, whatever VCRX itself would answer:
+	# admin (LAN only in VCRX as well), the Radarr and Sonarr webhook (its
+	# token travels in the query string), and inbound server links from
+	# friends' servers (federation stays off at the edge until it is wanted).
+	@blocked path /api/v1/admin /api/v1/admin/* /api/v1/hooks/* /api/v1/federation/*
+	respond @blocked "Not available from the internet." 403
+
+	# Caddy's own access log redacts Cookie and Authorization by default.
+	log {
+		output stdout
+		format json
+	}
+
+	reverse_proxy 127.0.0.1:3750 {
+		# Only X-Forwarded-For names the client to VCRX; drop the others a
+		# client might send so nothing downstream is tempted to read them.
+		header_up -Forwarded
+		header_up -X-Real-IP
+		# Stream bytes as VCRX writes them: no buffering of video.
+		flush_interval -1
+		transport http {
+			dial_timeout 5s
+			# A converted stream can take a while to send its first byte.
+			response_header_timeout 2m
+		}
+	}
+}

@@ -81,6 +81,12 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	if status != "ok" {
 		code = http.StatusServiceUnavailable
 	}
+	if !IsLAN(info(r).IP) {
+		// Off the LAN, the status only: the checks name every library,
+		// including ones a visitor is not granted, and carry raw mount errors.
+		writeJSON(w, code, map[string]any{"status": status})
+		return
+	}
 	writeJSON(w, code, map[string]any{"status": status, "checks": checks})
 }
 

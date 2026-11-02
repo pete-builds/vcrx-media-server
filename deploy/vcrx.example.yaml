@@ -18,6 +18,14 @@ server_name: VCRX
 # protection). Add a Tailscale MagicDNS or local name if you open VCRX by name.
 #allowed_hosts: [vcrx.local]
 
+# Behind a reverse proxy (deploy/caddy, docs/INTERNET-ACCESS.md): list the
+# proxy's own address, and only that. Its X-Forwarded-For then names the
+# client. A proxy NOT listed here makes every visitor "unknown" (no LAN rights,
+# no sign-in without a password) and logs a warning, so a missing entry fails
+# safe. Never list 0.0.0.0/0 (refused at start) or a whole LAN range.
+#trusted_proxies: [127.0.0.1, "::1"]
+#allowed_hosts: [watch.example.com]
+
 # Video a client cannot decode is transcoded to H.264 on the CPU, and 4K is
 # often slower than real time, so a transcode is capped at 1080p: the picture
 # fits inside 1920x1080, keeping its shape, never scaled up. The cap is a height
