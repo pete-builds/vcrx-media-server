@@ -61,6 +61,16 @@ func normDir(name string) string {
 	return strings.Join(strings.FieldsFunc(l, func(r rune) bool { return r == '.' || r == '_' || r == ' ' || r == '-' }), " ")
 }
 
+// IncompleteDir reports whether a folder is a download client's job that is
+// still unpacking or that failed: SABnzbd's "_UNPACK_x" and "_FAILED_x", and
+// NZBGet's "_unpack". Radarr and Sonarr skip them too. Indexed, a half-written
+// file became a title, or a one-episode show, that vanished when the unpack
+// finished.
+func IncompleteDir(name string) bool {
+	l := strings.ToLower(strings.TrimSpace(name))
+	return strings.HasPrefix(l, "_unpack_") || strings.HasPrefix(l, "_failed_") || l == "_unpack"
+}
+
 // SkipDir reports why a folder at the top of a library is not walked, or "" to
 // walk it.
 func SkipDir(name, kind string) string { return skipDirAt(name, kind, false) }
@@ -73,6 +83,8 @@ func skipDirAt(name, kind string, nested bool) string {
 	switch {
 	case strings.HasPrefix(name, "."):
 		return "hidden"
+	case IncompleteDir(name):
+		return "incomplete"
 	case junkDirs[l]:
 		return "system"
 	case norm == "sample" || norm == "samples":

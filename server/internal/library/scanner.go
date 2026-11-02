@@ -81,6 +81,9 @@ type Run struct {
 	Trigger, Status, Error, PathFilter    string
 	Seen, Added, Changed, Missing, Failed int
 	StartedAt, FinishedAt                 int64
+	// Unplayable lists titles the walk found but cannot index: disc images,
+	// disc folders, archives and unfinished downloads (unplayable.go).
+	Unplayable []Unplayable
 }
 
 // Scanner indexes libraries into the database. Callers must not run two scans
@@ -254,12 +257,14 @@ func (s *Scanner) execute(ctx context.Context, lib Library, opt Options, run Run
 	run.FinishedAt = s.now().UnixMilli()
 	// The row must close even when ctx was cancelled.
 	if _, ferr := s.DB.ExecContext(context.WithoutCancel(ctx), `UPDATE scan_runs SET status = ?, error = ?, files_seen = ?,
-		files_added = ?, files_changed = ?, files_missing = ?, files_failed = ?, finished_at = ? WHERE id = ?`,
-		run.Status, nullStr(run.Error), run.Seen, run.Added, run.Changed, run.Missing, run.Failed, run.FinishedAt, run.ID); ferr != nil && err == nil {
+		files_added = ?, files_changed = ?, files_missing = ?, files_failed = ?, files_unplayable = ?, unplayable = ?, finished_at = ?
+		WHERE id = ?`,
+		run.Status, nullStr(run.Error), run.Seen, run.Added, run.Changed, run.Missing, run.Failed, len(run.Unplayable),
+		unplayableJSON(run.Unplayable), run.FinishedAt, run.ID); ferr != nil && err == nil {
 		err = ferr
 	}
 	s.log().Info("scan finished", "library", lib.Name, "run", run.ID, "status", run.Status, "seen", run.Seen, "added", run.Added,
-		"changed", run.Changed, "missing", run.Missing, "failed", run.Failed, "took", s.now().Sub(start).Round(time.Millisecond).String(),
+		"changed", run.Changed, "missing", run.Missing, "failed", run.Failed, "unplayable", len(run.Unplayable), "took", s.now().Sub(start).Round(time.Millisecond).String(),
 		"error", run.Error)
 	// Recently added notices list movies and episodes; music has its own rows.
 	if s.OnAdded != nil && run.Status == StatusOK && run.Added > 0 && lib.Kind != KindMusic {
@@ -420,6 +425,7 @@ func (s *Scanner) scan(ctx context.Context, lib Library, opt Options, run *Run) 
 		}
 	}
 	run.Seen = len(w.videos)
+	run.Unplayable = w.unplayable
 
 	st, err := loadState(ctx, s.DB, lib)
 	if err != nil {

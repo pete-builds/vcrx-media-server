@@ -41,8 +41,11 @@ type ScanRun struct {
 	FilesChanged int     `json:"files_changed"`
 	FilesMissing int     `json:"files_missing"`
 	FilesFailed  int     `json:"files_failed"`
-	StartedAt    int64   `json:"started_at"`
-	FinishedAt   *int64  `json:"finished_at"`
+	// FilesUnplayable counts titles found on disk that cannot be played:
+	// disc images, disc folders, archives and unfinished downloads.
+	FilesUnplayable int    `json:"files_unplayable"`
+	StartedAt       int64  `json:"started_at"`
+	FinishedAt      *int64 `json:"finished_at"`
 }
 
 type Library struct {
@@ -222,7 +225,7 @@ func (a *Admin) Scans(ctx context.Context, libraryID int64, limit int) ([]ScanRu
 		limit = 20
 	}
 	q := `SELECT id, library_id, trigger, path_filter, status, error, files_seen, files_added, files_changed, files_missing,
-			files_failed, started_at, finished_at FROM scan_runs`
+			files_failed, files_unplayable, started_at, finished_at FROM scan_runs`
 	var args []any
 	if libraryID > 0 {
 		q += ` WHERE library_id = ?`
@@ -240,7 +243,7 @@ func (a *Admin) Scans(ctx context.Context, libraryID int64, limit int) ([]ScanRu
 		var pf, e sql.NullString
 		var fin sql.NullInt64
 		if err := rows.Scan(&s.ID, &s.LibraryID, &s.Trigger, &pf, &s.Status, &e, &s.FilesSeen, &s.FilesAdded, &s.FilesChanged,
-			&s.FilesMissing, &s.FilesFailed, &s.StartedAt, &fin); err != nil {
+			&s.FilesMissing, &s.FilesFailed, &s.FilesUnplayable, &s.StartedAt, &fin); err != nil {
 			return nil, err
 		}
 		if pf.Valid {
@@ -262,8 +265,9 @@ func (a *Admin) Scan(ctx context.Context, id int64) (ScanRun, error) {
 	var pf, e sql.NullString
 	var fin sql.NullInt64
 	err := a.DB.QueryRowContext(ctx, `SELECT id, library_id, trigger, path_filter, status, error, files_seen, files_added, files_changed,
-			files_missing, files_failed, started_at, finished_at FROM scan_runs WHERE id = ?`, id).Scan(&s.ID, &s.LibraryID, &s.Trigger,
-		&pf, &s.Status, &e, &s.FilesSeen, &s.FilesAdded, &s.FilesChanged, &s.FilesMissing, &s.FilesFailed, &s.StartedAt, &fin)
+			files_missing, files_failed, files_unplayable, started_at, finished_at FROM scan_runs WHERE id = ?`, id).Scan(&s.ID,
+		&s.LibraryID, &s.Trigger, &pf, &s.Status, &e, &s.FilesSeen, &s.FilesAdded, &s.FilesChanged, &s.FilesMissing, &s.FilesFailed,
+		&s.FilesUnplayable, &s.StartedAt, &fin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return s, ErrNotFound
 	}

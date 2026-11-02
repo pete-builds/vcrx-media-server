@@ -1615,6 +1615,36 @@ paths:
                 required: [scans]
                 properties:
                   scans: { type: array, items: { $ref: "#/components/schemas/ScanRun" } }
+  /api/v1/admin/scans/unplayable:
+    get:
+      operationId: adminUnplayable
+      summary: Titles each library's latest full scan found on disk but cannot play
+      description: >-
+        Disc images (.iso, .img), Blu-ray and DVD folders, archive sets with no
+        video beside them, and unfinished downloads (.part files, and SABnzbd or
+        NZBGet folders still unpacking or failed). They are never indexed; this
+        says they exist. Only each library's latest full scan that finished ok
+        counts. A run keeps at most 500 entries, so total can exceed the list.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [unplayable, total]
+                properties:
+                  total: { type: integer }
+                  unplayable:
+                    type: array
+                    items:
+                      type: object
+                      required: [library_id, path, reason]
+                      properties:
+                        library_id: { type: integer }
+                        path: { type: string, description: Relative to the library root. A folder for disc folders, archives and unpacking jobs; a file otherwise. }
+                        reason: { type: string, enum: [disc_image, disc_folder, archive, incomplete] }
+        "403": { $ref: "#/components/responses/Error" }
   /api/v1/admin/collections:
     get:
       operationId: adminSmartCollections
@@ -3382,6 +3412,7 @@ components:
         files_changed: { type: integer }
         files_missing: { type: integer }
         files_failed: { type: integer }
+        files_unplayable: { type: integer, description: Titles found on disk that cannot be played; see /api/v1/admin/scans/unplayable. }
         started_at: { type: integer }
         finished_at: { type: [integer, "null"] }
     AdminUser:
