@@ -48,7 +48,7 @@
   font: 600 24px/1 Rajdhani, Inter, sans-serif;
 }
 .pin-key:hover, .pin-key:focus-visible { border-color: var(--accent); }
-.pin-ok { background: var(--accent); color: #000; border-color: var(--accent); }
+.pin-ok { background: var(--accent-tint); color: var(--text); border-color: var(--accent-soft); }
 .pin-password { display: grid; gap: 12px; width: 100%; text-align: left; }
 .pin-error { min-height: 1.5em; }
 

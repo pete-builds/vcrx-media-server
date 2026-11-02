@@ -10,6 +10,10 @@
 :root {
   --accent: #008f11;
   --accent-soft: #1fae30;
+  /* Buttons never fill with the full green: they take a dark green tint (the
+     green at about 30% over black) with a thin green ring and white text. */
+  --accent-tint: #002b05;
+  --accent-tint-hi: #00440a;
   --bg: #000;
   --surface: #121214;
   --surface-2: #1c1c20;
@@ -93,7 +97,7 @@ h3 { font-size: var(--fs-h3); font-weight: 600; }
 .faint { color: var(--faint); }
 .noscript { padding: 40px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.skip-link { position: absolute; left: 12px; top: -60px; z-index: 40; padding: 8px 14px; border-radius: var(--radius); background: var(--accent); color: #000; font-weight: 600; }
+.skip-link { position: absolute; left: 12px; top: -60px; z-index: 40; padding: 8px 14px; border-radius: var(--radius); background: var(--accent-tint); box-shadow: inset 0 0 0 1.5px var(--accent-soft); color: var(--text); font-weight: 600; }
 .skip-link:focus { top: 12px; }
 
 /* Top bar: solid once the page scrolls, see-through over a hero. */
@@ -208,7 +212,7 @@ main:focus-visible { outline: none; }
 .sk-hero-poster { flex: none; width: clamp(150px, 19vw, 280px); aspect-ratio: 2 / 3; }
 .sk-lines { flex: 1; min-width: 0; }
 
-/* Buttons. Three shapes: the main action is a green pill, everything else a
+/* Buttons. Three shapes: the main action is a green-tinted pill (never solid green), everything else a
    softly rounded muted control, and an icon alone sits in a circle. */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--control); padding: 0 16px;
@@ -218,8 +222,8 @@ main:focus-visible { outline: none; }
 }
 .btn:hover { background: var(--surface-3); }
 .btn:active { transform: scale(.96); }
-.btn-primary { border-radius: var(--r-pill); padding: 0 22px; background: var(--accent); color: #000; font-weight: 600; }
-.btn-primary:hover { background: var(--accent-soft); }
+.btn-primary { border-radius: var(--r-pill); padding: 0 22px; background: var(--accent-tint); box-shadow: inset 0 0 0 1.5px var(--accent-soft); color: var(--text); font-weight: 600; }
+.btn-primary:hover { background: var(--accent-tint-hi); }
 .btn-large { height: var(--control-lg); padding: 0 26px 0 22px; font-size: var(--fs-lead); }
 .btn-large svg { width: 22px; height: 22px; }
 /* Secondary buttons over artwork: a translucent wash, so they read on any picture. */
@@ -433,8 +437,7 @@ main select:hover { background-color: var(--surface-3); }
   transition: opacity var(--t) var(--ease), transform var(--t) var(--ease), background-color var(--t) var(--ease);
 }
 .ep-play svg { width: 26px; height: 26px; margin-left: 3px; fill: #fff; }
-.ep-card:hover .ep-play > span, .ep-play:focus-visible > span { opacity: 1; transform: none; background: var(--accent); }
-.ep-card:hover .ep-play svg, .ep-play:focus-visible svg { fill: #000; }
+.ep-card:hover .ep-play > span, .ep-play:focus-visible > span { opacity: 1; transform: none; background: var(--accent-tint); box-shadow: inset 0 0 0 1.5px var(--accent-soft); }
 .ep-play:focus-visible { outline: 3px solid var(--accent); outline-offset: 0; }
 .ep-card:hover .art { box-shadow: var(--ring-hover), 0 10px 26px rgba(0,0,0,.6); }
 .ep-card a.card:hover .art, .ep-card a.card:focus-visible .art { transform: none; }
@@ -455,7 +458,7 @@ main select:hover { background-color: var(--surface-3); }
 /* Before a movie: Skip sits bottom right, above the clip. */
 .player.preroll .preroll-bar { position: absolute; right: 32px; bottom: 40px; z-index: 2; }
 /* CC lit while a subtitle track shows. */
-.player .top .cc-btn[aria-pressed="true"] { background: var(--accent); color: #000; }
+.player .top .cc-btn[aria-pressed="true"] { background: var(--accent-tint); box-shadow: inset 0 0 0 1.5px var(--accent-soft); color: var(--text); }
 .player .top .ptitle { font-family: Rajdhani, sans-serif; font-weight: 700; font-size: 22px; margin-right: auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 8px rgba(0,0,0,.6); }
 .player .top select { height: var(--control); background-color: rgba(20,20,24,.85); border: 0; border-radius: var(--r-control); padding: 0 32px 0 12px; }
 /* Picture subtitles: listed so the file does not look as if it had none, greyed out because a browser cannot draw them. */
@@ -701,7 +704,7 @@ kbd {
 
 /* Skip Intro and Skip Credits (views/skip.js), and the admin marker editor. */
 .player .skip-btn { position: absolute; right: 32px; bottom: 96px; z-index: 2; background: rgba(0,0,0,.85); border: 2px solid var(--accent); color: #fff; font-size: 16px; font-weight: 600; padding: 10px 20px; }
-.player .skip-btn:hover, .player .skip-btn:focus-visible { background: var(--accent); color: #000; }
+.player .skip-btn:hover, .player .skip-btn:focus-visible { background: var(--accent-tint-hi); color: #fff; }
 .markers-edit .marker-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
 .markers-edit .marker-row strong { min-width: 70px; }
 .markers-edit input { width: 84px; }
@@ -716,9 +719,8 @@ kbd {
 }
 .extra:hover, .extra:focus-visible { background: var(--wash); }
 .extra-icon { flex: 0 0 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: var(--wash-strong); transition: background-color var(--t-fast) var(--ease); }
-.extra:hover .extra-icon, .extra:focus-visible .extra-icon { background: var(--accent); }
+.extra:hover .extra-icon, .extra:focus-visible .extra-icon { background: var(--accent-tint); box-shadow: inset 0 0 0 1.5px var(--accent-soft); }
 .extra-icon svg { width: 18px; height: 18px; margin-left: 2px; fill: currentColor; }
-.extra:hover .extra-icon svg, .extra:focus-visible .extra-icon svg { fill: #000; }
 .extra-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .extra-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .extra-sub { color: var(--muted); font-size: var(--fs-meta); }

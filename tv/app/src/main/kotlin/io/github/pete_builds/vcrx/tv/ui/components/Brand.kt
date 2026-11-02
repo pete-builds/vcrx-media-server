@@ -34,7 +34,6 @@ import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Glow
 import androidx.tv.material3.Icon
-import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
@@ -45,6 +44,7 @@ import io.github.pete_builds.vcrx.tv.ui.theme.FocusStroke
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
 import io.github.pete_builds.vcrx.tv.ui.theme.LabelSpacing
 import io.github.pete_builds.vcrx.tv.ui.theme.Accent
+import io.github.pete_builds.vcrx.tv.ui.theme.AccentTint
 import io.github.pete_builds.vcrx.tv.ui.theme.Shapes
 import io.github.pete_builds.vcrx.tv.ui.theme.Surfaces
 import io.github.pete_builds.vcrx.tv.ui.theme.White
@@ -104,8 +104,9 @@ private val noGlow = Glow.None
 
 /**
  * The button. Three shapes, one focus: the main action is a pill, the rest
- * softly rounded, and every button the remote is on fills green with black
- * text and grows a little, so focus reads at a glance from the couch. At rest
+ * softly rounded, and every button the remote is on takes a dark green tint,
+ * a green ring and white text and grows a little, so focus reads at a glance
+ * from the couch without a solid green fill. At rest
  * they are a translucent wash; the main action's label rests green.
  */
 @Composable
@@ -126,8 +127,8 @@ fun BrandButton(
         colors = brandButtonColors(primary),
         border = ButtonDefaults.border(
             border = Border.None,
-            focusedBorder = Border.None,
-            pressedBorder = Border.None,
+            focusedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape),
+            pressedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape),
             disabledBorder = Border.None,
             focusedDisabledBorder = Border(BorderStroke(2.dp, Gray), shape = shape),
         ),
@@ -146,7 +147,7 @@ fun BrandButton(
 
 /**
  * An action that is only an icon, in a circle: Mark watched beside Play. The
- * name is for TalkBack; focus fills it green like every button.
+ * name is for TalkBack; focus tints it green like every button.
  */
 @Composable
 fun BrandIconButton(
@@ -164,12 +165,12 @@ fun BrandIconButton(
         colors = ButtonDefaults.colors(
             containerColor = Surfaces.WashStrong,
             contentColor = if (on) Accent else White,
-            focusedContainerColor = Accent,
-            focusedContentColor = Black,
-            pressedContainerColor = Accent,
-            pressedContentColor = Black,
+            focusedContainerColor = AccentTint,
+            focusedContentColor = White,
+            pressedContainerColor = AccentTint,
+            pressedContentColor = White,
         ),
-        border = ButtonDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
+        border = ButtonDefaults.border(border = Border.None, focusedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape), pressedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape)),
         glow = ButtonDefaults.glow(noGlow, noGlow, noGlow),
         scale = ButtonDefaults.scale(focusedScale = Focus.ButtonScale),
         tonalElevation = 0.dp,
@@ -183,7 +184,7 @@ fun BrandIconButton(
 
 /**
  * A pill to pick one of a few: a season, a filter. The chosen one rests white
- * with black text; focus fills green.
+ * with black text; focus tints it green with a green ring.
  */
 @Composable
 fun BrandChip(
@@ -200,12 +201,12 @@ fun BrandChip(
         colors = ButtonDefaults.colors(
             containerColor = if (selected) White else Surfaces.Wash,
             contentColor = if (selected) Black else Gray,
-            focusedContainerColor = Accent,
-            focusedContentColor = Black,
-            pressedContainerColor = Accent,
-            pressedContentColor = Black,
+            focusedContainerColor = AccentTint,
+            focusedContentColor = White,
+            pressedContainerColor = AccentTint,
+            pressedContentColor = White,
         ),
-        border = ButtonDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
+        border = ButtonDefaults.border(border = Border.None, focusedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape), pressedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape)),
         glow = ButtonDefaults.glow(noGlow, noGlow, noGlow),
         scale = ButtonDefaults.scale(focusedScale = Focus.ButtonScale),
         tonalElevation = 0.dp,
@@ -219,10 +220,10 @@ fun BrandChip(
 private fun brandButtonColors(primary: Boolean) = ButtonDefaults.colors(
     containerColor = if (primary) Surfaces.WashStrong else Surfaces.Wash,
     contentColor = if (primary) Accent else White,
-    focusedContainerColor = Accent,
-    focusedContentColor = Black,
-    pressedContainerColor = Accent,
-    pressedContentColor = Black,
+    focusedContainerColor = AccentTint,
+    focusedContentColor = White,
+    pressedContainerColor = AccentTint,
+    pressedContentColor = White,
     disabledContainerColor = Surfaces.Wash,
     disabledContentColor = Gray,
 )
@@ -266,8 +267,8 @@ fun FrameCard(
 }
 
 /**
- * A full-width row for menus, lists and dialogs. Focus fills it green with black
- * text; a selected row reads white with a short green mark at its leading edge.
+ * A full-width row for menus, lists and dialogs. Focus tints it green with a
+ * green ring and white text; a selected row reads white with a short green mark at its leading edge.
  * [restColor] is the label colour of rows that are neither: the rail rests gray.
  */
 @Composable
@@ -287,12 +288,12 @@ fun BrandRow(
         colors = ClickableSurfaceDefaults.colors(
             containerColor = Color.Transparent,
             contentColor = if (selected) White else restColor,
-            focusedContainerColor = Accent,
-            focusedContentColor = Black,
-            pressedContainerColor = Accent,
-            pressedContentColor = Black,
+            focusedContainerColor = AccentTint,
+            focusedContentColor = White,
+            pressedContainerColor = AccentTint,
+            pressedContentColor = White,
         ),
-        border = ClickableSurfaceDefaults.border(border = Border.None, focusedBorder = Border.None),
+        border = ClickableSurfaceDefaults.border(border = Border.None, focusedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape), pressedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape)),
         glow = ClickableSurfaceDefaults.glow(noGlow, noGlow, noGlow),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
         tonalElevation = 0.dp,
@@ -302,9 +303,7 @@ fun BrandRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // The mark is green at rest and takes the label's black when focus fills the row green.
-            val mark = if (LocalContentColor.current == Black) Black else Accent
-            val marker = if (selected) Modifier.background(mark, Shapes.Pill) else Modifier
+            val marker = if (selected) Modifier.background(Accent, Shapes.Pill) else Modifier
             Box(Modifier.width(3.dp).height(18.dp).then(marker))
             if (icon != null) Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
             Box(Modifier.padding(vertical = 11.dp)) { content() }
