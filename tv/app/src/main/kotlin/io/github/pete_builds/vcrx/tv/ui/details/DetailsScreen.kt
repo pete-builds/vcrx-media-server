@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -189,6 +191,7 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
     val isContainer = item.kind == "show" || item.kind == "season"
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val headerReveal = remember { BringIntoViewRequester() }
     ThemeMusic(item)
 
     // The rows inside the page keep the TV's own sideways scrolling.
@@ -202,9 +205,18 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
         LazyColumn(state = list, contentPadding = PaddingValues(48.dp), verticalArrangement = Arrangement.spacedBy(36.dp)) {
             item(key = "header") {
                 Row(
-                    // Coming back up from the cast: the whole header, not just its buttons.
-                    Modifier.padding(top = 24.dp).onFocusChanged { state ->
-                        if (state.hasFocus && headerFits(list)) scope.launch { list.animateScrollToItem(0) }
+                    // Coming back up from the seasons or the cast: the whole header,
+                    // not just its buttons. Focus also starts the list's own reveal of
+                    // the focused button, which would cancel a scroll launched beside
+                    // it; so ask for the header through the same reveal, wait for it
+                    // to finish, then settle the list at its top.
+                    Modifier.bringIntoViewRequester(headerReveal).padding(top = 24.dp).onFocusChanged { state ->
+                        if (state.hasFocus && headerFits(list)) {
+                            scope.launch {
+                                headerReveal.bringIntoView()
+                                list.animateScrollToItem(0)
+                            }
+                        }
                     },
                     horizontalArrangement = Arrangement.spacedBy(40.dp),
                 ) {
@@ -270,7 +282,20 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
                 if (item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
             }
             if (isContainer && item.kind == "show" && vm.seasons.isNotEmpty()) {
-                item(key = "seasons") { keepRowScroll { SeasonRow(vm) } }
+                item(key = "seasons") {
+                    // Down to the seasons lifts them to the top, so the episodes come
+                    // into view: the chips alone are never cut off, so RevealOnly
+                    // would leave the episode list below the screen.
+                    Box(
+                        Modifier.onFocusChanged { state ->
+                            if (state.hasFocus) {
+                                list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "seasons" }?.index?.let { i ->
+                                    scope.launch { list.animateScrollToItem(i) }
+                                }
+                            }
+                        },
+                    ) { keepRowScroll { SeasonRow(vm) } }
+                }
             }
             if (isContainer) {
                 item(key = "episodes") { EpisodeList(vm) }

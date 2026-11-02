@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -192,7 +193,9 @@ private fun ProfileGrid(profiles: List<Profile>, step: PickerStep.Grid, vm: Prof
             }
         }
         step.error?.let { Label(it, color = Orange, maxLines = 2) }
-        Column(Modifier.width(420.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // As wide as its widest row, so the rows sit centred under the profiles
+        // rather than on the left of a fixed-width box.
+        Column(Modifier.width(IntrinsicSize.Max), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             BrandRow(onClick = vm::toggleAlwaysAsk, icon = if (vm.alwaysAsk) Icons.Filled.Check else null) {
                 Label(if (vm.alwaysAsk) "Asking every time the app opens" else "Ask every time the app opens")
             }
