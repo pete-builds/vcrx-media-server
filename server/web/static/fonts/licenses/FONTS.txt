@@ -19,3 +19,9 @@ Inter 4.1
   extras/ttf/Inter-Medium.ttf -> inter_medium.ttf
            97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872
   LICENSE.txt -> Inter-OFL.txt
+
+The web app loads WOFF2 copies of the same four files (2026-11-01): each .ttf
+above re-wrapped as .woff2 by fontTools 4.68.0 (TTFont(ttf); flavor="woff2";
+save), lossless, no glyphs removed: glyph order and character map were
+checked identical to the .ttf. The .ttf files stay for the server's own
+drawing and the TV build.

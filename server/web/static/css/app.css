@@ -1,8 +1,11 @@
 /* VCRX web: VCRX Orange on black, Rajdhani for display, Inter for text. */
-@font-face { font-family: Inter; src: url(../fonts/inter_regular.ttf) format("truetype"); font-weight: 400; font-display: swap; }
-@font-face { font-family: Inter; src: url(../fonts/inter_medium.ttf) format("truetype"); font-weight: 500 600; font-display: swap; }
-@font-face { font-family: Rajdhani; src: url(../fonts/rajdhani_semibold.ttf) format("truetype"); font-weight: 600; font-display: swap; }
-@font-face { font-family: Rajdhani; src: url(../fonts/rajdhani_bold.ttf) format("truetype"); font-weight: 700; font-display: swap; }
+/* WOFF2 is the same font in about a third of the bytes (1.6 MB of TrueType
+   became 0.5 MB), which is most of a first visit on a phone's data. The
+   TrueType files stay for the server's own drawing and the TV build. */
+@font-face { font-family: Inter; src: url(../fonts/inter_regular.woff2) format("woff2"), url(../fonts/inter_regular.ttf) format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: Inter; src: url(../fonts/inter_medium.woff2) format("woff2"), url(../fonts/inter_medium.ttf) format("truetype"); font-weight: 500 600; font-display: swap; }
+@font-face { font-family: Rajdhani; src: url(../fonts/rajdhani_semibold.woff2) format("woff2"), url(../fonts/rajdhani_semibold.ttf) format("truetype"); font-weight: 600; font-display: swap; }
+@font-face { font-family: Rajdhani; src: url(../fonts/rajdhani_bold.woff2) format("woff2"), url(../fonts/rajdhani_bold.ttf) format("truetype"); font-weight: 700; font-display: swap; }
 
 :root {
   --orange: #ff5f00;

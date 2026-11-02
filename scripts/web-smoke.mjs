@@ -312,6 +312,20 @@ async function main() {
     if (!man.capable) fail("manifest", "no apple-mobile-web-app-capable, so an iPhone opens it in Safari");
   }
 
+  // Fonts: the page's faces load from WOFF2. A TrueType download means a WOFF2
+  // file failed and the browser fell back to three times the bytes.
+  console.log("fonts");
+  await s("Page.navigate", { url: "about:blank" });
+  await s("Page.navigate", { url: `${base}/#/` });
+  const fonts = await evaluate(`${wait(`document.querySelector("#view .row")`)}
+    await document.fonts.ready;
+    const names = performance.getEntriesByType("resource").map((e) => e.name).filter((n) => /\\/fonts\\//.test(n));
+    return { woff2: names.filter((n) => n.endsWith(".woff2")).length, ttf: names.filter((n) => n.endsWith(".ttf")),
+      faces: [...document.fonts].filter((f) => f.status === "loaded").map((f) => f.family + " " + f.weight) };`);
+  if (!fonts.woff2) fail("fonts", "no WOFF2 font was loaded");
+  if (fonts.ttf.length) fail("fonts", `fell back to TrueType: ${fonts.ttf.join(", ")}`);
+  if (!fonts.faces.some((f) => /Inter/.test(f)) || !fonts.faces.some((f) => /Rajdhani/.test(f))) fail("fonts", `loaded faces: ${fonts.faces.join(", ") || "none"}`);
+
   // The same pages on a phone: nothing may be wider than the screen.
   await s("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   for (const [path, selector] of pages) {
