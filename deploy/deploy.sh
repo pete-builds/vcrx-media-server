@@ -103,7 +103,7 @@ served=$(curl -fsS "$url/api/v1/server" | jq -r .version) || die "the server did
 echo "deploy: serving $served"
 
 if [ -f "$pwfile" ]; then
-  VCRX_URL="$url" VCRX_USER=flexbot VCRX_PASSWORD="$(cat "$pwfile")" VCRX_KEEP_POSITION=0 bash "$repo/scripts/smoke-api.sh"
+  VCRX_URL="$url" VCRX_USER=flexbot VCRX_PASSWORD="$(cat "$pwfile")" VCRX_KEEP_POSITION=0 VCRX_REQUIRE_ADMIN=1 bash "$repo/scripts/smoke-api.sh"
 else
   echo "deploy: no $pwfile, so the smoke test was skipped"
 fi

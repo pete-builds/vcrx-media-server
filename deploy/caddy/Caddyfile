@@ -3,8 +3,9 @@
 # The router forwards public TCP 443 to this host's HTTPS_PORT; Caddy serves the
 # one public name with a Let's Encrypt certificate obtained by the TLS-ALPN-01
 # challenge over that same forward (no port 80, no DNS API token, the stock
-# Caddy image), and passes requests to VCRX on loopback. VCRX must list 127.0.0.1 and ::1 in
-# trusted_proxies and the public name in allowed_hosts.
+# Caddy image), and passes requests to VCRX on loopback. VCRX must list 127.0.0.2 (the
+# source address Caddy dials from, below) as its only trusted_proxies entry, and
+# the public name in allowed_hosts.
 #
 # Values come from the environment (compose passes them from caddy.env):
 #   VCRX_DOMAIN   the public name, e.g. watch.example.com
@@ -96,6 +97,13 @@
 		# Stream bytes as VCRX writes them: no buffering of video.
 		flush_interval -1
 		transport http {
+			# Dial from a loopback address of Caddy's own, so VCRX can trust
+			# exactly this proxy. Trusting 127.0.0.1 instead would turn every
+			# local tool (deploy.sh's "is anyone watching" check, the smoke
+			# test) into an unknown client: a trusted proxy that sends no
+			# X-Forwarded-For is never read as local. Linux answers on all of
+			# 127.0.0.0/8; macOS needs `sudo ifconfig lo0 alias 127.0.0.2`.
+			local_address 127.0.0.2
 			dial_timeout 5s
 			# A converted stream can take a while to send its first byte.
 			response_header_timeout 2m
