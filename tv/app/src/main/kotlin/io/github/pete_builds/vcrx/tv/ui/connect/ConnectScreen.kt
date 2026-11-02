@@ -32,6 +32,7 @@ import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.ServerAddress
 import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
 import io.github.pete_builds.vcrx.tv.ui.components.BrandButton
+import io.github.pete_builds.vcrx.tv.ui.components.BrandDialog
 import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.components.TvTextField
 import io.github.pete_builds.vcrx.tv.ui.components.Wordmark
@@ -52,8 +53,17 @@ class ConnectViewModel(private val graph: AppGraph) : ViewModel() {
         private set
 
     /**
+     * A plain http:// address to a host that is not on a private network, waiting
+     * for the viewer to confirm before anything is sent to it.
+     */
+    var cleartextWarning by mutableStateOf<String?>(null)
+        private set
+    private var afterWarning: ((needsLogin: Boolean) -> Unit)? = null
+
+    /**
      * Checks the address is a VCRX server before saving it. [onDone] says whether
      * sign in is needed; [onEmpty] runs when nothing was typed, to open the keyboard.
+     * An unencrypted address to a public host waits for [confirmCleartext] first.
      */
     fun connect(onEmpty: () -> Unit = {}, onDone: (needsLogin: Boolean) -> Unit) {
         if (busy) return
@@ -67,6 +77,30 @@ class ConnectViewModel(private val graph: AppGraph) : ViewModel() {
             error = "That is not an address. Type the server's LAN address, for example 192.168.1.20:3750."
             return
         }
+        error = null
+        if (ServerAddress.cleartextToPublicHost(base)) {
+            cleartextWarning = base
+            afterWarning = onDone
+            return
+        }
+        probe(base, onDone)
+    }
+
+    /** The viewer chose to connect over plain http:// to a public host anyway. */
+    fun confirmCleartext() {
+        val base = cleartextWarning ?: return
+        val onDone = afterWarning ?: return
+        cancelCleartext()
+        probe(base, onDone)
+    }
+
+    fun cancelCleartext() {
+        cleartextWarning = null
+        afterWarning = null
+    }
+
+    private fun probe(base: String, onDone: (needsLogin: Boolean) -> Unit) {
+        if (busy) return
         busy = true
         error = null
         viewModelScope.launch {
@@ -138,6 +172,7 @@ fun ConnectScreen() {
                 style = MaterialTheme.typography.bodyMedium,
             )
             vm.error?.let { ErrorLine(it) }
+            vm.cleartextWarning?.let { CleartextWarning(it, onBack = vm::cancelCleartext, onConnect = vm::confirmCleartext) }
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 BrandButton(if (vm.busy) "Connecting" else "Connect", onClick = submit, primary = true)
                 // Connect, then pair as an invited device rather than sign in. Back
@@ -159,6 +194,25 @@ fun ConnectScreen() {
         }
     }
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
+}
+
+/** Asks before sending a password and streams unencrypted across the internet. Go back has focus. */
+@Composable
+private fun CleartextWarning(address: String, onBack: () -> Unit, onConnect: () -> Unit) {
+    val back = remember { FocusRequester() }
+    BrandDialog("Unencrypted connection", onDismiss = onBack) {
+        Text(
+            "$address is not on your home network, and http:// does not encrypt anything. Your password and everything " +
+                "you watch would cross the internet where others can read it. Use an https:// address if the server has one.",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(start = 9.dp, end = 9.dp, bottom = 16.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            BrandButton("Go back", onClick = onBack, primary = true, modifier = Modifier.focusRequester(back))
+            BrandButton("Connect anyway", onClick = onConnect)
+        }
+    }
+    LaunchedEffect(address) { runCatching { back.requestFocus() } }
 }
 
 @Composable
