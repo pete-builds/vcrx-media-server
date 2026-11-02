@@ -1,6 +1,6 @@
 import { signOut } from "../api.js";
 import { h, toast } from "../dom.js";
-import { state, go } from "../app.js";
+import { state, go, signedOut } from "../app.js";
 import { librariesTab, usersTab } from "./manage.js";
 import { homeLayoutTab } from "./homelayout.js";
 import { newsletterTab } from "./newsletter.js";
@@ -34,7 +34,7 @@ export async function settingsView({ match }) {
     } catch (e) {
       toast(e.message);
     }
-    state.me = null;
+    signedOut();
     go("/"); // the sign-in form, or "Who's watching?" where the server shows it
   });
   const note = invited ? "This device was invited: it sees only what it was given, and the server's admin can revoke it."

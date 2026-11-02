@@ -1103,6 +1103,24 @@ async function music(s, evaluate, press, ids, ex) {
   } else {
     fail("music", "no Low Orbit album (the ALAC sample)");
   }
+
+  // Signing out stops the music and takes the bar away: the next person on
+  // the device must not hear, or see the queue of, the last one's music.
+  // The dev server signs this browser straight back in on the next load.
+  await s("Page.navigate", { url: `${base}/#/settings` });
+  const out = await evaluate(`${wait(`[...document.querySelectorAll("#view button")].some((b) => /^Sign out/.test(b.textContent))`)}
+    const before = ${playing};
+    [...document.querySelectorAll("#view button")].find((b) => /^Sign out/.test(b.textContent)).click();
+    ${wait(`${playing} < 0 && !location.hash.startsWith("#/settings")`, 40)}
+    const bar = document.getElementById("music-bar");
+    return { before, after: ${playing}, bar: !!bar && !bar.hidden, hash: location.hash };`);
+  if (!(out.before > 0)) fail("music sign-out", `no music was playing before signing out (t=${out.before})`);
+  if (out.after >= 0) fail("music sign-out", "the music played on after signing out");
+  if (out.bar) fail("music sign-out", "the player bar still shows after signing out");
+  await s("Page.navigate", { url: "about:blank" });
+  await s("Page.navigate", { url: `${base}/#/` });
+  await evaluate(wait(`document.querySelector("#view .row")`));
+
   await evaluate(`const b = document.querySelector("#music-bar .mb-btn[aria-label^='Stop']"); if (b) b.click();`);
   if (ex.first()) fail("music", `threw: ${ex.first()}`);
 }
