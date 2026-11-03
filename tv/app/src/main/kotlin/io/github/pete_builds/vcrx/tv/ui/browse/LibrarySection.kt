@@ -108,26 +108,49 @@ private fun orderLabel(field: SortField, order: String): String = when (field) {
     SortField.Added, SortField.Year -> if (order == "desc") "newest" else "oldest"
 }
 
+/** The library's grid model, one per library, so sort and scroll survive a trip to Details. */
+@Composable
+fun libraryGridModel(library: Library): LibraryViewModel =
+    graphViewModel(key = librarySection(library.id)) { LibraryViewModel(it, library.id) }
+
 @Composable
 fun LibrarySection(library: Library, focus: BrowseFocus) {
-    val vm = graphViewModel(key = librarySection(library.id)) { LibraryViewModel(it, library.id) }
-    val grid = rememberLazyGridState()
-
+    val vm = libraryGridModel(library)
     Column(Modifier.padding(top = 24.dp)) {
-        Row(
-            Modifier.padding(horizontal = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Label(library.name, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 12.dp, top = 12.dp))
-            SortField.entries.forEach { field ->
-                val selected = field == vm.sort
-                BrandButton(
-                    text = if (selected) "${field.label}, ${orderLabel(field, vm.order)}" else field.label,
-                    onClick = { vm.chooseSort(field) },
-                    primary = selected,
-                )
-            }
-        }
+        LibraryHeader(library.name) { SortButtons(vm) }
+        LibraryGrid(vm, focus)
+    }
+}
+
+/** A library page's top line: its name, then the page's own buttons. */
+@Composable
+fun LibraryHeader(name: String, buttons: @Composable () -> Unit) {
+    Row(
+        Modifier.padding(horizontal = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Label(name, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 12.dp, top = 12.dp))
+        buttons()
+    }
+}
+
+@Composable
+fun SortButtons(vm: LibraryViewModel) {
+    SortField.entries.forEach { field ->
+        val selected = field == vm.sort
+        BrandButton(
+            text = if (selected) "${field.label}, ${orderLabel(field, vm.order)}" else field.label,
+            onClick = { vm.chooseSort(field) },
+            primary = selected,
+        )
+    }
+}
+
+/** Every title in the library as a poster grid, paged in as it scrolls. */
+@Composable
+fun LibraryGrid(vm: LibraryViewModel, focus: BrowseFocus) {
+    val grid = rememberLazyGridState()
+    Column {
         LoadStateContent(vm.state, onRetry = vm::reload) {
             if (vm.items.isEmpty()) {
                 EmptyView("This library is empty", "Scan it on the server, or check that its folder is mounted.")

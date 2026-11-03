@@ -101,15 +101,20 @@ class ServerApi(
 
     suspend fun libraries(): List<Library> = get("/api/v1/libraries", LibrariesResponse.serializer()).libraries
 
-    suspend fun libraryItems(libraryId: Long, sort: String, order: String, limit: Int, offset: Int): ItemPage {
+    suspend fun libraryItems(libraryId: Long, sort: String, order: String, limit: Int, offset: Int, genre: String? = null): ItemPage {
         val url = url("/api/v1/libraries/$libraryId/items").newBuilder()
             .addQueryParameter("sort", sort)
             .addQueryParameter("order", order)
             .addQueryParameter("limit", limit.toString())
             .addQueryParameter("offset", offset.toString())
+            .apply { if (genre != null) addQueryParameter("genre", genre) }
             .build()
         return send(Request.Builder().url(url).build(), ItemPage.serializer())
     }
+
+    /** The library's genres and decades with counts, for genre= on [libraryItems]. */
+    suspend fun libraryFilters(libraryId: Long): LibraryFilters =
+        get("/api/v1/libraries/$libraryId/filters", LibraryFilters.serializer())
 
     suspend fun search(query: String, limit: Int = 60): List<Item> {
         val url = url("/api/v1/search").newBuilder()

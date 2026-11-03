@@ -1,11 +1,9 @@
 package io.github.pete_builds.vcrx.tv.ui.browse
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,9 +13,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -29,8 +24,6 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import io.github.pete_builds.vcrx.tv.graph
 import io.github.pete_builds.vcrx.tv.net.Item
-import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
-import io.github.pete_builds.vcrx.tv.ui.components.BrandButton
 import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import io.github.pete_builds.vcrx.tv.ui.details.formatRuntime
@@ -46,26 +39,20 @@ val HERO_HEIGHT = 250.dp
 val HERO_ART_ALIGNMENT = BiasAlignment(horizontalBias = 0f, verticalBias = -0.67f)
 
 /**
- * The top of Home, as on the web and in Plex: a title's backdrop fading into
- * black, its name, details and plot, and Play and More info. It shows the
- * day's featured title ([featured] true) until focus moves into the rows, then
- * whichever card has focus, so the rows need no titles under their posters.
- * [onMoreInfo] runs before More info opens Details, so Home can give that
- * button focus back through [moreInfo] on return; [returningToMoreInfo] is
- * set while it does.
+ * The top of Home, as in Plex: a title's backdrop fading into black, its name,
+ * details and plot, and no buttons. It shows the day's featured title
+ * ([featured] true) until focus moves into the rows, then whichever card has
+ * focus, so the rows need no titles under their posters. Selecting a card opens
+ * its Details, where Play lives (Pete, 2026-11-03: "remove the play and more
+ * info buttons ... users will just click on the movie").
  */
 @Composable
 fun HomeHero(
     item: Item,
     featured: Boolean,
-    firstButton: FocusRequester,
-    moreInfo: FocusRequester,
-    onMoreInfo: () -> Unit,
-    returningToMoreInfo: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val api = LocalContext.current.graph.api
-    val actions = LocalAppActions.current
     Box(modifier.fillMaxWidth().height(HERO_HEIGHT)) {
         // An episode borrows its show's backdrop.
         val artId = if (item.kind == "episode") item.showId ?: item.id else item.id
@@ -100,52 +87,12 @@ fun HomeHero(
             (item.overview ?: item.tagline)?.takeIf { it.isNotBlank() }?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = White, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
-            // The restorer sends focus coming into the row to the button it last
-            // had, else its fallback: Play, or More info when coming back from the
-            // Details it opened. The row is new on return, with nothing to restore,
-            // so a fixed Play fallback overrode More info's own focus request.
-            Row(
-                Modifier.padding(top = 6.dp).focusRestorer(if (returningToMoreInfo) moreInfo else firstButton).focusGroup(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                val play = heroPlay(item)
-                if (play != null) {
-                    BrandButton(
-                        play.label,
-                        onClick = { actions.play(play.itemId, play.title, null, fromStart = !play.resume, resume = play.resume) },
-                        primary = true,
-                        modifier = Modifier.focusRequester(firstButton),
-                    )
-                }
-                BrandButton(
-                    "More info",
-                    onClick = {
-                        onMoreInfo()
-                        actions.openDetails(item.id)
-                    },
-                    primary = play == null,
-                    modifier = Modifier.focusRequester(moreInfo).let { if (play == null) it.focusRequester(firstButton) else it },
-                )
+            // Cast, as Plex's hero closes on it: the first three names, quiet.
+            item.cast.take(3).map { it.name }.takeIf { it.isNotEmpty() }?.let {
+                Label(it.joinToString(", "), style = MaterialTheme.typography.labelMedium, color = Gray)
             }
         }
     }
-}
-
-/** What the hero's Play button starts, or null when there is nothing to play from here. */
-data class HeroPlay(val itemId: Long, val title: String, val label: String, val resume: Boolean)
-
-fun heroPlay(item: Item): HeroPlay? = when (item.kind) {
-    "movie", "episode" -> {
-        val resume = (item.watch?.positionMs ?: 0) > 0 && item.watch?.played != true
-        val title = if (item.kind == "episode") listOfNotNull(item.showTitle, episodeCode(item), item.title).joinToString("  ") else item.title
-        HeroPlay(item.id, title, if (resume) "Resume" else "Play", resume)
-    }
-    "show" -> item.nextEpisode?.let { n ->
-        val resume = (n.watch?.positionMs ?: 0) > 0 && n.watch?.played != true
-        val code = episodeCode(n)
-        HeroPlay(n.id, listOfNotNull(item.title, code, n.title).joinToString("  "), listOfNotNull(if (resume) "Resume" else "Play", code).joinToString(" "), resume)
-    }
-    else -> null
 }
 
 /** Year, rating, runtime or seasons, resolution and score, as the web's hero chips. */
