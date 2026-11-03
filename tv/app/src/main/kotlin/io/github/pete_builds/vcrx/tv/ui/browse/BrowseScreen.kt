@@ -4,17 +4,22 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayArrow
@@ -26,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -42,21 +48,28 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.viewModelScope
+import androidx.tv.material3.Border
+import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Glow
+import androidx.tv.material3.Icon
 import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.Surface
 import io.github.pete_builds.vcrx.tv.AppGraph
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.Library
 import io.github.pete_builds.vcrx.tv.ui.components.AppIcons
-import io.github.pete_builds.vcrx.tv.ui.components.BrandRow
 import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
-import io.github.pete_builds.vcrx.tv.ui.components.Mark
-import io.github.pete_builds.vcrx.tv.ui.components.Wordmark
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
+import io.github.pete_builds.vcrx.tv.ui.theme.AccentTint
 import io.github.pete_builds.vcrx.tv.ui.theme.Black
+import io.github.pete_builds.vcrx.tv.ui.theme.FocusStroke
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
 import io.github.pete_builds.vcrx.tv.ui.theme.Motion
+import io.github.pete_builds.vcrx.tv.ui.theme.Surfaces
+import io.github.pete_builds.vcrx.tv.ui.theme.White
 import io.github.pete_builds.vcrx.tv.ui.music.MusicSection
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -81,9 +94,6 @@ class BrowseFocus {
 
     /** The Home row that card was in, since one title can be in several rows. */
     var restoreRowId by mutableStateOf<String?>(null)
-
-    /** The hero's More info opened Details; it takes focus again on return. */
-    var restoreHero by mutableStateOf(false)
 }
 
 class BrowseViewModel(private val graph: AppGraph) : ViewModel() {
@@ -143,9 +153,25 @@ fun Lifecycle.inFrontNow(): Boolean = currentState.isAtLeast(Lifecycle.State.RES
 
 private data class RailEntry(val key: String, val label: String, val icon: ImageVector)
 
-/** The rail's width at rest (icons only) and with focus in it (icons and labels). */
-private val RAIL_CLOSED = 72.dp
-private val RAIL_OPEN = 232.dp
+/**
+ * The rail is a floating pill, centred top to bottom on the left edge, as in
+ * Plex (Pete, 2026-11-03: "the menu on the left is actually a floating centred
+ * vertically pill. i like that"). Its width at rest (icons only) and with focus
+ * in it (icons and labels), and its gap from the screen's edge.
+ */
+private val RAIL_CLOSED = 56.dp
+private val RAIL_OPEN = 220.dp
+private val RAIL_INSET = 16.dp
+
+/** One rail button: a circle at rest, a pill with its label when the rail is open. */
+private val RAIL_ITEM = 44.dp
+
+/** A capsule at rest (radius half its width); the same corners, gentler, once it widens. */
+private val RAIL_SHAPE = RoundedCornerShape(RAIL_CLOSED / 2)
+private val RAIL_ITEM_SHAPE = RoundedCornerShape(RAIL_ITEM / 2)
+
+/** Where the page starts: just past the resting pill, which floats over nothing. */
+private val CONTENT_START = RAIL_INSET + RAIL_CLOSED + 8.dp
 
 /** How dark the whole page goes while the rail is open, as a share of the rail's own wash. */
 private const val PAGE_DIM = 0.7f
@@ -191,7 +217,7 @@ fun BrowseScreen() {
     )
     val railWash by animateFloatAsState(if (railHasFocus) 0.94f else 0f, tween(Motion.NORMAL, easing = Motion.Ease), label = "rail wash")
     Box(Modifier.fillMaxSize().onFocusChanged { anyFocus = it.hasFocus }) {
-        Box(Modifier.fillMaxSize().padding(start = RAIL_CLOSED).focusRestorer().focusGroup()) {
+        Box(Modifier.fillMaxSize().padding(start = CONTENT_START).focusRestorer().focusGroup()) {
             val section = vm.section
             when {
                 section == HOME -> HomeSection(vm.focus, onRetry = vm::loadLibraries)
@@ -203,6 +229,7 @@ fun BrowseScreen() {
                     val library = libraries.firstOrNull { librarySection(it.id) == section }
                     when {
                         library != null && library.kind == "music" -> MusicSection(library, vm.focus)
+                        library != null && library.kind == "show" -> ShowLibrarySection(library, vm.focus)
                         library != null -> LibrarySection(library, vm.focus)
                         vm.libraries is LoadState.Loading -> LoadingView()
                         else -> LaunchedEffect(section) { vm.section = HOME }
@@ -229,39 +256,36 @@ fun BrowseScreen() {
                     ),
             )
         }
+        // The pill floats over the page: dark and a little see-through at rest, so
+        // the hero's art shows behind it, near solid once it opens.
+        val pillAlpha by animateFloatAsState(if (railHasFocus) 0.96f else 0.72f, tween(Motion.NORMAL, easing = Motion.Ease), label = "pill")
         Column(
             Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = RAIL_INSET)
                 .width(railWidth)
-                .fillMaxHeight()
-                .padding(start = 8.dp, top = 24.dp, end = 8.dp)
+                .background(Surfaces.Raised.copy(alpha = pillAlpha), RAIL_SHAPE)
+                .border(1.dp, Surfaces.Wash, RAIL_SHAPE)
+                .padding(6.dp)
                 .onFocusChanged { railHasFocus = it.hasFocus }
                 .focusRestorer(railRequester)
                 .focusGroup(),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Box(Modifier.height(28.dp).padding(start = 12.dp)) {
-                if (railHasFocus) Wordmark(height = 24.dp) else Mark(height = 24.dp)
-            }
-            Spacer(Modifier.height(24.dp))
+            // No brand in the pill: anything shown only while it is open would
+            // change its height, and a centred pill would then move every icon.
             entries.forEach { entry ->
                 val selected = entry.key == vm.section
-                BrandRow(
+                RailItem(
+                    entry = entry,
+                    selected = selected,
+                    open = railHasFocus,
                     onClick = {
                         vm.section = entry.key
                         vm.focus.toContent = true
                     },
-                    selected = selected,
-                    icon = entry.icon,
-                    restColor = Gray,
                     modifier = if (selected) Modifier.focusRequester(railRequester) else Modifier,
-                ) {
-                    // Closed, the icon says it; TalkBack still reads the label from the row.
-                    if (railHasFocus) {
-                        Label(entry.label, style = MaterialTheme.typography.labelLarge)
-                    } else {
-                        Box(Modifier.semantics { contentDescription = entry.label })
-                    }
-                }
+                )
             }
         }
     }
@@ -277,3 +301,43 @@ fun BrowseScreen() {
         if (!anyFocus && lifecycle.inFrontNow()) runCatching { railRequester.requestFocus() }
     }
 }
+
+/**
+ * One place in the rail. At rest a circle around the icon: the page you are on
+ * reads white on a faint wash, the rest gray. Focused, the app's usual green
+ * tint and ring. With the rail open the label shows beside the icon; closed,
+ * TalkBack still reads it from the button.
+ */
+@Composable
+private fun RailItem(entry: RailEntry, selected: Boolean, open: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth().height(RAIL_ITEM).semantics { contentDescription = entry.label },
+        shape = ClickableSurfaceDefaults.shape(RAIL_ITEM_SHAPE),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = if (selected) Surfaces.Wash else Color.Transparent,
+            contentColor = if (selected) White else Gray,
+            focusedContainerColor = AccentTint,
+            focusedContentColor = White,
+            pressedContainerColor = AccentTint,
+            pressedContentColor = White,
+        ),
+        border = ClickableSurfaceDefaults.border(
+            focusedBorder = Border(BorderStroke(FocusStroke, Accent), shape = RAIL_ITEM_SHAPE),
+            pressedBorder = Border(BorderStroke(FocusStroke, Accent), shape = RAIL_ITEM_SHAPE),
+        ),
+        glow = ClickableSurfaceDefaults.glow(Glow.None, Glow.None, Glow.None),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+    ) {
+        Row(
+            Modifier.fillMaxHeight().padding(start = (RAIL_ITEM - RAIL_ICON) / 2, end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Icon(entry.icon, contentDescription = null, modifier = Modifier.size(RAIL_ICON))
+            if (open) Label(entry.label, style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+private val RAIL_ICON = 22.dp

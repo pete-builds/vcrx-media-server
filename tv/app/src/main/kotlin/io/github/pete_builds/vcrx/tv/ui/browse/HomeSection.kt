@@ -149,19 +149,11 @@ fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
             )
         } else {
             val heroItem = vm.hero
-            val heroFocus = remember { FocusRequester() }
-            val heroMoreInfo = remember { FocusRequester() }
             val list = rememberLazyListState()
             val scope = rememberCoroutineScope()
             val rowScroll = LocalBringIntoViewSpec.current
             Column(Modifier.fillMaxSize()) {
-                if (heroItem != null) {
-                    HomeHero(heroItem, vm.heroFeatured, heroFocus, heroMoreInfo, onMoreInfo = {
-                        focus.restoreHero = true
-                        focus.restoreItemId = null
-                        focus.restoreRowId = null
-                    }, returningToMoreInfo = focus.restoreHero)
-                }
+                if (heroItem != null) HomeHero(heroItem, vm.heroFeatured)
                 // The row with focus sits at the top of the list, right under the
                 // hero; the rows above it go behind the hero whole. The TV's own
                 // scroll stopped wherever the focused card came into view, which
@@ -175,8 +167,9 @@ fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
                         verticalArrangement = Arrangement.spacedBy(20.dp),
                     ) {
                         itemsIndexed(rows, key = { _, row -> row.id }) { index, row ->
+                            // The hero has no buttons, so the rail hands over to the first card.
                             HomeRowView(
-                                row, focus, firstRow = index == 0 && heroItem == null, onFocused = { vm.showInHero(it) },
+                                row, focus, firstRow = index == 0, onFocused = { vm.showInHero(it) },
                                 rowScroll = rowScroll,
                                 modifier = Modifier.onFocusChanged { if (it.hasFocus) scope.launch { list.animateScrollToItem(index) } },
                             )
@@ -184,29 +177,13 @@ fun HomeSection(focus: BrowseFocus, onRetry: () -> Unit) {
                     }
                 }
             }
-            // The rail handed over: the hero's Play takes focus, as the first
-            // card did before Home had a hero. Back from Details: More info.
-            val heroTakes = HomeRows.heroFocus(browseInFront(), heroItem != null, focus.toContent, focus.restoreItemId, focus.restoreHero)
-            val lifecycle = LocalLifecycleOwner.current.lifecycle
-            LaunchedEffect(heroTakes) {
-                // Not in the frame a click navigates away in (browseInFront).
-                if (!lifecycle.inFrontNow()) return@LaunchedEffect
-                val requester = when (heroTakes) {
-                    HomeRows.HeroFocus.First -> heroFocus
-                    HomeRows.HeroFocus.MoreInfo -> heroMoreInfo
-                    null -> return@LaunchedEffect
-                }
-                runCatching { requester.requestFocus() }
-                focus.toContent = false
-                focus.restoreHero = false
-            }
         }
     }
 }
 
 /** Home's list never scrolls to a focused card itself: each row scrolls the list to its own top as it takes focus. */
 @OptIn(ExperimentalFoundationApi::class)
-private val RowsSnapThemselves: BringIntoViewSpec = object : BringIntoViewSpec {
+internal val RowsSnapThemselves: BringIntoViewSpec = object : BringIntoViewSpec {
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
 }
 
@@ -219,33 +196,36 @@ private val HOME_WIDE_WIDTH = 200.dp
 /** How long focus rests on a card before the hero asks for its details. */
 private const val HERO_DETAIL_DELAY_MS = 350L
 
+/** One titled row of cards. [shape] forces every card's shape; null lets the row decide ([HomeRows.wide]). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HomeRowView(
+internal fun HomeRowView(
     row: HomeRow,
     focus: BrowseFocus,
     firstRow: Boolean,
     onFocused: (Item) -> Unit,
     rowScroll: BringIntoViewSpec,
     modifier: Modifier = Modifier,
+    shape: CardShape? = null,
 ) {
     val actions = LocalAppActions.current
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SectionTitle(row.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 24.dp))
         // The row keeps the TV's own sideways scrolling.
-        CompositionLocalProvider(LocalBringIntoViewSpec provides rowScroll) { HomeRowCards(row, focus, firstRow, onFocused, actions) }
+        CompositionLocalProvider(LocalBringIntoViewSpec provides rowScroll) {
+            HomeRowCards(row, focus, firstRow, onFocused, actions, shape ?: shapeFor(row))
+        }
     }
 }
 
 @Composable
-private fun HomeRowCards(row: HomeRow, focus: BrowseFocus, firstRow: Boolean, onFocused: (Item) -> Unit, actions: AppActions) {
+private fun HomeRowCards(row: HomeRow, focus: BrowseFocus, firstRow: Boolean, onFocused: (Item) -> Unit, actions: AppActions, shape: CardShape) {
     LazyRow(
         modifier = Modifier.focusRestorer(),
         contentPadding = PaddingValues(horizontal = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         itemsIndexed(row.items, key = { _, item -> item.id }) { index, item ->
-            val shape = shapeFor(row)
             ItemCard(
                 item = item,
                 shape = shape,

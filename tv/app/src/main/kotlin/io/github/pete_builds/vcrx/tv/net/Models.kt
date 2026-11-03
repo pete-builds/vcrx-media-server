@@ -225,6 +225,16 @@ data class ItemPage(
 @Serializable
 data class ItemsResponse(val items: List<Item> = emptyList())
 
+/** One genre or decade and how many visible titles carry it. */
+@Serializable
+data class FilterCount(val value: String, val count: Int = 0)
+
+@Serializable
+data class LibraryFilters(
+    val genres: List<FilterCount> = emptyList(),
+    val decades: List<FilterCount> = emptyList(),
+)
+
 /**
  * One Home row. The server decides which rows exist and their order (the
  * user's Home layout); the app draws whatever comes. [id] is stable and is the
