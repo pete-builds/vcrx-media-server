@@ -86,6 +86,8 @@ List `overlays` under a library in `vcrx.yaml` and the server draws badges onto 
 
 All three take `position`: `top_left`, `top_right`, `bottom_left` or `bottom_right`. Badges are VCRX's own lettering, not copies of third-party logos. Kometa's `ribbon` default draws on IMDb Top 250 and Rotten Tomatoes lists that VCRX has no source for, so VCRX's ribbon is a rule on the IMDb rating and vote count instead.
 
+**Cast:** a details page lists up to 20 actors in billing order, an episode's guests before its show's cast, each with the part they played and a round headshot (initials when there is none). With a TMDb key, a movie's cast comes from its credits and a show's from every season (most episodes first, under the part played most), not only the latest season's regulars. Headshots download once per person at 185 pixels wide into the metadata folder and are served only for the cast of a title the viewer can open. Actors from an NFO keep their names and get no photo.
+
 **IMDb ratings:** set `imdb_ratings: true` and the server downloads IMDb's public ratings file once a day (and only when it changed) and keeps the rating and vote count for every title with an IMDb id. NFO files and TMDb enrichment supply the ids. `vcrx metadata imdb` runs the sync now. IMDb licenses the file for personal, non-commercial use, so it is off by default.
 
 ## Trailers and extras

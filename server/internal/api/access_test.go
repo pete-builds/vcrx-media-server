@@ -336,6 +336,21 @@ func newWalkFixture(t *testing.T) *walkFixture {
 	playable(w.strictEpisode, w.tv, strictDir, "Show.S02E01", "1080p")
 	art(w.strictEpisode, "thumb", strictDir)
 
+	// One actor with a headshot in every hidden title's cast, and in the
+	// visible show's, which its hidden TV-MA episode borrows, so the open
+	// friend gets the photo everywhere the walk asks.
+	meta := t.TempDir()
+	f.srv.Artwork.MetadataDir = meta
+	if err := os.MkdirAll(filepath.Join(meta, "people"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	face := filepath.Join(meta, "people", "5-face.jpg")
+	jpg(face)
+	exec(`INSERT INTO people (tmdb_id, name, profile_path, cache_path, updated_at) VALUES (5, 'Walk Actor', '/face.jpg', ?, ?)`, face, now)
+	for _, id := range []int64{w.vaultMovie, w.horrorMovie, w.ratedMovie, w.horrorShow, f.showID} {
+		exec(`INSERT INTO item_tags (item_id, kind, value, person_id) VALUES (?, 'actor', 'Walk Actor', 5)`, id)
+	}
+
 	coll := func(name string, items ...int64) int64 {
 		id := exec(`INSERT INTO collections (library_id, slug, name, sort_title, source, updated_at) VALUES (?, ?, ?, ?, 'auto', ?)`,
 			w.movies, strings.ToLower(strings.ReplaceAll(name, " ", "-")), name, name, now)
@@ -555,6 +570,9 @@ func (w *walkFixture) videoProbes(sessions []string, adminSession string) []prob
 	}
 	for _, id := range []int64{w.horrorEpisode, w.strictEpisode} {
 		ps = append(ps, at("GET /api/v1/items/{item_id}/artwork/{kind}", id, "thumb"))
+	}
+	for _, id := range hiddenItems {
+		ps = append(ps, at("GET /api/v1/items/{item_id}/cast/{person_id}/photo", id, 5))
 	}
 	for _, id := range append(hiddenPlayables, w.horrorShow) {
 		ps = append(ps, at("POST /api/v1/playback/sessions").with(map[string]any{"item_id": id, "capabilities": tclCaps()}))

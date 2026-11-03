@@ -219,6 +219,7 @@ func (s *Server) Routes() []route {
 		{"PUT", "/api/v1/items/{item_id}/watched", signedIn, s.setWatched},
 		{"DELETE", "/api/v1/items/{item_id}/progress", signedIn, s.clearProgress},
 		{"GET", "/api/v1/items/{item_id}/artwork/{kind}", signedIn, s.artwork},
+		{"GET", "/api/v1/items/{item_id}/cast/{person_id}/photo", signedIn, s.castPhoto},
 		{"POST", "/api/v1/playback/sessions", signedIn, s.startPlayback},
 		{"POST", "/api/v1/playback/sessions/{session_id}/events", signedIn, s.playbackEvent},
 		{"GET", "/api/v1/playback/sessions/{session_id}/seek", signedIn, s.convertedSeek},

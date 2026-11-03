@@ -82,6 +82,13 @@ func (p *plan) tagList(kind string, values []tag) {
 	if cur != joined {
 		p.tags[kind] = clean
 	}
+	if kind == "actor" {
+		for _, t := range clean {
+			if t.person > 0 {
+				p.people = append(p.people, person{id: t.person, name: t.value, profile: t.photo})
+			}
+		}
+	}
 }
 
 func (p *plan) setRating(avg float64, votes int) {
@@ -107,7 +114,7 @@ func actors(cast []tmdb.Cast) []tag {
 		if len(out) == maxActors {
 			break
 		}
-		out = append(out, tag{value: a.Name, role: a.Character})
+		out = append(out, tag{value: a.Name, role: a.Character, person: a.ID, photo: a.ProfilePath})
 	}
 	return out
 }
@@ -162,6 +169,9 @@ func (e *Enricher) applyMovie(ctx context.Context, c *candidate, m *tmdb.Movie, 
 	p.tagList("director", crew(m.Credits.Crew, func(x tmdb.Crew) bool { return x.Job == "Director" }, maxWriters))
 	p.tagList("writer", crew(m.Credits.Crew, func(x tmdb.Crew) bool { return x.Department == "Writing" }, maxWriters))
 	p.tagList("actor", actors(m.Credits.Cast))
+	if err := e.planPhotos(ctx, p); err != nil {
+		return err
+	}
 	p.setRating(m.VoteAverage, m.VoteCount)
 	if err := e.planArt(ctx, p, "poster", posterSize, m.PosterPath); err != nil {
 		return err
@@ -184,7 +194,13 @@ func (e *Enricher) applyShow(ctx context.Context, c *candidate, s *tmdb.Show, ke
 	p.col("premiere_date", s.FirstAirDate, s.FirstAirDate)
 	p.tagList("genre", names(s.Genres, 0))
 	p.tagList("network", names(s.Networks, maxStudios))
-	p.tagList("actor", actors(s.Credits.Cast))
+	p.tagList("actor", actors(e.showCast(ctx, s)))
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if err := e.planPhotos(ctx, p); err != nil {
+		return 0, err
+	}
 	p.setRating(s.VoteAverage, s.VoteCount)
 	if err := e.planArt(ctx, p, "poster", posterSize, s.PosterPath); err != nil {
 		return 0, err
@@ -313,8 +329,25 @@ func (e *Enricher) planArt(ctx context.Context, p *plan, kind, size, path string
 	if format == "png" {
 		ext = ".png"
 	}
-	base := strings.TrimSuffix(strings.TrimPrefix(path, "/"), filepath.Ext(path))
-	out := filepath.Join(dir, kind+"-"+base+ext)
+	out := filepath.Join(dir, kind+"-"+imageBase(path)+ext)
+	if err := saveFile(dir, out, b); err != nil {
+		return err
+	}
+	if a, ok := p.c.art[kind]; ok && a.source == "tmdb" && a.file != "" && a.file != out && fsafe.Within(e.Dir, a.file) {
+		_ = os.Remove(a.file)
+	}
+	p.art = append(p.art, artPlan{kind: kind, url: path, file: out})
+	return nil
+}
+
+// imageBase is a TMDb file_path without its slash and extension.
+func imageBase(path string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(path, "/"), filepath.Ext(path))
+}
+
+// saveFile writes b to out through a temporary file in dir, so a reader never
+// sees half an image.
+func saveFile(dir, out string, b []byte) error {
 	tmp, err := os.CreateTemp(dir, ".dl-*")
 	if err != nil {
 		return err
@@ -332,9 +365,86 @@ func (e *Enricher) planArt(ctx context.Context, p *plan, kind, size, path string
 		_ = os.Remove(tmp.Name())
 		return err
 	}
-	if a, ok := p.c.art[kind]; ok && a.source == "tmdb" && a.file != "" && a.file != out && fsafe.Within(e.Dir, a.file) {
-		_ = os.Remove(a.file)
+	return nil
+}
+
+// showCast is a show's cast across every season. When TMDb cannot give that
+// (an error, or a list too long to read), it falls back to the show's plain
+// credits, which name only the latest season's regulars.
+func (e *Enricher) showCast(ctx context.Context, s *tmdb.Show) []tmdb.Cast {
+	all, err := e.TMDb.ShowCast(ctx, s.ID)
+	if err != nil {
+		if ctx.Err() == nil && !errors.Is(err, tmdb.ErrNotFound) {
+			e.log().Warn("tmdb: show cast across seasons failed; using the latest season's", "show", s.ID, "err", err)
+		}
+		return s.Credits.Cast
 	}
-	p.art = append(p.art, artPlan{kind: kind, url: path, file: out})
+	if len(all) == 0 {
+		return s.Credits.Cast
+	}
+	return all
+}
+
+// planPhotos downloads each listed actor's headshot once, into people/ under
+// the metadata folder, and keeps that file for as long as TMDb's photo stays
+// the same. A failed download costs that one photo, never the title.
+func (e *Enricher) planPhotos(ctx context.Context, p *plan) error {
+	if len(p.people) == 0 {
+		return nil
+	}
+	dir := filepath.Join(e.Dir, "people")
+	for i := range p.people {
+		pp := &p.people[i]
+		if !tmdb.ValidImagePath(pp.profile) {
+			pp.profile = ""
+			continue
+		}
+		prefix := strconv.FormatInt(pp.id, 10) + "-"
+		for _, ext := range []string{".jpg", ".png"} {
+			f := filepath.Join(dir, prefix+imageBase(pp.profile)+ext)
+			if _, err := os.Stat(f); err == nil {
+				pp.file = f
+				break
+			}
+		}
+		if pp.file != "" {
+			continue
+		}
+		b, err := e.TMDb.Image(ctx, photoSize, pp.profile)
+		if err != nil {
+			if errors.Is(err, tmdb.ErrUnauthorized) || ctx.Err() != nil {
+				return err
+			}
+			if !errors.Is(err, tmdb.ErrNotFound) {
+				e.log().Warn("tmdb: actor photo download failed", "person", pp.id, "err", err)
+			}
+			continue
+		}
+		_, format, err := image.DecodeConfig(bytes.NewReader(b))
+		if err != nil || (format != "jpeg" && format != "png") {
+			e.log().Warn("tmdb: actor photo is not a usable image", "person", pp.id)
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return err
+		}
+		ext := ".jpg"
+		if format == "png" {
+			ext = ".png"
+		}
+		out := filepath.Join(dir, prefix+imageBase(pp.profile)+ext)
+		if err := saveFile(dir, out, b); err != nil {
+			return err
+		}
+		pp.file = out
+		// An older photo of the same person is replaced, not kept beside it.
+		if old, err := filepath.Glob(filepath.Join(dir, prefix+"*")); err == nil {
+			for _, f := range old {
+				if f != out {
+					_ = os.Remove(f)
+				}
+			}
+		}
+	}
 	return nil
 }

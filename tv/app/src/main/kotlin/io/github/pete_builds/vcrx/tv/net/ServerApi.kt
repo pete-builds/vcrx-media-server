@@ -240,6 +240,10 @@ class ServerApi(
     fun artworkUrl(itemId: Long, kind: String, width: Int): String? =
         baseUrl()?.let { ServerAddress.resolve(it, "/api/v1/items/$itemId/artwork/$kind?width=$width")?.toString() }
 
+    /** Absolute URL of an actor's headshot on [itemId]'s cast; 404 when there is none. */
+    fun castPhotoUrl(itemId: Long, personId: Long): String? =
+        baseUrl()?.let { ServerAddress.resolve(it, "/api/v1/items/$itemId/cast/$personId/photo")?.toString() }
+
     /** Resolves a path from the server, such as stream.url, against the base URL. */
     fun absoluteUrl(path: String): String? =
         baseUrl()?.let { ServerAddress.resolve(it, path)?.toString() }

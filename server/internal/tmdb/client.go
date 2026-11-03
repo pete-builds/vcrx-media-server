@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +23,9 @@ const (
 	DefaultBaseURL  = "https://api.themoviedb.org/3"
 	DefaultImageURL = "https://image.tmdb.org/t/p"
 	maxBody         = 4 << 20
+	// maxCredits caps a show's aggregate credits: a long-running series lists
+	// every regular and guest of every season, which can pass maxBody.
+	maxCredits = 16 << 20
 	// MaxImage caps a downloaded image; TMDb originals at the sizes used here are far smaller.
 	MaxImage = 15 << 20
 )
@@ -131,6 +135,10 @@ func (c *Client) do(ctx context.Context, u string, auth bool, limit int64) ([]by
 }
 
 func (c *Client) get(ctx context.Context, path string, q url.Values, out any) error {
+	return c.getLimit(ctx, path, q, out, maxBody)
+}
+
+func (c *Client) getLimit(ctx context.Context, path string, q url.Values, out any, limit int64) error {
 	if q == nil {
 		q = url.Values{}
 	}
@@ -140,7 +148,7 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 	if !c.bearer() {
 		q.Set("api_key", c.Key)
 	}
-	body, err := c.do(ctx, c.BaseURL+path+"?"+q.Encode(), true, maxBody)
+	body, err := c.do(ctx, c.BaseURL+path+"?"+q.Encode(), true, limit)
 	if err != nil {
 		return err
 	}
@@ -163,10 +171,27 @@ type Named struct {
 	Name string `json:"name"`
 }
 
+// Cast is one actor. ID is TMDb's person id; ProfilePath their headshot, if any.
 type Cast struct {
-	Name      string `json:"name"`
-	Character string `json:"character"`
-	Order     int    `json:"order"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Character   string `json:"character"`
+	Order       int    `json:"order"`
+	ProfilePath string `json:"profile_path"`
+}
+
+// AggregateCast is one actor across every season of a show, with each part
+// they played and in how many episodes.
+type AggregateCast struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	ProfilePath string `json:"profile_path"`
+	Order       int    `json:"order"`
+	Episodes    int    `json:"total_episode_count"`
+	Roles       []struct {
+		Character string `json:"character"`
+		Episodes  int    `json:"episode_count"`
+	} `json:"roles"`
 }
 
 type Crew struct {
@@ -364,6 +389,36 @@ func (c *Client) Show(ctx context.Context, id int64) (*Show, error) {
 		return nil, err
 	}
 	return &s, nil
+}
+
+// ShowCast is a show's cast across all its seasons, most episodes first, each
+// actor with the part they played most. A show's plain credits list only its
+// latest season's regulars, which is nobody at all for many ended series.
+func (c *Client) ShowCast(ctx context.Context, id int64) ([]Cast, error) {
+	var out struct {
+		Cast []AggregateCast `json:"cast"`
+	}
+	if err := c.getLimit(ctx, "/tv/"+strconv.FormatInt(id, 10)+"/aggregate_credits", nil, &out, maxCredits); err != nil {
+		return nil, err
+	}
+	agg := out.Cast
+	sort.SliceStable(agg, func(i, j int) bool {
+		if agg[i].Episodes != agg[j].Episodes {
+			return agg[i].Episodes > agg[j].Episodes
+		}
+		return agg[i].Order < agg[j].Order
+	})
+	cast := make([]Cast, 0, len(agg))
+	for i, a := range agg {
+		role, most := "", -1
+		for _, r := range a.Roles {
+			if r.Character != "" && r.Episodes > most {
+				role, most = r.Character, r.Episodes
+			}
+		}
+		cast = append(cast, Cast{ID: a.ID, Name: a.Name, Character: role, Order: i, ProfilePath: a.ProfilePath})
+	}
+	return cast, nil
 }
 
 func (c *Client) Season(ctx context.Context, showID int64, number int) (*Season, error) {

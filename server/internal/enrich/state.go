@@ -61,6 +61,27 @@ func writePlan(ctx context.Context, tx *sql.Tx, p *plan, now int64) error {
 			}
 		}
 	}
+	// After the tag lists, so a list rewritten above gets its ids too.
+	for _, pp := range p.people {
+		var prof, file any
+		if pp.profile != "" {
+			prof = pp.profile
+		}
+		if pp.file != "" {
+			file = pp.file
+		}
+		// A failed download keeps the photo already there: still the same person.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO people (tmdb_id, name, profile_path, cache_path, updated_at) VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT (tmdb_id) DO UPDATE SET name = excluded.name, profile_path = excluded.profile_path,
+			cache_path = CASE WHEN excluded.profile_path IS NULL THEN NULL ELSE IFNULL(excluded.cache_path, people.cache_path) END,
+			updated_at = excluded.updated_at`, pp.id, pp.name, prof, file, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE item_tags SET person_id = ? WHERE item_id = ? AND kind = 'actor' AND value = ?`,
+			pp.id, p.c.id, pp.name); err != nil {
+			return err
+		}
+	}
 	if p.rating != nil {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO item_ratings (item_id, source, value, votes) VALUES (?, 'tmdb', ?, ?)
 			ON CONFLICT (item_id, source) DO UPDATE SET value = excluded.value, votes = excluded.votes`,
