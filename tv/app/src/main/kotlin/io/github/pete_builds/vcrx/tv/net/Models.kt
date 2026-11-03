@@ -156,6 +156,8 @@ data class Item(
     @SerialName("premiere_date") val premiereDate: String? = null,
     /** Actors in billing order; an episode's guests first. */
     val cast: List<CastMember> = emptyList(),
+    /** The directors, drawn after the cast; each has role "Director". */
+    val crew: List<CastMember> = emptyList(),
     val ratings: Map<String, Double> = emptyMap(),
     /** How many votes stand behind each of ratings, when known. */
     @SerialName("rating_votes") val ratingVotes: Map<String, Long> = emptyMap(),

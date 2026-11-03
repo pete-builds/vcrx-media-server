@@ -273,6 +273,27 @@ async function main() {
     for (const want of ["Written by", "Rafe Lindqvist", "Country", "Canada", "Released", "2001", "IMDb 8.4", "310K votes"]) {
       if (!facts.includes(want)) fail("details panel", `no "${want}" in: ${facts.slice(0, 300).replace(/\n/g, " | ")}`);
     }
+
+    // The Google TV look: no poster in the hero, "Directed by" under the plot,
+    // the director last in Cast & Crew, and the page washed in the backdrop's
+    // colours once it loads (a solid navy fanart: blue must lead the base).
+    console.log("details page look");
+    const look = await evaluate(`${wait(`document.querySelector(".page-wash.washed")`)}
+      const wash = document.querySelector(".page-wash");
+      const base = wash ? getComputedStyle(wash).getPropertyValue("--wash-base").trim() : "";
+      const members = [...document.querySelectorAll(".cast .cast-member")];
+      const last = members[members.length - 1];
+      return { poster: !!document.querySelector(".hero .poster"), directed: (document.querySelector(".hero .directed") || {}).textContent || "",
+        title: (document.querySelector(".cast h2") || {}).textContent || "", washed: !!(wash && wash.classList.contains("washed")), base,
+        lastName: last ? last.querySelector(".cast-name").textContent : "", lastRole: last ? (last.querySelector(".cast-role") || {}).textContent || "" : "",
+        round: members[0] ? getComputedStyle(members[0].querySelector(".cast-photo")).borderRadius : "" };`);
+    if (look.poster) fail("details look", "the hero still shows a poster");
+    if (look.directed !== "Directed by Ines Calloway") fail("details look", `directed line is "${look.directed}"`);
+    if (look.title !== "Cast & Crew") fail("details look", `cast heading is "${look.title}"`);
+    if (look.lastName !== "Ines Calloway" || look.lastRole !== "Director") fail("details look", `last in Cast & Crew is ${look.lastName} / ${look.lastRole}`);
+    if (look.round !== "50%") fail("details look", `cast photos are not circles (border-radius ${look.round})`);
+    const rgb = (look.base.match(/\d+/g) || []).map(Number);
+    if (!look.washed || rgb.length < 3 || !(rgb[2] > rgb[0] && rgb[2] > rgb[1])) fail("details look", `no blue wash from the navy fanart: washed=${look.washed} base="${look.base}"`);
   }
 
   // Installable: the page names a manifest whose start page is in its scope,

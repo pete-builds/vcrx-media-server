@@ -1,6 +1,7 @@
 package io.github.pete_builds.vcrx.tv.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -296,6 +297,41 @@ fun PillCard(
         ),
         glow = ClickableSurfaceDefaults.glow(noGlow, noGlow, noGlow),
         scale = ClickableSurfaceDefaults.scale(focusedScale = Focus.RowScale),
+        tonalElevation = 0.dp,
+        content = content,
+    )
+}
+
+/**
+ * A round card, for the cast and crew's photos: no fill of its own, and the
+ * green focus ring around the circle when the remote is on it.
+ */
+@Composable
+fun CircleCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val shape = CircleShape
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = ClickableSurfaceDefaults.shape(shape, shape, shape, shape, shape),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color.Transparent,
+            contentColor = White,
+            focusedContainerColor = Color.Transparent,
+            focusedContentColor = White,
+            pressedContainerColor = Color.Transparent,
+            pressedContentColor = White,
+        ),
+        border = ClickableSurfaceDefaults.border(
+            border = Border.None,
+            focusedBorder = Border(BorderStroke(FocusStroke, Accent), inset = 2.dp, shape = shape),
+            pressedBorder = Border(BorderStroke(FocusStroke, Accent), inset = 2.dp, shape = shape),
+        ),
+        glow = ClickableSurfaceDefaults.glow(noGlow, noGlow, noGlow),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = Focus.CardScale),
         tonalElevation = 0.dp,
         content = content,
     )

@@ -56,6 +56,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.BiasAlignment
+import io.github.pete_builds.vcrx.tv.ui.components.CircleCard
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import io.github.pete_builds.vcrx.tv.ui.components.revealWithMargin
@@ -88,12 +93,10 @@ import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
-import io.github.pete_builds.vcrx.tv.ui.components.PillCard
 import io.github.pete_builds.vcrx.tv.ui.components.Reveal
 import io.github.pete_builds.vcrx.tv.ui.components.SectionTitle
 import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
-import io.github.pete_builds.vcrx.tv.ui.theme.Black
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
 import io.github.pete_builds.vcrx.tv.ui.theme.Motion
 import io.github.pete_builds.vcrx.tv.ui.theme.White
@@ -251,19 +254,13 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
                             }
                         }
                     },
-                    horizontalArrangement = Arrangement.spacedBy(40.dp),
                 ) {
                     val episode = item.kind == "episode"
-                    Box(Modifier.width(if (episode) 352.dp else 200.dp).aspectRatio(if (episode) 16f / 9f else 2f / 3f)) {
-                        if (episode) {
-                            Artwork(item.id, if (item.hasThumb) "thumb" else "backdrop", item.hasThumb || item.hasBackdrop, item.title, 768)
-                        } else {
-                            Artwork(item.id, "poster", item.hasPoster, item.title, 480)
-                        }
-                    }
-                    // In the web page's order: where it sits, the title, the facts in a
-                    // line, genres, tagline, plot, its series, how far in, then the buttons.
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // As on Google TV: no poster, just the text on the left over the
+                    // wash, with the backdrop showing on the right. In the web page's
+                    // order: where it sits, the title, the facts in a line, genres,
+                    // tagline, plot, who directed it, how far in, then the buttons.
+                    Column(Modifier.widthIn(max = HEADER_WIDTH), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (episode && item.showTitle != null) {
                             Label(item.showTitle, style = MaterialTheme.typography.labelLarge, color = Gray)
                         }
@@ -276,8 +273,9 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
                         if (item.genres.isNotEmpty()) Label(item.genres.take(4).joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = Gray)
                         item.tagline?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = Gray) }
                         item.overview?.takeIf { it.isNotBlank() }?.let {
-                            Text(it, style = MaterialTheme.typography.bodyLarge, maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 760.dp))
+                            Text(it, style = MaterialTheme.typography.bodyLarge, maxLines = 5, overflow = TextOverflow.Ellipsis)
                         }
+                        directedBy(item)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Gray, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                         resumeBar(item)?.let { ResumeBarView(it) }
                         // Wraps: Resume, Play from the start, Version, Trailer and the icons do not fit on one line.
                         FlowRow(
@@ -341,7 +339,7 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
             if (item.extras.isNotEmpty()) {
                 item(key = "extras") { keepRowScroll { ExtrasRow(item, PAGE_EDGE) } }
             }
-            if (item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
+            if (item.cast.isNotEmpty() || item.crew.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
             val facts = webFacts(item)
             if (facts.isNotEmpty()) item(key = "facts") { FactsList(facts) }
         }
@@ -416,6 +414,13 @@ private fun ShowButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusReq
 /** How far the page's text and rows sit in from the screen's edges. */
 private val PAGE_EDGE = 48.dp
 
+/** The header's text column: a little over half the screen, so the backdrop shows on the right. */
+private val HEADER_WIDTH = 520.dp
+
+/** "Directed by" and the names, for under the plot; null with no directors. */
+internal fun directedBy(item: Item): String? =
+    item.directors.takeIf { it.isNotEmpty() }?.let { "Directed by ${it.joinToString(", ")}" }
+
 /** The space a focused row keeps from the top and bottom of the screen. */
 private val REVEAL_MARGIN = 48.dp
 
@@ -480,32 +485,37 @@ private fun FactsList(facts: List<Fact>) {
     }
 }
 
-/** The cast in billing order, as small pills: a headshot, the name and the part. Pills take focus so the D-pad can reach the panel and the cast. */
+/**
+ * Cast & Crew as on Google TV: the cast in billing order, then the directors,
+ * each a big round photo with the name under it and the part under that. The
+ * circles take focus so the D-pad can reach the panel below.
+ */
 @Composable
 private fun CastRow(item: Item) {
     val api = LocalContext.current.graph.api
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("Cast", modifier = Modifier.padding(start = PAGE_EDGE))
+        SectionTitle("Cast & Crew", modifier = Modifier.padding(start = PAGE_EDGE))
         LazyRow(
             Modifier.focusRestorer(),
-            contentPadding = PaddingValues(horizontal = PAGE_EDGE, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(horizontal = PAGE_EDGE, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            items(item.cast, key = { it.name }) { member ->
-                PillCard(onClick = {}, modifier = Modifier.widthIn(max = 300.dp)) {
-                    Row(
-                        Modifier.padding(start = 5.dp, top = 5.dp, bottom = 5.dp, end = 18.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+            items(castAndCrew(item), key = { "${it.role == DIRECTOR}:${it.name}" }) { member ->
+                Column(Modifier.width(CAST_CIRCLE + 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircleCard(onClick = {}, modifier = Modifier.size(CAST_CIRCLE)) {
                         val photo = member.personId?.takeIf { member.hasPhoto }?.let { api.castPhotoUrl(item.id, it) }
                         CastPhoto(member.name, photo)
-                        Column {
-                            Text(member.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            member.role?.takeIf { it.isNotBlank() }?.let {
-                                Text(it, style = MaterialTheme.typography.labelSmall, color = Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
+                    }
+                    Text(
+                        member.name,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                    member.role?.takeIf { it.isNotBlank() }?.let {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -513,21 +523,29 @@ private fun CastRow(item: Item) {
     }
 }
 
+/** The circle's size: big, as on Google TV, about an eighth of the screen's width. */
+private val CAST_CIRCLE = 112.dp
+
+private const val DIRECTOR = "Director"
+
+/** The cast, then the directors, in one row. */
+internal fun castAndCrew(item: Item) = item.cast + item.crew
+
 /**
- * A round headshot over the actor's initials, which show while it loads and when there is none.
- * TMDb headshots are 2:3 portraits: anchored at the top, the circle keeps the whole head
- * (hair, hats) and loses only the chin and shoulders.
+ * A round headshot over the person's initials, which show while it loads and when there is none.
+ * TMDb headshots are 2:3 portraits: the photo fills the circle's width and keeps its top, so the
+ * whole head (hair, hats) stays in and only the shoulders go. It is not zoomed past that.
  */
 @Composable
 private fun CastPhoto(name: String, url: String?) {
-    Box(Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
-        Text(castInitials(name), style = MaterialTheme.typography.labelMedium, color = Gray)
+    Box(Modifier.fillMaxSize().clip(CircleShape).background(Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+        Text(castInitials(name), style = MaterialTheme.typography.titleLarge, color = Gray)
         if (url != null) {
             AsyncImage(
                 model = url,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                alignment = Alignment.TopCenter,
+                alignment = BiasAlignment(0f, -0.75f),
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -625,9 +643,10 @@ private fun WatchedButton(played: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * The title's backdrop across the screen behind the page, under a wash from the
- * left and the bottom so the text reads on any picture. An episode or season
- * borrows its show's. It dims once the page scrolls past the header.
+ * Behind the page, as on Google TV: a wash of the backdrop's own colours across
+ * the whole screen, and the backdrop itself on the right two thirds, fading out
+ * to its left and bottom edges. An episode or season borrows its show's. The
+ * picture dims once the page scrolls past the header; the wash stays.
  */
 @Composable
 private fun Backdrop(item: Item, dimmed: Boolean) {
@@ -635,15 +654,29 @@ private fun Backdrop(item: Item, dimmed: Boolean) {
     val borrows = item.kind == "episode" || item.kind == "season"
     val artId = if (borrows) item.showId ?: item.id else item.id
     val url = if (item.hasBackdrop || borrows) api.artworkUrl(artId, "backdrop", 1280) else null
-    val alpha by animateFloatAsState(if (dimmed) 0.25f else 1f, tween(Motion.SLOW, easing = Motion.Ease), label = "backdrop")
-    Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }) {
-        if (url != null) {
-            AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
+    val alpha by animateFloatAsState(if (dimmed) 0.2f else 1f, tween(Motion.SLOW, easing = Motion.Ease), label = "backdrop")
+    WashBackground(rememberWash(url))
+    if (url != null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopEnd) {
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter,
+                modifier = Modifier.fillMaxWidth(BACKDROP_WIDTH).aspectRatio(16f / 9f)
+                    .graphicsLayer { this.alpha = alpha; compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(Brush.horizontalGradient(0f to Color.Transparent, 0.42f to Color.Black), blendMode = BlendMode.DstIn)
+                        drawRect(Brush.verticalGradient(0.5f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
+                    },
+            )
         }
-        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Black.copy(alpha = 0.94f), 0.5f to Black.copy(alpha = 0.72f), 1f to Black.copy(alpha = 0.25f))))
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 0.85f to Black)))
     }
 }
+
+/** How much of the screen's width the backdrop takes, from the right. */
+private const val BACKDROP_WIDTH = 0.7f
 
 /**
  * Whether the header fits on screen whole, so scrolling back to the top shows

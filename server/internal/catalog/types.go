@@ -101,9 +101,11 @@ type ItemDetail struct {
 	Studios       []string `json:"studios"`
 	Countries     []string `json:"countries"`
 	// PremiereDate is the release (or first air) date, YYYY-MM-DD.
-	PremiereDate *string            `json:"premiere_date"`
-	Cast         []CastMember       `json:"cast"`
-	Ratings      map[string]float64 `json:"ratings"`
+	PremiereDate *string      `json:"premiere_date"`
+	Cast         []CastMember `json:"cast"`
+	// Crew is the directors, drawn beside the cast with their photos; Role is "Director".
+	Crew    []CastMember       `json:"crew"`
+	Ratings map[string]float64 `json:"ratings"`
 	// RatingVotes is how many votes stand behind each of Ratings, when known.
 	RatingVotes map[string]int64 `json:"rating_votes"`
 	Versions    []Version        `json:"versions"`

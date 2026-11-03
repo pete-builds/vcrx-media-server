@@ -82,7 +82,8 @@ func (p *plan) tagList(kind string, values []tag) {
 	if cur != joined {
 		p.tags[kind] = clean
 	}
-	if kind == "actor" {
+	// Actors and directors are drawn with their photos; writers are names only.
+	if kind == "actor" || kind == "director" {
 		for _, t := range clean {
 			if t.person > 0 {
 				p.people = append(p.people, person{id: t.person, name: t.value, profile: t.photo})
@@ -126,11 +127,13 @@ func crew(cs []tmdb.Crew, keep func(tmdb.Crew) bool, limit int) []tag {
 			break
 		}
 		if keep(c) {
-			out = append(out, tag{value: c.Name})
+			out = append(out, tag{value: c.Name, person: c.ID, photo: c.ProfilePath})
 		}
 	}
 	return out
 }
+
+func isDirector(c tmdb.Crew) bool { return c.Job == "Director" }
 
 func idStr(id int64) string {
 	if id <= 0 {
@@ -166,7 +169,7 @@ func (e *Enricher) applyMovie(ctx context.Context, c *candidate, m *tmdb.Movie, 
 	p.tagList("genre", names(m.Genres, 0))
 	p.tagList("studio", names(m.Companies, maxStudios))
 	p.tagList("country", names(m.Countries, 0))
-	p.tagList("director", crew(m.Credits.Crew, func(x tmdb.Crew) bool { return x.Job == "Director" }, maxWriters))
+	p.tagList("director", crew(m.Credits.Crew, isDirector, maxWriters))
 	p.tagList("writer", crew(m.Credits.Crew, func(x tmdb.Crew) bool { return x.Department == "Writing" }, maxWriters))
 	p.tagList("actor", actors(m.Credits.Cast))
 	if err := e.planPhotos(ctx, p); err != nil {
@@ -268,6 +271,10 @@ func (e *Enricher) applyShow(ctx context.Context, c *candidate, s *tmdb.Show, ke
 			epl.col("overview", ep.Overview, ep.Overview)
 			epl.col("premiere_date", ep.AirDate, ep.AirDate)
 			epl.setRating(ep.VoteAverage, ep.VoteCount)
+			epl.tagList("director", crew(ep.Crew, isDirector, maxWriters))
+			if err := e.planPhotos(ctx, epl); err != nil {
+				return 0, err
+			}
 			if err := e.planArt(ctx, epl, "thumb", stillSize, ep.StillPath); err != nil {
 				return 0, err
 			}

@@ -209,7 +209,6 @@ main:focus-visible { outline: none; }
   display: flex; gap: 40px; align-items: flex-end; margin: 0 calc(-1 * var(--pad));
   min-height: clamp(480px, 70vh, 760px); padding: calc(var(--topbar-h) + 40px) var(--pad) 40px; background: linear-gradient(#0c0c0f, #000);
 }
-.sk-hero-poster { flex: none; width: clamp(150px, 19vw, 280px); aspect-ratio: 2 / 3; }
 .sk-lines { flex: 1; min-width: 0; }
 
 /* Buttons. Three shapes: the main action is a green-tinted pill (never solid green), everything else a
@@ -387,8 +386,37 @@ main select:hover { background-color: var(--surface-3); }
 .hero { position: relative; display: flex; align-items: flex-end; margin: var(--under-bar) calc(-1 * var(--pad)) 0; min-height: clamp(480px, 70vh, 760px); }
 .hero .inner { position: relative; display: flex; gap: 40px; width: 100%; padding: calc(var(--topbar-h) + 40px) var(--pad) 36px; align-items: flex-end; }
 .hero .poster { flex: 0 0 auto; width: clamp(150px, 19vw, 280px); }
-.hero .poster.landscape { width: clamp(240px, 30vw, 440px); }
 .hero .poster .art { box-shadow: 0 18px 50px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.1); }
+/* The details page, as on Google TV: no poster; the backdrop sits on the right
+   and fades into a wash of its own colours (wash.js), which stays fixed behind
+   the whole page. The page is its own stacking context so the wash paints
+   above the body's black and under everything else. */
+.item-page {
+  position: relative; z-index: 0;
+  --wash-base: #0a0f14; --wash-glow: #1d2a33; --wash-deep: #10171d;
+}
+#view > .item-page { animation-name: view-fade; }
+@keyframes view-fade { from { opacity: 0; } }
+.page-wash {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(ellipse 75% 85% at 92% 0%, var(--wash-glow), transparent 72%),
+    radial-gradient(ellipse 90% 80% at 10% 100%, var(--wash-deep), transparent 75%),
+    linear-gradient(160deg, var(--wash-base) 0%, var(--wash-deep) 100%);
+  transition: opacity .6s ease;
+}
+.page-wash:not(.washed) { opacity: .6; }
+.item-page .hero .backdrop { left: auto; width: 68%; background: none; }
+.item-page .hero .backdrop img {
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 42%), linear-gradient(180deg, #000 52%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(90deg, transparent 0%, #000 42%), linear-gradient(180deg, #000 52%, transparent 100%);
+  mask-composite: intersect;
+}
+.item-page .hero .backdrop::after { background: none; }
+.item-page .hero .backdrop.from-poster { width: 100%; }
+.directed { margin: 8px 0 22px; color: rgba(255,255,255,.62); font-size: 15px; }
+.overview:has(+ .directed) { margin-bottom: 0; }
 .hero .info { min-width: 0; max-width: 780px; }
 .hero h1 { font-size: clamp(32px, 5vw, 62px); text-shadow: 0 2px 30px rgba(0,0,0,.5); }
 .crumbs { color: #c4c4cc; font-size: 14px; margin-bottom: 6px; }
@@ -651,10 +679,11 @@ kbd {
   .hero .backdrop::after { background: linear-gradient(0deg, #000 0%, rgba(0,0,0,.35) 45%, rgba(0,0,0,.25) 100%); }
   .hero .inner { flex-direction: column; align-items: flex-start; gap: 18px; padding: calc(var(--topbar-h) + 30vw) var(--pad) 28px; }
   .hero .poster { width: 132px; }
-  .hero .poster.landscape { width: min(100%, 360px); }
+  .item-page .hero .backdrop { width: 100%; }
+  .item-page .hero .backdrop img { -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent 100%); mask-image: linear-gradient(180deg, #000 55%, transparent 100%); }
+  .item-page .hero .info { align-self: stretch; }
   .sk-hero { flex-direction: column; align-items: flex-start; min-height: 0; padding-top: calc(var(--topbar-h) + 30vw); }
   .sk-feature { height: 74vh; }
-  .sk-hero-poster { width: 132px; }
   .sk-lines { width: 100%; }
   /* Play takes the width, as streaming apps do on a phone; the rest stay compact under it. */
   .actions .btn-large { flex: 1 1 100%; }
@@ -691,13 +720,22 @@ kbd {
 /* Cast: small pills, a round headshot (initials when TMDb has none) beside
    the name over the part. TMDb headshots are 2:3 portraits, so the circle is
    anchored at the top: it keeps hair and hats and loses the chin. */
-.cast-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--s-2); }
-.cast-member { display: inline-flex; align-items: center; gap: 10px; max-width: 280px; min-width: 0; padding: 4px 16px 4px 4px; border-radius: 999px; background: var(--surface-2); }
-.cast-photo { flex: none; width: 36px; height: 36px; border-radius: 50%; overflow: hidden; background: var(--surface-3); display: grid; place-items: center; color: var(--muted); font-weight: 600; font-size: 0.75rem; }
-.cast-photo img { width: 100%; height: 100%; object-fit: cover; object-position: center top; }
-.cast-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
-.cast-name { font-weight: 500; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Cast & Crew as on Google TV: big round photos in one row that scrolls, the
+   name under each and the part under that. The photo fills the circle's width
+   and keeps its top, so heads and hats stay in and only the shoulders go. */
+.cast-list { list-style: none; margin: 0 calc(-1 * var(--pad)); padding: 4px var(--pad) 8px; display: flex; gap: 22px; overflow-x: auto; scrollbar-width: none; }
+.cast-list::-webkit-scrollbar { display: none; }
+.cast-member { flex: none; display: flex; flex-direction: column; align-items: center; width: 132px; text-align: center; }
+.cast-photo { width: 124px; height: 124px; border-radius: 50%; overflow: hidden; background: rgba(255,255,255,.08); display: grid; place-items: center; color: var(--muted); font-weight: 600; font-size: 1.6rem; }
+.cast-photo img { width: 100%; height: 100%; object-fit: cover; object-position: center 12%; }
+.cast-text { display: flex; flex-direction: column; min-width: 0; max-width: 100%; margin-top: 10px; line-height: 1.3; }
+.cast-name { font-weight: 500; font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cast-role { color: var(--muted); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 720px) {
+  .cast-list { gap: 16px; }
+  .cast-member { width: 96px; }
+  .cast-photo { width: 88px; height: 88px; font-size: 1.2rem; }
+}
 
 /* Version tools on a movie's page, for admins (views/versions.js). */
 .version-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
