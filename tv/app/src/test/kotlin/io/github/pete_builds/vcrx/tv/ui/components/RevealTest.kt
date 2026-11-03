@@ -41,4 +41,16 @@ class RevealTest {
         assertEquals(-30f, Reveal.distance(-30f, 700f, screen))
         assertEquals(20f, Reveal.distance(20f, 700f, screen))
     }
+
+    @Test
+    fun aMarginKeepsAFocusedRowOffTheBottomEdge() {
+        // The cast row, flush on the bottom edge: lifted a 48 margin clear of it.
+        assertEquals(48f, Reveal.distance(480f, 60f, screen, margin = 48f))
+        // Already a margin clear: stays put.
+        assertEquals(0f, Reveal.distance(400f, 60f, screen, margin = 48f))
+        // Cut off at the top: comes down to a margin below it.
+        assertEquals(-58f, Reveal.distance(-10f, 60f, screen, margin = 48f))
+        // Too tall for a margin on both sides: the margin shrinks to what fits.
+        assertEquals(20f, Reveal.distance(20f, 540f, screen, margin = 48f))
+    }
 }

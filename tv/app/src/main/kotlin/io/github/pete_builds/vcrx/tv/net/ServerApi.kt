@@ -140,6 +140,11 @@ class ServerApi(
         send<Unit>(Request.Builder().url(url("/api/v1/items/$itemId/watched")).put(body).build(), null)
     }
 
+    /** Forgets the resume point, which takes the title off Continue Watching. */
+    suspend fun clearProgress(itemId: Long) {
+        send<Unit>(Request.Builder().url(url("/api/v1/items/$itemId/progress")).delete().build(), null)
+    }
+
     /** The user's Skip intro choice, for the Settings screen. */
     suspend fun playbackSettings(): PlaybackSettings = get("/api/v1/me/playback-settings", PlaybackSettings.serializer())
 
