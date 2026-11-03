@@ -21,7 +21,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -80,6 +81,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
+import io.github.pete_builds.vcrx.tv.ui.components.PillCard
 import io.github.pete_builds.vcrx.tv.ui.components.Reveal
 import io.github.pete_builds.vcrx.tv.ui.components.RevealOnly
 import io.github.pete_builds.vcrx.tv.ui.components.SectionTitle
@@ -397,25 +399,27 @@ private fun FactColumn(facts: List<Fact>, modifier: Modifier) {
     }
 }
 
-/** The cast in billing order, each with a headshot. Cards take focus so the D-pad can reach the panel and the cast. */
+/** The cast in billing order, as small pills: a headshot, the name and the part. Pills take focus so the D-pad can reach the panel and the cast. */
 @Composable
 private fun CastRow(item: Item) {
     val api = LocalContext.current.graph.api
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionTitle("Cast")
-        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(item.cast, key = { it.name }) { member ->
-                FrameCard(onClick = {}, quiet = true, modifier = Modifier.width(260.dp)) {
+                PillCard(onClick = {}, modifier = Modifier.widthIn(max = 300.dp)) {
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        Modifier.padding(start = 5.dp, top = 5.dp, bottom = 5.dp, end = 18.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         val photo = member.personId?.takeIf { member.hasPhoto }?.let { api.castPhotoUrl(item.id, it) }
                         CastPhoto(member.name, photo)
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(member.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Label(member.role.orEmpty(), style = MaterialTheme.typography.labelSmall, color = Gray, maxLines = 2)
+                        Column {
+                            Text(member.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            member.role?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.labelSmall, color = Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                     }
                 }
@@ -425,17 +429,14 @@ private fun CastRow(item: Item) {
 }
 
 /**
- * A headshot over the actor's initials, which show while it loads and when there is none.
- * TMDb headshots are 2:3 portraits, so the box is too (a circle cropped off hair and hats);
- * one that is not quite 2:3 loses its bottom edge, never the head.
+ * A round headshot over the actor's initials, which show while it loads and when there is none.
+ * TMDb headshots are 2:3 portraits: anchored at the top, the circle keeps the whole head
+ * (hair, hats) and loses only the chin and shoulders.
  */
 @Composable
 private fun CastPhoto(name: String, url: String?) {
-    Box(
-        Modifier.width(72.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.08f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(castInitials(name), style = MaterialTheme.typography.titleMedium, color = Gray)
+    Box(Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+        Text(castInitials(name), style = MaterialTheme.typography.labelMedium, color = Gray)
         if (url != null) {
             AsyncImage(
                 model = url,

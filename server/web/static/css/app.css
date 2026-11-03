@@ -688,17 +688,16 @@ kbd {
   a.card:hover .art, a.card:focus-visible .art, .cw-card:hover .card .art, .cw-card:hover .cw-remove { transform: none; }
 }
 
-/* Cast: a headshot (initials when TMDb has none) beside the name over the
-   role, wrapping into as many columns as fit. TMDb headshots are 2:3
-   portraits, so the box is too: a circle cropped off hair, hats and chins.
-   Any photo that is not quite 2:3 loses its bottom edge, never the head. */
-.cast-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--s-4) var(--s-5); }
-.cast-member { display: flex; align-items: center; gap: var(--s-3); min-width: 0; }
-.cast-photo { flex: none; width: 64px; aspect-ratio: 2 / 3; border-radius: 8px; overflow: hidden; background: var(--surface-2); display: grid; place-items: center; color: var(--muted); font-weight: 600; font-size: 0.95rem; }
+/* Cast: small pills, a round headshot (initials when TMDb has none) beside
+   the name over the part. TMDb headshots are 2:3 portraits, so the circle is
+   anchored at the top: it keeps hair and hats and loses the chin. */
+.cast-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.cast-member { display: inline-flex; align-items: center; gap: 10px; max-width: 280px; min-width: 0; padding: 4px 16px 4px 4px; border-radius: 999px; background: var(--surface-2); }
+.cast-photo { flex: none; width: 36px; height: 36px; border-radius: 50%; overflow: hidden; background: var(--surface-3); display: grid; place-items: center; color: var(--muted); font-weight: 600; font-size: 0.75rem; }
 .cast-photo img { width: 100%; height: 100%; object-fit: cover; object-position: center top; }
-.cast-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.cast-name { font-weight: 500; overflow-wrap: anywhere; }
-.cast-role { color: var(--muted); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.cast-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.cast-name { font-weight: 500; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cast-role { color: var(--muted); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Version tools on a movie's page, for admins (views/versions.js). */
 .version-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
