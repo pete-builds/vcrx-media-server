@@ -144,8 +144,11 @@ fun Lifecycle.inFrontNow(): Boolean = currentState.isAtLeast(Lifecycle.State.RES
 private data class RailEntry(val key: String, val label: String, val icon: ImageVector)
 
 /** The rail's width at rest (icons only) and with focus in it (icons and labels). */
-private val RAIL_CLOSED = 100.dp
+private val RAIL_CLOSED = 72.dp
 private val RAIL_OPEN = 232.dp
+
+/** How dark the whole page goes while the rail is open, as a share of the rail's own wash. */
+private const val PAGE_DIM = 0.7f
 
 /** How far past the open rail its black wash fades to nothing. */
 private val RAIL_FADE = 200.dp
@@ -207,9 +210,12 @@ fun BrowseScreen() {
                 }
             }
         }
-        // The wash runs past the open rail and fades out, so it never ends on a hard
-        // edge through the hero's title and text.
+        // With the rail open, the whole page dims, posters included, so the eye
+        // goes to the rail (Pete, 2026-11-02: "the content on the right should dim
+        // more"). Behind the rail itself the wash is darker still, and it fades out
+        // past the rail so it never ends on a hard edge through the hero's text.
         if (railWash > 0f) {
+            Box(Modifier.fillMaxSize().background(Black.copy(alpha = railWash * PAGE_DIM)))
             Box(
                 Modifier
                     .width(RAIL_OPEN + RAIL_FADE)
@@ -227,7 +233,7 @@ fun BrowseScreen() {
             Modifier
                 .width(railWidth)
                 .fillMaxHeight()
-                .padding(start = 20.dp, top = 24.dp, end = 8.dp)
+                .padding(start = 8.dp, top = 24.dp, end = 8.dp)
                 .onFocusChanged { railHasFocus = it.hasFocus }
                 .focusRestorer(railRequester)
                 .focusGroup(),

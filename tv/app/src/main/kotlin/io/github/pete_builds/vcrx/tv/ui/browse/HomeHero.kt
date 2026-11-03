@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -41,6 +42,9 @@ import io.github.pete_builds.vcrx.tv.ui.theme.White
 /** How tall the hero stands; the rows scroll beneath it. */
 val HERO_HEIGHT = 250.dp
 
+/** Where the hero crops its backdrop: centred on the top third of the picture (-1 is the top edge, 0 the middle). */
+val HERO_ART_ALIGNMENT = BiasAlignment(horizontalBias = 0f, verticalBias = -0.67f)
+
 /**
  * The top of Home, as on the web and in Plex: a title's backdrop fading into
  * black, its name, details and plot, and Play and More info. It shows the
@@ -68,7 +72,16 @@ fun HomeHero(
         val hasArt = item.hasBackdrop || item.kind == "episode"
         val url = if (hasArt) api.artworkUrl(artId, "backdrop", 1280) else null
         if (url != null) {
-            AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            // Cropped around the picture's top third, not its middle: backdrops put
+            // faces high, and a centred crop of a 16:9 picture into the hero's strip
+            // cut off heads (Pete, 2026-11-02).
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                alignment = HERO_ART_ALIGNMENT,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Black, 0.45f to Black.copy(alpha = 0.75f), 1f to Color.Transparent)))
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Black)))
