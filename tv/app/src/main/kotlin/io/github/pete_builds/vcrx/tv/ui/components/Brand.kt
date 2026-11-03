@@ -267,6 +267,41 @@ fun FrameCard(
 }
 
 /**
+ * A small capsule that takes focus like the other cards: a faint fill at rest,
+ * the green border and a slight lift when focused. Cast members on Details.
+ */
+@Composable
+fun PillCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val shape = Shapes.Pill
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = ClickableSurfaceDefaults.shape(shape, shape, shape, shape, shape),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Surfaces.Wash,
+            contentColor = White,
+            focusedContainerColor = Surfaces.WashStrong,
+            focusedContentColor = White,
+            pressedContainerColor = Surfaces.WashStrong,
+            pressedContentColor = White,
+        ),
+        border = ClickableSurfaceDefaults.border(
+            border = Border.None,
+            focusedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape),
+            pressedBorder = Border(BorderStroke(FocusStroke, Accent), shape = shape),
+        ),
+        glow = ClickableSurfaceDefaults.glow(noGlow, noGlow, noGlow),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = Focus.RowScale),
+        tonalElevation = 0.dp,
+        content = content,
+    )
+}
+
+/**
  * A full-width row for menus, lists and dialogs. Focus tints it green with a
  * green ring and white text; a selected row reads white with a short green mark at its leading edge.
  * [restColor] is the label colour of rows that are neither: the rail rests gray.
