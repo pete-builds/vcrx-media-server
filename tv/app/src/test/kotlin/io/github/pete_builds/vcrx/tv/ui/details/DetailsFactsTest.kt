@@ -17,6 +17,7 @@ class DetailsFactsTest {
          "premiere_date": "1957-04-10", "directors": ["A Director"], "writers": ["A Writer", "Another Writer"],
          "studios": ["A Studio"], "countries": ["United States of America"],
          "cast": [{"name": "Lead Actor", "role": "Juror 8", "person_id": 39, "has_photo": true}, {"name": "Bit Part"}],
+         "crew": [{"name": "A Director", "role": "Director", "person_id": 40, "has_photo": true}],
          "ratings": {"imdb": 9.0, "tmdb": 8.576}, "rating_votes": {"imdb": 1010165},
          "versions": [{"id": 1, "file_name": "x.mkv", "container": "mkv", "size": 7505064572, "video_codec": "h264",
            "bit_depth": 8, "resolution": "1080p",
@@ -34,6 +35,18 @@ class DetailsFactsTest {
     )
 
     private fun List<Fact>.value(label: String) = firstOrNull { it.label == label }?.value
+
+    @Test
+    fun theHeaderSaysWhoDirectedIt() {
+        assertEquals("Directed by A Director", directedBy(movie))
+        assertNull(directedBy(movie.copy(directors = emptyList())))
+    }
+
+    @Test
+    fun castAndCrewListTheCastThenTheDirectors() {
+        assertEquals(listOf("Lead Actor", "Bit Part", "A Director"), castAndCrew(movie).map { it.name })
+        assertEquals("Director", castAndCrew(movie).last().role)
+    }
 
     @Test
     fun aFilmsDetailsReadLikeTheWebPage() {

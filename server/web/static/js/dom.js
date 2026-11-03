@@ -193,7 +193,7 @@ export function skeleton(path) {
   let body;
   if (path.startsWith("/play/")) body = [];
   else if (path === "/") body = [bar("sk-feature"), bar("sk-heading"), posters(8), bar("sk-heading"), posters(8)];
-  else if (path.startsWith("/item/")) body = [h("div", { class: "sk-hero" }, bar("sk-hero-poster"), h("div", { class: "sk-lines" }, bar("sk-title"), bar("sk-line"), bar("sk-line short"), bar("sk-button")))];
+  else if (path.startsWith("/item/")) body = [h("div", { class: "sk-hero" }, h("div", { class: "sk-lines" }, bar("sk-title"), bar("sk-line"), bar("sk-line short"), bar("sk-button")))];
   else if (/^\/(library|collection|search|row)/.test(path)) body = [bar("sk-title"), h("div", { class: "sk-grid" }, Array.from({ length: 18 }, () => bar("sk-poster")))];
   else body = [bar("sk-title"), bar("sk-line"), bar("sk-line"), bar("sk-line short")];
   return h("div", { class: "skeleton" + (path === "/" || path.startsWith("/item/") ? " sk-over-hero" : ""), "aria-busy": "true" },

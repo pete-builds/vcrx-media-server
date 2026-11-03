@@ -90,7 +90,7 @@ func newFake() *fakeTMDb {
 			"production_companies":[{"name":"Harbor Light Films"}],"production_countries":[{"name":"Iceland"}],
 			"belongs_to_collection":{"id":555},
 			"credits":{"cast":[{"id":11,"name":"Ada Fenwick","character":"The Keeper","order":0,"profile_path":"/ada.jpg"},{"id":12,"name":"Rui Sato","character":"Ferryman","order":1}],
-			"crew":[{"name":"Mira Holt","job":"Director","department":"Directing"},{"name":"Jon Vale","job":"Screenplay","department":"Writing"}]},
+			"crew":[{"id":31,"name":"Mira Holt","job":"Director","department":"Directing","profile_path":"/mira.jpg"},{"id":32,"name":"Jon Vale","job":"Screenplay","department":"Writing","profile_path":"/jon.jpg"}]},
 			"release_dates":{"results":[{"iso_3166_1":"US","release_dates":[{"certification":""},{"certification":"PG-13"}]}]}}`,
 		"/movie/200":               `{"id":200,"title":"Night Ferry","overview":"Crossing at midnight.","poster_path":"/nf.jpg","vote_count":0}`,
 		"/search/tv?Glass Orchard": `{"results":[{"id":300,"name":"Glass Orchard","first_air_date":"2016-09-01"}]}`,
@@ -124,7 +124,8 @@ func newFake() *fakeTMDb {
 				"roles":[{"character":"Young Ivo","episode_count":1},{"character":"Ivo","episode_count":6}]},
 			{"id":11,"name":"Ada Fenwick","profile_path":"/ada.jpg","order":2,"total_episode_count":1,"roles":[{"character":"","episode_count":1}]}]}`,
 		"/tv/300/season/1": `{"season_number":1,"overview":"The first harvest.","poster_path":"/gos1.jpg","episodes":[
-			{"episode_number":1,"name":"Seedlings","overview":"It begins.","air_date":"2016-09-01","still_path":"/e1.jpg","vote_average":7.9,"vote_count":10},
+			{"episode_number":1,"name":"Seedlings","overview":"It begins.","air_date":"2016-09-01","still_path":"/e1.jpg","vote_average":7.9,"vote_count":10,
+				"crew":[{"id":33,"name":"Odile Brand","job":"Director","department":"Directing","profile_path":"/odile.jpg"},{"id":34,"name":"Sam Reed","job":"Writer","department":"Writing"}]},
 			{"episode_number":2,"name":"First Frost","overview":"It gets cold.","air_date":"2016-09-08","still_path":"/e2.jpg"},
 			{"episode_number":3,"name":"Thaw","overview":"It warms.","air_date":"2016-09-15","still_path":"/e3.jpg"}]}`,
 	}}
@@ -559,6 +560,42 @@ func TestCastAcrossSeasonsWithPhotos(t *testing.T) {
 	}
 	if _, err := os.Stat(old); !os.IsNotExist(err) {
 		t.Errorf("old photo left behind: %v", err)
+	}
+}
+
+// Directors carry their TMDb person and headshot like actors, a film's from
+// its credits and an episode's from its season's crew; writers stay names.
+func TestDirectorsWithPhotos(t *testing.T) {
+	v := setup(t)
+	movies, shows := v.library("movie"), v.library("show")
+	movie := v.item(movies, "movie", nil, "k", "Lantern Keeper", 2011, nil, nil)
+	show := v.item(shows, "show", nil, "glass orchard", "Glass Orchard", nil, nil, nil)
+	s1 := v.item(shows, "season", show, "1", "Season 1", nil, 1, nil)
+	e1 := v.item(shows, "episode", s1, "1", "Episode 1", nil, 1, 1)
+	v.run()
+
+	tags := func(id int64, kind string) string {
+		t.Helper()
+		return v.str(`SELECT IFNULL(group_concat(value || '/' || IFNULL(person_id, ''), ', '), '')
+			FROM (SELECT * FROM item_tags WHERE item_id = ? AND kind = ? ORDER BY position)`, id, kind)
+	}
+	if got, want := tags(movie, "director"), "Mira Holt/31"; got != want {
+		t.Errorf("movie directors = %q, want %q", got, want)
+	}
+	if got, want := tags(movie, "writer"), "Jon Vale/"; got != want {
+		t.Errorf("movie writers = %q, want %q (no person: writers have no photo)", got, want)
+	}
+	if got, want := tags(e1, "director"), "Odile Brand/33"; got != want {
+		t.Errorf("episode directors = %q, want %q", got, want)
+	}
+	for _, id := range []int64{31, 33} {
+		file := v.str(`SELECT IFNULL(cache_path, '') FROM people WHERE tmdb_id = ?`, id)
+		if _, err := os.Stat(file); file == "" || err != nil {
+			t.Errorf("director %d photo at %q: %v", id, file, err)
+		}
+	}
+	if n := v.f.fetched["/img/w185/jon.jpg"]; n != 0 {
+		t.Errorf("writer photo downloaded %d times, want 0", n)
 	}
 }
 

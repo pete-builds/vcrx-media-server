@@ -1416,6 +1416,10 @@ func TestCastPhoto(t *testing.T) {
 	exec(`INSERT INTO item_tags (item_id, kind, value, position, role, person_id) VALUES
 		(?, 'actor', 'Series Regular', 0, 'Neighbour', 7), (?, 'actor', 'No Photo', 0, NULL, 8), (?, 'actor', 'Escaper', 1, NULL, 9),
 		(?, 'actor', 'From An NFO', 2, NULL, NULL)`, f.showID, f.movieID, f.movieID, f.movieID)
+	// A director with a photo, and one an NFO named, who has none.
+	exec(`INSERT INTO people (tmdb_id, name, profile_path, cache_path, updated_at) VALUES (10, 'Film Director', '/face.jpg', ?, 0)`, photo)
+	exec(`INSERT INTO item_tags (item_id, kind, value, position, role, person_id) VALUES
+		(?, 'director', 'Film Director', 0, NULL, 10), (?, 'director', 'NFO Director', 1, NULL, NULL)`, f.movieID, f.movieID)
 
 	get := func(item, person int64, tok string) int {
 		t.Helper()
@@ -1436,6 +1440,8 @@ func TestCastPhoto(t *testing.T) {
 		{"no photo", f.movieID, 8, f.adminTok, 404},
 		{"a path outside the metadata folder", f.movieID, 9, f.adminTok, 404},
 		{"no such person", f.movieID, 99, f.adminTok, 404},
+		{"the film's director", f.movieID, 10, f.adminTok, 200},
+		{"a director of another title", f.showID, 10, f.adminTok, 404},
 	} {
 		if got := get(c.item, c.person, c.tok); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
@@ -1470,6 +1476,27 @@ func TestCastPhoto(t *testing.T) {
 	}
 	if m := movie["From An NFO"]; m.PersonID != nil || m.HasPhoto {
 		t.Errorf("NFO actor: %+v", m)
+	}
+	if _, ok := movie["Film Director"]; ok {
+		t.Error("a director is listed in the cast")
+	}
+
+	// Directors come as crew, in order, each with the part "Director".
+	var d struct {
+		Crew []struct {
+			member
+			Role *string
+		}
+	}
+	f.do("GET", fmt.Sprintf("/api/v1/items/%d", f.movieID), f.adminTok, nil).json(t, &d)
+	if len(d.Crew) != 2 {
+		t.Fatalf("crew = %+v, want 2 directors", d.Crew)
+	}
+	if c := d.Crew[0]; c.Name != "Film Director" || c.PersonID == nil || *c.PersonID != 10 || !c.HasPhoto || c.Role == nil || *c.Role != "Director" {
+		t.Errorf("first director: %+v", c)
+	}
+	if c := d.Crew[1]; c.Name != "NFO Director" || c.PersonID != nil || c.HasPhoto {
+		t.Errorf("NFO director: %+v", c)
 	}
 }
 

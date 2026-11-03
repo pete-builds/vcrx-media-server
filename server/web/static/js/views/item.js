@@ -1,11 +1,12 @@
 import { api, artUrl } from "../api.js";
-import { h, icon, runtime, clock, size, bitrate, episodeCode, toast, fadeImg, placeholderArt, cardArt, when, hours } from "../dom.js";
+import { h, icon, runtime, clock, size, bitrate, episodeCode, toast, fadeImg, cardArt, when, hours } from "../dom.js";
 import { go, state } from "../app.js";
 import { versionTools } from "./versions.js";
 import { markerEditor } from "./markers.js";
 import { extraActions, extrasSection } from "./extras.js";
 import { downloadedSubtitles } from "./subtitle-admin.js";
 import { dueDate, returnButton } from "./lend.js";
+import { applyWash } from "../wash.js";
 
 // The details page for a movie, show, season or episode.
 export async function itemView({ match, params }) {
@@ -25,36 +26,34 @@ export async function itemView({ match, params }) {
   const markers = state.me && state.me.is_admin && item.kind === "episode" ? markerEditor(item) : null;
   // What everyone came for first (episodes, extras, cast, the facts), then the
   // admin tools. Fix match stays at the top when a link opened it.
-  const el = h("div", {}, hero(item), fixOpen ? fix : null, children ? childrenSection(item, children.items || []) : null,
+  // The wash sits fixed behind the whole page, so the backdrop's colours run
+  // down past the hero the way they do on Google TV.
+  const wash = h("div", { class: "page-wash", "aria-hidden": "true" });
+  const el = h("div", { class: "item-page" }, wash, hero(item, wash), fixOpen ? fix : null, children ? childrenSection(item, children.items || []) : null,
     extrasSection(item), castSection(item), playable ? techFacts(item) : null,
     subs, tools, markers, fixOpen ? null : fix, history ? historySection(item, history) : null);
   return { el, title: item.kind === "episode" ? `${item.show_title || ""} ${episodeCode(item)}`.trim() : item.title, hero: true };
 }
 
-// hero is the top of the page: the backdrop across the full width, under the
-// top bar, with the poster, the facts that decide what to watch, and Play.
-function hero(item) {
+// hero is the top of the page, as on Google TV: no poster, the backdrop on the
+// right fading into a wash of its own colours, and on the left the facts that
+// decide what to watch, who directed it, and Play.
+function hero(item, wash) {
   const backdropId = item.has_backdrop ? item.id : item.kind !== "show" && item.show_id ? item.show_id : null;
   const backdrop = h("div", { class: "backdrop" });
-  if (item.kind === "episode" && item.has_thumb) backdrop.append(fadeImg(artUrl(item.id, "thumb", 1280), { lazy: false }));
+  let img = null;
+  if (item.kind === "episode" && item.has_thumb) img = fadeImg(artUrl(item.id, "thumb", 1280), { lazy: false });
   else if (backdropId) {
-    backdrop.append(fadeImg(artUrl(backdropId, "backdrop", 1920), { lazy: false,
-      srcset: `${artUrl(backdropId, "backdrop", 960)} 960w, ${artUrl(backdropId, "backdrop", 1920)} 1920w`, sizes: "100vw" }));
+    img = fadeImg(artUrl(backdropId, "backdrop", 1920), { lazy: false,
+      srcset: `${artUrl(backdropId, "backdrop", 960)} 960w, ${artUrl(backdropId, "backdrop", 1920)} 1920w`, sizes: "70vw" });
   } else if (item.has_poster) {
     // No backdrop: the poster, blurred into a wash of its colours.
     backdrop.classList.add("from-poster");
-    backdrop.append(fadeImg(artUrl(item.id, "poster", 320) + "&overlays=0", { lazy: false }));
+    img = fadeImg(artUrl(item.id, "poster", 320) + "&overlays=0", { lazy: false });
   }
-
-  // Episodes show their still in the poster's place, when there is one.
-  let poster = null;
-  if (item.kind !== "episode" || item.has_thumb) {
-    const landscape = item.kind === "episode";
-    const art = h("div", { class: "art" });
-    if (landscape) art.append(fadeImg(artUrl(item.id, "thumb", 640), { lazy: false, onFail: () => art.append(placeholderArt(episodeCode(item))) }));
-    else if (item.has_poster) art.append(fadeImg(artUrl(item.id, "poster", 480), { lazy: false, onFail: () => art.append(placeholderArt(item.title)) }));
-    else art.append(placeholderArt(item.title));
-    poster = h("div", { class: "poster card" + (landscape ? " landscape" : "") }, art);
+  if (img) {
+    backdrop.append(img);
+    img.addEventListener("load", () => applyWash(wash, img), { once: true });
   }
 
   const crumbs = [];
@@ -64,7 +63,7 @@ function hero(item) {
     ? `Season ${item.season_number} · Episode ${item.episode_number}${item.episode_number_end ? `-${item.episode_number_end}` : ""}` : "";
 
   return h("section", { class: "hero", "data-kind": item.kind }, backdrop,
-    h("div", { class: "inner" }, poster,
+    h("div", { class: "inner" },
       h("div", { class: "info" },
         crumbs.length ? h("nav", { class: "crumbs", "aria-label": "Breadcrumb" }, crumbs.flatMap((c, i) => (i ? [h("span", { "aria-hidden": "true" }, " › "), c] : [c]))) : null,
         eyebrow ? h("p", { class: "eyebrow" }, eyebrow) : null,
@@ -73,6 +72,7 @@ function hero(item) {
         (item.genres || []).length ? h("p", { class: "genres" }, item.genres.slice(0, 4).join(" · ")) : null,
         item.tagline ? h("p", { class: "tagline" }, item.tagline) : null,
         item.overview ? h("p", { class: "overview" }, item.overview) : null,
+        (item.directors || []).length ? h("p", { class: "directed" }, `Directed by ${item.directors.join(", ")}`) : null,
         (item.collections || []).length ? h("p", { class: "muted" }, "Part of ",
           item.collections.flatMap((c, i) => [i ? ", " : "", h("a", { class: "link", href: `#/collection/${c.id}` }, c.name)])) : null,
         resumeBar(item),
@@ -221,11 +221,12 @@ function trackName(t) {
   return parts.filter(Boolean).join(" · ");
 }
 
-// The cast in billing order: a headshot, then the name over the part played.
+// The cast in billing order, then the directors: as on Google TV, each a big
+// round photo with the name under it and the part under that.
 function castSection(item) {
-  const cast = item.cast || [];
+  const cast = [...(item.cast || []), ...(item.crew || [])];
   if (!cast.length) return null;
-  return h("section", { class: "section cast" }, h("h2", {}, "Cast"),
+  return h("section", { class: "section cast" }, h("h2", {}, "Cast & Crew"),
     h("ul", { class: "cast-list" }, cast.map((c) => h("li", { class: "cast-member" },
       castPhoto(item, c),
       h("div", { class: "cast-text" },

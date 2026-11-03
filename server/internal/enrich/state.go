@@ -77,7 +77,7 @@ func writePlan(ctx context.Context, tx *sql.Tx, p *plan, now int64) error {
 			updated_at = excluded.updated_at`, pp.id, pp.name, prof, file, now); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE item_tags SET person_id = ? WHERE item_id = ? AND kind = 'actor' AND value = ?`,
+		if _, err := tx.ExecContext(ctx, `UPDATE item_tags SET person_id = ? WHERE item_id = ? AND kind IN ('actor', 'director') AND value = ?`,
 			pp.id, p.c.id, pp.name); err != nil {
 			return err
 		}

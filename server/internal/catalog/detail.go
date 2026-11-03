@@ -18,7 +18,7 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 		return ItemDetail{}, ErrNotFound
 	}
 	d := ItemDetail{ItemSummary: sums[0], Genres: []string{}, Directors: []string{}, Writers: []string{}, Studios: []string{}, Countries: []string{},
-		Cast: []CastMember{}, Ratings: map[string]float64{}, RatingVotes: map[string]int64{}, Versions: []Version{}}
+		Cast: []CastMember{}, Crew: []CastMember{}, Ratings: map[string]float64{}, RatingVotes: map[string]int64{}, Versions: []Version{}}
 	var overview, tagline, rating, premiere sql.NullString
 	if err := c.DB.QueryRowContext(ctx, `SELECT overview, tagline, content_rating, premiere_date FROM items WHERE id = ?`, id).
 		Scan(&overview, &tagline, &rating, &premiere); err != nil {
@@ -62,21 +62,35 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 	if err != nil {
 		return d, err
 	}
-	// Cast in billing order: an episode's own (guest) cast first, then its show's.
-	rows, err = c.DB.QueryContext(ctx, `SELECT t.value, t.role, t.person_id, p.cache_path IS NOT NULL
+	// Cast in billing order, then the directors as crew: an episode's own
+	// (guest cast, its director) first, then its show's.
+	rows, err = c.DB.QueryContext(ctx, `SELECT t.kind, t.value, t.role, t.person_id, p.cache_path IS NOT NULL
 		FROM item_tags t LEFT JOIN people p ON p.tmdb_id = t.person_id
-		WHERE t.item_id IN (?, ?) AND t.kind = 'actor'
+		WHERE t.item_id IN (?, ?) AND t.kind IN ('actor', 'director')
 		ORDER BY t.item_id = ? DESC, t.position, t.value`, id, tagOwner, id)
 	if err != nil {
 		return d, err
 	}
 	err = each(rows, func() error {
-		var name string
+		var kind, name string
 		var role sql.NullString
 		var person sql.NullInt64
 		var photo bool
-		if err := rows.Scan(&name, &role, &person, &photo); err != nil {
+		if err := rows.Scan(&kind, &name, &role, &person, &photo); err != nil {
 			return err
+		}
+		if kind == "director" {
+			if seen["crew\x00"+name] || len(d.Crew) >= maxCrew {
+				return nil
+			}
+			seen["crew\x00"+name] = true
+			r := "Director"
+			m := CastMember{Name: name, Role: &r, HasPhoto: photo}
+			if person.Valid {
+				m.PersonID = &person.Int64
+			}
+			d.Crew = append(d.Crew, m)
+			return nil
 		}
 		if seen["actor\x00"+name] || len(d.Cast) >= maxCast {
 			return nil
@@ -276,6 +290,9 @@ func pickNext(eps []episodeState) int64 {
 // maxCast is how many actors a details page lists.
 const maxCast = 20
 
+// maxCrew is how many directors the crew lists.
+const maxCrew = 5
+
 // loan is the item's loan while it is out, for its detail page.
 func (c *Catalog) loan(ctx context.Context, pol policy.Policy, id int64) (*LoanInfo, error) {
 	var l LoanInfo
@@ -296,7 +313,7 @@ func (c *Catalog) loan(ctx context.Context, pol policy.Policy, id int64) (*LoanI
 	return &l, nil
 }
 
-// CastPhoto is the downloaded headshot of an actor credited on item or on its
+// CastPhoto is the downloaded headshot of an actor or director credited on item or on its
 // show, or ErrNotFound. Callers check first that the caller may see item, so
 // a photo answers only for the cast of a title the caller can open.
 func (c *Catalog) CastPhoto(ctx context.Context, item int64, show *int64, personID int64) (string, error) {
@@ -306,7 +323,7 @@ func (c *Catalog) CastPhoto(ctx context.Context, item int64, show *int64, person
 	}
 	var p sql.NullString
 	err := c.DB.QueryRowContext(ctx, `SELECT p.cache_path FROM people p
-		WHERE p.tmdb_id = ? AND EXISTS (SELECT 1 FROM item_tags t WHERE t.person_id = p.tmdb_id AND t.kind = 'actor' AND t.item_id IN (?, ?))`,
+		WHERE p.tmdb_id = ? AND EXISTS (SELECT 1 FROM item_tags t WHERE t.person_id = p.tmdb_id AND t.kind IN ('actor', 'director') AND t.item_id IN (?, ?))`,
 		personID, item, owner).Scan(&p)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !p.Valid) {
 		return "", ErrNotFound

@@ -195,9 +195,11 @@ type AggregateCast struct {
 }
 
 type Crew struct {
-	Name       string `json:"name"`
-	Job        string `json:"job"`
-	Department string `json:"department"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Job         string `json:"job"`
+	Department  string `json:"department"`
+	ProfilePath string `json:"profile_path"`
 }
 
 type Credits struct {
@@ -299,6 +301,7 @@ type Episode struct {
 	StillPath     string  `json:"still_path"`
 	VoteAverage   float64 `json:"vote_average"`
 	VoteCount     int     `json:"vote_count"`
+	Crew          []Crew  `json:"crew"`
 }
 
 type Season struct {
