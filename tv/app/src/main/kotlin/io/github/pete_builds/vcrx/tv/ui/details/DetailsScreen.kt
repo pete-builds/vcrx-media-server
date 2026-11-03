@@ -21,8 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -425,13 +424,26 @@ private fun CastRow(item: Item) {
     }
 }
 
-/** A round headshot over the actor's initials, which show while it loads and when there is none. */
+/**
+ * A headshot over the actor's initials, which show while it loads and when there is none.
+ * TMDb headshots are 2:3 portraits, so the box is too (a circle cropped off hair and hats);
+ * one that is not quite 2:3 loses its bottom edge, never the head.
+ */
 @Composable
 private fun CastPhoto(name: String, url: String?) {
-    Box(Modifier.size(64.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+    Box(
+        Modifier.width(72.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.08f)),
+        contentAlignment = Alignment.Center,
+    ) {
         Text(castInitials(name), style = MaterialTheme.typography.titleMedium, color = Gray)
         if (url != null) {
-            AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
