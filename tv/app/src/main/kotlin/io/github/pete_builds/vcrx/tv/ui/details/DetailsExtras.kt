@@ -26,6 +26,8 @@ import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -94,14 +96,21 @@ private fun openView(context: Context, uri: String): Boolean =
         false
     }
 
-/** The Extras row: each local extra, which plays in the app's player. */
+/**
+ * The Extras row: each local extra, which plays in the app's player. It runs the
+ * screen's full width, [edge] in from each side, so a focused card is never cut off.
+ */
 @Composable
-fun ExtrasRow(item: Item) {
+fun ExtrasRow(item: Item, edge: Dp = 0.dp) {
     if (item.extras.isEmpty()) return
     val actions = LocalAppActions.current
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("Extras")
-        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle("Extras", modifier = Modifier.padding(start = edge))
+        LazyRow(
+            Modifier.focusRestorer(),
+            contentPadding = PaddingValues(horizontal = edge, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             items(item.extras, key = { it.id }) { extra ->
                 FrameCard(onClick = { actions.playExtra(item.id, extra.id, "${item.title}  ${extra.title}") }, quiet = true, modifier = Modifier.width(300.dp)) {
                     Column(

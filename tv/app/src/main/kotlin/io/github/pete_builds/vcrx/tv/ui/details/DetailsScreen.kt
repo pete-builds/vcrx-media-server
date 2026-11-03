@@ -5,6 +5,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import io.github.pete_builds.vcrx.tv.ui.theme.Accent
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -53,6 +58,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import io.github.pete_builds.vcrx.tv.ui.components.revealWithMargin
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -83,7 +90,6 @@ import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
 import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
 import io.github.pete_builds.vcrx.tv.ui.components.PillCard
 import io.github.pete_builds.vcrx.tv.ui.components.Reveal
-import io.github.pete_builds.vcrx.tv.ui.components.RevealOnly
 import io.github.pete_builds.vcrx.tv.ui.components.SectionTitle
 import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
 import io.github.pete_builds.vcrx.tv.ui.graphViewModel
@@ -156,6 +162,19 @@ class DetailsViewModel(private val graph: AppGraph, private val itemId: Long) : 
         }
     }
 
+    /** Remove from Continue Watching: forgets the resume point. */
+    fun forgetProgress(item: Item) {
+        actionError = null
+        viewModelScope.launch {
+            try {
+                graph.api.clearProgress(item.id)
+                load(quiet = true)
+            } catch (e: ApiException) {
+                actionError = e.message
+            }
+        }
+    }
+
     fun toggleWatched(item: Item) {
         actionError = null
         viewModelScope.launch {
@@ -183,7 +202,10 @@ fun DetailsScreen(itemId: Long) {
     // back to the rows inside it.
     val rowScroll = LocalBringIntoViewSpec.current
     LoadStateContent(vm.state, onRetry = { vm.load() }) { item ->
-        CompositionLocalProvider(LocalBringIntoViewSpec provides RevealOnly) { Details(item, vm, rowScroll) }
+        // A focused row stops a page margin short of the screen's bottom edge.
+        val density = LocalDensity.current
+        val reveal = remember(density) { revealWithMargin(with(density) { REVEAL_MARGIN.toPx() }) }
+        CompositionLocalProvider(LocalBringIntoViewSpec provides reveal) { Details(item, vm, rowScroll) }
     }
 }
 
@@ -206,7 +228,14 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
     val scrolled by remember { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 120 } }
     Box(Modifier.fillMaxSize()) {
         Backdrop(item, dimmed = scrolled)
-        LazyColumn(state = list, contentPadding = PaddingValues(48.dp), verticalArrangement = Arrangement.spacedBy(36.dp)) {
+        // Only top and bottom padding on the list: the rows inside run the full
+        // width with their own side padding, so a focused pill or card has room
+        // to grow instead of being cut off at the list's inner edge.
+        LazyColumn(
+            state = list,
+            contentPadding = PaddingValues(top = 48.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(36.dp),
+        ) {
             item(key = "header") {
                 Row(
                     // Coming back up from the seasons or the cast: the whole header,
@@ -214,7 +243,7 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
                     // the focused button, which would cancel a scroll launched beside
                     // it; so ask for the header through the same reveal, wait for it
                     // to finish, then settle the list at its top.
-                    Modifier.bringIntoViewRequester(headerReveal).padding(top = 24.dp).onFocusChanged { state ->
+                    Modifier.bringIntoViewRequester(headerReveal).padding(top = 24.dp).padding(horizontal = PAGE_EDGE).onFocusChanged { state ->
                         if (state.hasFocus && headerFits(list)) {
                             scope.launch {
                                 headerReveal.bringIntoView()
@@ -232,33 +261,49 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
                             Artwork(item.id, "poster", item.hasPoster, item.title, 480)
                         }
                     }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Label(metaLine(item), style = MaterialTheme.typography.labelMedium, color = Gray)
+                    // In the web page's order: where it sits, the title, the facts in a
+                    // line, genres, tagline, plot, its series, how far in, then the buttons.
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (episode && item.showTitle != null) {
-                            Label("${item.showTitle}  ${episodeCode(item).orEmpty()}", style = MaterialTheme.typography.labelLarge)
+                            Label(item.showTitle, style = MaterialTheme.typography.labelLarge, color = Gray)
+                        }
+                        if (episode && item.episodeNumber != null) {
+                            val end = item.episodeNumberEnd?.let { "-$it" }.orEmpty()
+                            Label("Season ${item.seasonNumber} · Episode ${item.episodeNumber}$end", style = MaterialTheme.typography.labelMedium, color = Accent, caps = true)
                         }
                         Text(item.title, style = MaterialTheme.typography.displaySmall, color = White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        HeroChipRow(heroChips(item))
+                        if (item.genres.isNotEmpty()) Label(item.genres.take(4).joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = Gray)
                         item.tagline?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = Gray) }
                         item.overview?.takeIf { it.isNotBlank() }?.let {
                             Text(it, style = MaterialTheme.typography.bodyLarge, maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 760.dp))
                         }
-                        if (item.genres.isNotEmpty()) Label(item.genres.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = Gray)
-                        if (item.directors.isNotEmpty()) {
-                            Label("Directed by ${item.directors.joinToString(", ")}", style = MaterialTheme.typography.labelSmall, color = Gray)
-                        }
-                        // Wraps: Resume, Play from start, Mark watched and Trailer do not fit on one line.
+                        resumeBar(item)?.let { ResumeBarView(it) }
+                        // Wraps: Resume, Play from the start, Version, Trailer and the icons do not fit on one line.
                         FlowRow(
-                            Modifier.padding(top = 12.dp).focusRestorer(primaryFocus).focusGroup(),
+                            Modifier.padding(top = 8.dp).focusRestorer(primaryFocus).focusGroup(),
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
-                            if (isContainer) ShowButtons(item, vm, primaryFocus) else PlayButtons(item, vm, primaryFocus)
-                            TrailerButton(item)
-                        }
-                        // On its own row: four buttons do not fit beside the poster.
-                        if (!isContainer && item.versions.size > 1) {
-                            val chosen = item.versions.firstOrNull { it.id == vm.versionId } ?: item.versions.first()
-                            BrandButton("Version: ${versionLabel(chosen)}", onClick = { pickVersion = true })
+                            if (isContainer) {
+                                ShowButtons(item, vm, primaryFocus)
+                                TrailerButton(item)
+                            } else {
+                                PlayButtons(item, vm, primaryFocus)
+                                if (item.versions.size > 1) {
+                                    val chosen = item.versions.firstOrNull { it.id == vm.versionId } ?: item.versions.first()
+                                    BrandButton("Version: ${versionLabel(chosen)}", onClick = { pickVersion = true })
+                                }
+                                TrailerButton(item)
+                                WatchedButton(item.watch?.played == true) { vm.toggleWatched(item) }
+                                if (resumeBar(item) != null) {
+                                    BrandIconButton(
+                                        Icons.Filled.Close,
+                                        contentDescription = "Remove from Continue Watching",
+                                        onClick = { vm.forgetProgress(item) },
+                                    )
+                                }
+                            }
                         }
                         // A film series: open its other titles.
                         if (item.collections.isNotEmpty()) {
@@ -273,18 +318,7 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
                     }
                 }
             }
-            if (item.extras.isNotEmpty()) {
-                item(key = "extras") { keepRowScroll { ExtrasRow(item) } }
-            }
-            // The panel sits above the cast row: the D-pad cannot stop on text, so
-            // moving down to the cast scrolls the panel into view on the way.
-            if (!isContainer) {
-                val facts = detailFacts(item, item.versions.firstOrNull { it.id == vm.versionId } ?: item.versions.firstOrNull())
-                if (facts.about.isNotEmpty() || facts.media.isNotEmpty()) {
-                    item(key = "facts") { FactsPanel(facts) }
-                }
-                if (item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
-            }
+            // The rest in the web page's order: seasons and episodes, extras, cast, then Details.
             if (isContainer && item.kind == "show" && vm.seasons.isNotEmpty()) {
                 item(key = "seasons") {
                     // Down to the seasons lifts them to the top, so the episodes come
@@ -302,9 +336,14 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
                 }
             }
             if (isContainer) {
-                item(key = "episodes") { EpisodeList(vm) }
-                if (item.kind == "show" && item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
+                item(key = "episodes") { Box(Modifier.padding(horizontal = PAGE_EDGE)) { EpisodeList(vm) } }
             }
+            if (item.extras.isNotEmpty()) {
+                item(key = "extras") { keepRowScroll { ExtrasRow(item, PAGE_EDGE) } }
+            }
+            if (item.cast.isNotEmpty()) item(key = "cast") { keepRowScroll { CastRow(item) } }
+            val facts = webFacts(item)
+            if (facts.isNotEmpty()) item(key = "facts") { FactsList(facts) }
         }
     }
 
@@ -326,20 +365,20 @@ private fun PlayButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusReq
     if (resumeMs != null && vm.resumeMode == ResumeMode.StartOver) {
         // Settings say start over: that is the first button, and resuming is one step right.
         BrandButton(
-            "Play from start",
+            "Play from the start",
             onClick = { actions.play(item.id, playTitle(item), vm.versionId, fromStart = true) },
             primary = true,
             modifier = Modifier.focusRequester(primaryFocus),
         )
-        BrandButton("Resume ${formatTime(resumeMs)}", onClick = { actions.play(item.id, playTitle(item), vm.versionId, resume = true) })
+        BrandButton("Resume from ${formatTime(resumeMs)}", onClick = { actions.play(item.id, playTitle(item), vm.versionId, resume = true) })
     } else if (resumeMs != null) {
         BrandButton(
-            "Resume ${formatTime(resumeMs)}",
+            "Resume from ${formatTime(resumeMs)}",
             onClick = { actions.play(item.id, playTitle(item), vm.versionId, resume = true) },
             primary = true,
             modifier = Modifier.focusRequester(primaryFocus),
         )
-        BrandButton("Play from start", onClick = { actions.play(item.id, playTitle(item), vm.versionId, fromStart = true) })
+        BrandButton("Play from the start", onClick = { actions.play(item.id, playTitle(item), vm.versionId, fromStart = true) })
     } else {
         BrandButton(
             "Play",
@@ -348,7 +387,6 @@ private fun PlayButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusReq
             modifier = Modifier.focusRequester(primaryFocus),
         )
     }
-    WatchedButton(watch?.played == true) { vm.toggleWatched(item) }
 }
 
 @Composable
@@ -375,25 +413,68 @@ private fun ShowButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusReq
     }
 }
 
-/** Details: about the title on the left, the file on the right. */
+/** How far the page's text and rows sit in from the screen's edges. */
+private val PAGE_EDGE = 48.dp
+
+/** The space a focused row keeps from the top and bottom of the screen. */
+private val REVEAL_MARGIN = 48.dp
+
+/** The hero's facts in a line, as the web's chips: plain text, boxed facts, then star scores. */
 @Composable
-private fun FactsPanel(facts: Facts) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("Details")
-        Row(horizontalArrangement = Arrangement.spacedBy(48.dp)) {
-            FactColumn(facts.about, Modifier.weight(1f))
-            FactColumn(facts.media, Modifier.weight(1f))
+private fun HeroChipRow(chips: List<HeroChip>) {
+    if (chips.isEmpty()) return
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        chips.forEach { c ->
+            when (c.style) {
+                ChipStyle.Plain -> Label(c.text, Modifier.align(Alignment.CenterVertically), style = MaterialTheme.typography.labelLarge, color = Gray)
+                ChipStyle.Boxed -> Label(
+                    c.text,
+                    Modifier.align(Alignment.CenterVertically).border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Gray,
+                )
+                ChipStyle.Score -> Row(Modifier.align(Alignment.CenterVertically), verticalAlignment = Alignment.CenterVertically) {
+                    Text("★", style = MaterialTheme.typography.labelLarge, color = ScoreStar)
+                    Text(" ${c.text}", style = MaterialTheme.typography.labelLarge, color = White)
+                    Text(" ${c.source.orEmpty()}", style = MaterialTheme.typography.labelSmall, color = Gray)
+                }
+            }
         }
     }
 }
 
+/** The IMDb star's yellow, as on the web. */
+private val ScoreStar = Color(0xFFF5C518)
+
+/** How far in, above the buttons: a thin bar and the time left, as on the web. */
 @Composable
-private fun FactColumn(facts: List<Fact>, modifier: Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        facts.forEach { f ->
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Label(f.label, Modifier.width(150.dp), style = MaterialTheme.typography.labelSmall, color = Gray)
-                Text(f.value, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
+private fun ResumeBarView(bar: ResumeBar) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(260.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.22f))) {
+            Box(Modifier.fillMaxWidth(bar.fraction).fillMaxSize().background(Accent))
+        }
+        Label(bar.left, style = MaterialTheme.typography.labelMedium, color = Gray)
+    }
+}
+
+/**
+ * Details, row for row as the web's: a label and its value, one per line. It
+ * takes focus, quietly, so the D-pad can reach it below the cast; text alone
+ * cannot stop focus, and it would stay below the screen.
+ */
+@Composable
+private fun FactsList(facts: List<Fact>) {
+    Column(Modifier.padding(horizontal = PAGE_EDGE - 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionTitle("Details", modifier = Modifier.padding(start = 12.dp))
+        FrameCard(onClick = {}, quiet = true, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                facts.forEach { f ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                        Label(f.label, Modifier.width(180.dp), style = MaterialTheme.typography.labelMedium, color = Gray)
+                        Text(f.value, style = MaterialTheme.typography.bodyMedium, color = White)
+                    }
+                }
             }
         }
     }
@@ -404,8 +485,12 @@ private fun FactColumn(facts: List<Fact>, modifier: Modifier) {
 private fun CastRow(item: Item) {
     val api = LocalContext.current.graph.api
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("Cast")
-        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle("Cast", modifier = Modifier.padding(start = PAGE_EDGE))
+        LazyRow(
+            Modifier.focusRestorer(),
+            contentPadding = PaddingValues(horizontal = PAGE_EDGE, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             items(item.cast, key = { it.name }) { member ->
                 PillCard(onClick = {}, modifier = Modifier.widthIn(max = 300.dp)) {
                     Row(
@@ -456,8 +541,12 @@ internal fun castInitials(name: String): String =
 @Composable
 private fun SeasonRow(vm: DetailsViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("Seasons")
-        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle("Seasons", modifier = Modifier.padding(start = PAGE_EDGE))
+        LazyRow(
+            Modifier.focusRestorer(),
+            contentPadding = PaddingValues(horizontal = PAGE_EDGE, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             items(vm.seasons, key = { it.id }) { season ->
                 BrandChip(season.title, selected = season.id == vm.seasonId, onClick = { vm.selectSeason(season.id) })
             }
@@ -565,16 +654,6 @@ private fun headerFits(list: LazyListState): Boolean {
     val header = info.visibleItemsInfo.firstOrNull { it.key == "header" } ?: return false
     return Reveal.fitsAtTop(header.size, info.beforeContentPadding, info.viewportSize.height)
 }
-
-private fun metaLine(item: Item): String = listOfNotNull(
-    item.kind.replaceFirstChar { it.uppercase() },
-    item.year?.toString(),
-    item.runtimeMs?.let { formatRuntime(it) },
-    item.resolution,
-    item.contentRating,
-    item.ratings["imdb"]?.let { "IMDb %.1f".format(it) } ?: item.ratings["tmdb"]?.let { "TMDB %.1f".format(it) },
-    if (item.watch?.played == true) "Watched" else null,
-).joinToString("   ")
 
 private fun episodeLine(episode: Item): String = listOfNotNull(
     episodeCode(episode),

@@ -14,12 +14,20 @@ import androidx.compose.foundation.gestures.BringIntoViewSpec
  * [containerSize] the list's height; the answer is how far to scroll down.
  */
 object Reveal {
-    fun distance(offset: Float, size: Float, containerSize: Float): Float {
-        val end = offset + size
+    /**
+     * [margin] keeps that much space between a revealed child and the list's
+     * edge, so a focused row never sits flush on the bottom of the screen
+     * (Pete, 2026-11-02: the cast pills sat cut off at the bottom). It shrinks
+     * for a child too tall to have it on both sides.
+     */
+    fun distance(offset: Float, size: Float, containerSize: Float, margin: Float = 0f): Float {
+        val m = margin.coerceAtMost(((containerSize - size) / 2f).coerceAtLeast(0f))
+        val top = offset - m
+        val end = offset + size + m
         return when {
-            offset >= 0f && end <= containerSize -> 0f
+            top >= 0f && end <= containerSize -> 0f
             // Cut off at the top, or taller than the list: its top at the top.
-            offset < 0f || size > containerSize -> offset
+            top < 0f || size > containerSize -> top
             else -> end - containerSize
         }
     }
@@ -33,4 +41,11 @@ object Reveal {
 val RevealOnly: BringIntoViewSpec = object : BringIntoViewSpec {
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
         Reveal.distance(offset, size, containerSize)
+}
+
+/** [Reveal] with [marginPx] of space kept between the revealed child and the list's edges. */
+@OptIn(ExperimentalFoundationApi::class)
+fun revealWithMargin(marginPx: Float): BringIntoViewSpec = object : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
+        Reveal.distance(offset, size, containerSize, marginPx)
 }
