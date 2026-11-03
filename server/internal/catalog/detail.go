@@ -63,22 +63,30 @@ func (c *Catalog) Item(ctx context.Context, pol policy.Policy, userID, id int64)
 		return d, err
 	}
 	// Cast in billing order: an episode's own (guest) cast first, then its show's.
-	rows, err = c.DB.QueryContext(ctx, `SELECT value, role FROM item_tags WHERE item_id IN (?, ?) AND kind = 'actor'
-		ORDER BY item_id = ? DESC, position, value`, id, tagOwner, id)
+	rows, err = c.DB.QueryContext(ctx, `SELECT t.value, t.role, t.person_id, p.cache_path IS NOT NULL
+		FROM item_tags t LEFT JOIN people p ON p.tmdb_id = t.person_id
+		WHERE t.item_id IN (?, ?) AND t.kind = 'actor'
+		ORDER BY t.item_id = ? DESC, t.position, t.value`, id, tagOwner, id)
 	if err != nil {
 		return d, err
 	}
 	err = each(rows, func() error {
 		var name string
 		var role sql.NullString
-		if err := rows.Scan(&name, &role); err != nil {
+		var person sql.NullInt64
+		var photo bool
+		if err := rows.Scan(&name, &role, &person, &photo); err != nil {
 			return err
 		}
 		if seen["actor\x00"+name] || len(d.Cast) >= maxCast {
 			return nil
 		}
 		seen["actor\x00"+name] = true
-		d.Cast = append(d.Cast, CastMember{Name: name, Role: strPtr(role)})
+		m := CastMember{Name: name, Role: strPtr(role), HasPhoto: photo}
+		if person.Valid {
+			m.PersonID = &person.Int64
+		}
+		d.Cast = append(d.Cast, m)
 		return nil
 	})
 	if err != nil {
@@ -286,4 +294,22 @@ func (c *Catalog) loan(ctx context.Context, pol policy.Policy, id int64) (*LoanI
 		l.Borrower = &borrower
 	}
 	return &l, nil
+}
+
+// CastPhoto is the downloaded headshot of an actor credited on item or on its
+// show, or ErrNotFound. Callers check first that the caller may see item, so
+// a photo answers only for the cast of a title the caller can open.
+func (c *Catalog) CastPhoto(ctx context.Context, item int64, show *int64, personID int64) (string, error) {
+	owner := item
+	if show != nil {
+		owner = *show
+	}
+	var p sql.NullString
+	err := c.DB.QueryRowContext(ctx, `SELECT p.cache_path FROM people p
+		WHERE p.tmdb_id = ? AND EXISTS (SELECT 1 FROM item_tags t WHERE t.person_id = p.tmdb_id AND t.kind = 'actor' AND t.item_id IN (?, ?))`,
+		personID, item, owner).Scan(&p)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !p.Valid) {
+		return "", ErrNotFound
+	}
+	return p.String, err
 }

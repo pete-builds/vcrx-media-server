@@ -650,6 +650,19 @@ paths:
       responses:
         "200": { description: Image, content: { image/jpeg: {} } }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/items/{item_id}/cast/{person_id}/photo:
+    get:
+      operationId: getCastPhoto
+      summary: >-
+        An actor's headshot from TMDb, as downloaded during enrichment, for an actor credited on the item or on its
+        show. 404 when the caller cannot see the item, the person is not in its cast, or there is no photo; clients
+        draw a placeholder.
+      parameters:
+        - { $ref: "#/components/parameters/ItemID" }
+        - { name: person_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: Image, content: { image/jpeg: {}, image/png: {} } }
+        "404": { $ref: "#/components/responses/Error" }
 
   /api/v1/playback/sessions:
     post:
@@ -3099,6 +3112,8 @@ components:
                 properties:
                   name: { type: string }
                   role: { type: [string, "null"] }
+                  person_id: { type: [integer, "null"], description: "TMDb's id for the actor; null for actors an NFO or an admin listed." }
+                  has_photo: { type: boolean, description: "True when getCastPhoto has a headshot for this actor on this item." }
             ratings: { type: object, additionalProperties: { type: number }, description: "Keyed by source: imdb, tmdb, nfo." }
             rating_votes: { type: object, additionalProperties: { type: integer }, description: "How many votes stand behind each rating, keyed like ratings; a source with no count is absent." }
             versions: { type: array, items: { $ref: "#/components/schemas/Version" }, description: Only versions the caller may play, best first. }

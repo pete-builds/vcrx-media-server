@@ -27,6 +27,7 @@ const (
 	posterSize      = "w780"
 	backdropSize    = "w1280"
 	stillSize       = "w780"
+	photoSize       = "w185"
 	maxActors       = 15
 	maxStudios      = 3
 	maxWriters      = 5
@@ -351,6 +352,7 @@ type plan struct {
 	tags   map[string][]tag
 	rating *[2]float64
 	art    []artPlan
+	people []person
 	source string
 	status string
 	tmdbID int64
@@ -358,7 +360,20 @@ type plan struct {
 	reason string
 }
 
-type tag struct{ value, role string }
+// tag is one value of a tag list. For an actor, person is TMDb's person id
+// and photo their headshot's file_path, when TMDb has them.
+type tag struct {
+	value, role string
+	person      int64
+	photo       string
+}
+
+// person is an actor whose tag gets a TMDb id; file is their downloaded
+// photo, empty when there is none.
+type person struct {
+	id                  int64
+	name, profile, file string
+}
 
 type artPlan struct{ kind, url, file string }
 

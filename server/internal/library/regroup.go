@@ -274,7 +274,7 @@ func fold(ctx context.Context, tx *sql.Tx, target movieRow, others []movieRow, n
 			`INSERT OR IGNORE INTO item_labels (item_id, label_id, source)
 				SELECT :into, label_id, CASE source WHEN 'collection' THEN 'collection' ELSE 'manual' END FROM item_labels WHERE item_id = :from`,
 			`INSERT OR IGNORE INTO item_ratings (item_id, source, value, votes) SELECT :into, source, value, votes FROM item_ratings WHERE item_id = :from`,
-			`INSERT OR IGNORE INTO item_tags (item_id, kind, value, position, role) SELECT :into, b.kind, b.value, b.position, b.role
+			`INSERT OR IGNORE INTO item_tags (item_id, kind, value, position, role, person_id) SELECT :into, b.kind, b.value, b.position, b.role, b.person_id
 				FROM item_tags b WHERE b.item_id = :from AND NOT EXISTS (SELECT 1 FROM item_tags a WHERE a.item_id = :into AND a.kind = b.kind)`,
 			`INSERT OR IGNORE INTO artwork (item_id, kind, source, source_path, url, cache_path, width, height, updated_at)
 				SELECT :into, kind, source, source_path, url, cache_path, width, height, updated_at FROM artwork WHERE item_id = :from`,
@@ -355,7 +355,7 @@ func Split(ctx context.Context, db *sql.DB, versionID int64) (int64, error) {
 			return err
 		}
 		steps := []string{
-			`INSERT INTO item_tags (item_id, kind, value, position, role) SELECT :to, kind, value, position, role FROM item_tags WHERE item_id = :from`,
+			`INSERT INTO item_tags (item_id, kind, value, position, role, person_id) SELECT :to, kind, value, position, role, person_id FROM item_tags WHERE item_id = :from`,
 			`INSERT INTO item_ratings (item_id, source, value, votes) SELECT :to, source, value, votes FROM item_ratings WHERE item_id = :from`,
 			`INSERT INTO item_labels (item_id, label_id, source) SELECT :to, label_id, source FROM item_labels WHERE item_id = :from`,
 			`INSERT INTO artwork (item_id, kind, source, source_path, url, cache_path, width, height, updated_at)

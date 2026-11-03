@@ -15,7 +15,7 @@ class DetailsFactsTest {
         {"id": 5694, "kind": "movie", "title": "Twelve Jurors", "runtime_ms": 5820000, "content_rating": "NR",
          "premiere_date": "1957-04-10", "directors": ["A Director"], "writers": ["A Writer", "Another Writer"],
          "studios": ["A Studio"], "countries": ["United States of America"],
-         "cast": [{"name": "Lead Actor", "role": "Juror 8"}, {"name": "Bit Part"}],
+         "cast": [{"name": "Lead Actor", "role": "Juror 8", "person_id": 39, "has_photo": true}, {"name": "Bit Part"}],
          "ratings": {"imdb": 9.0, "tmdb": 8.576}, "rating_votes": {"imdb": 1010165},
          "versions": [{"id": 1, "file_name": "x.mkv", "container": "mkv", "size": 7505064572, "video_codec": "h264",
            "bit_depth": 8, "resolution": "1080p",
@@ -54,6 +54,19 @@ class DetailsFactsTest {
         assertEquals("7.5 GB   MKV", f.value("File"))
         assertEquals(listOf("Lead Actor", "Bit Part"), movie.cast.map { it.name })
         assertNull(movie.cast[1].role)
+        // The photo flag and TMDb id come through; an actor without them has none.
+        assertEquals(39L, movie.cast[0].personId)
+        assertTrue(movie.cast[0].hasPhoto)
+        assertNull(movie.cast[1].personId)
+        assertEquals(false, movie.cast[1].hasPhoto)
+    }
+
+    @Test
+    fun castInitialsStandInForAMissingPhoto() {
+        assertEquals("LA", castInitials("Lead Actor"))
+        assertEquals("BP", castInitials("  bit   part  extra "))
+        assertEquals("C", castInitials("Cher"))
+        assertEquals("", castInitials(""))
     }
 
     @Test

@@ -173,8 +173,14 @@ data class Item(
     @SerialName("theme_music") val themeMusic: ThemeMusic? = null,
 )
 
+/** One actor. [personId] is TMDb's id, set when enrichment named them; [hasPhoto] means the server has a headshot. */
 @Serializable
-data class CastMember(val name: String, val role: String? = null)
+data class CastMember(
+    val name: String,
+    val role: String? = null,
+    @SerialName("person_id") val personId: Long? = null,
+    @SerialName("has_photo") val hasPhoto: Boolean = false,
+)
 
 @Serializable
 data class Extra(

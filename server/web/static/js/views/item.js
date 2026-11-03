@@ -221,14 +221,27 @@ function trackName(t) {
   return parts.filter(Boolean).join(" · ");
 }
 
-// The cast in billing order, name over the part played.
+// The cast in billing order: a headshot, then the name over the part played.
 function castSection(item) {
   const cast = item.cast || [];
   if (!cast.length) return null;
   return h("section", { class: "section cast" }, h("h2", {}, "Cast"),
     h("ul", { class: "cast-list" }, cast.map((c) => h("li", { class: "cast-member" },
-      h("span", { class: "cast-name" }, c.name),
-      c.role ? h("span", { class: "cast-role" }, c.role) : null))));
+      castPhoto(item, c),
+      h("div", { class: "cast-text" },
+        h("span", { class: "cast-name" }, c.name),
+        c.role ? h("span", { class: "cast-role" }, c.role) : null)))));
+}
+
+// castPhoto is an actor's headshot, or their initials when there is none.
+function castPhoto(item, c) {
+  const initials = c.name.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  const box = h("div", { class: "cast-photo", "aria-hidden": "true" });
+  const fallback = () => box.append(h("span", {}, initials));
+  if (c.has_photo && c.person_id) {
+    box.append(fadeImg(`/api/v1/items/${encodeURIComponent(item.id)}/cast/${encodeURIComponent(c.person_id)}/photo`, { onFail: fallback }));
+  } else fallback();
+  return box;
 }
 
 // releaseDate is "April 10, 1957" for "1957-04-10", read as a calendar date so

@@ -130,9 +130,13 @@ type LoanInfo struct {
 }
 
 // CastMember is one actor in billing order, with the part they play when known.
+// PersonID is TMDb's id for the actor, set only when enrichment named them;
+// HasPhoto means GET /items/{id}/cast/{person_id}/photo has a headshot.
 type CastMember struct {
-	Name string  `json:"name"`
-	Role *string `json:"role"`
+	Name     string  `json:"name"`
+	Role     *string `json:"role"`
+	PersonID *int64  `json:"person_id"`
+	HasPhoto bool    `json:"has_photo"`
 }
 
 // HomeRow is one row of Home. ID names the row and is stable for its

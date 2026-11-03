@@ -32,6 +32,7 @@ type fakeTMDb struct {
 	mu        sync.Mutex
 	overview  string
 	images    atomic.Int32
+	fetched   map[string]int // image path -> downloads
 	unauth    bool
 	responses map[string]string
 }
@@ -58,6 +59,10 @@ func (f *fakeTMDb) handler(t *testing.T) http.HandlerFunc {
 		}
 		if strings.HasPrefix(r.URL.Path, "/img/") {
 			f.images.Add(1)
+			if f.fetched == nil {
+				f.fetched = map[string]int{}
+			}
+			f.fetched[r.URL.Path]++
 			_, _ = w.Write(img)
 			return
 		}
@@ -84,7 +89,7 @@ func newFake() *fakeTMDb {
 			"vote_average":7.4,"vote_count":321,"genres":[{"name":"Drama"},{"name":"Mystery"}],
 			"production_companies":[{"name":"Harbor Light Films"}],"production_countries":[{"name":"Iceland"}],
 			"belongs_to_collection":{"id":555},
-			"credits":{"cast":[{"name":"Ada Fenwick","character":"The Keeper","order":0},{"name":"Rui Sato","character":"Ferryman","order":1}],
+			"credits":{"cast":[{"id":11,"name":"Ada Fenwick","character":"The Keeper","order":0,"profile_path":"/ada.jpg"},{"id":12,"name":"Rui Sato","character":"Ferryman","order":1}],
 			"crew":[{"name":"Mira Holt","job":"Director","department":"Directing"},{"name":"Jon Vale","job":"Screenplay","department":"Writing"}]},
 			"release_dates":{"results":[{"iso_3166_1":"US","release_dates":[{"certification":""},{"certification":"PG-13"}]}]}}`,
 		"/movie/200":               `{"id":200,"title":"Night Ferry","overview":"Crossing at midnight.","poster_path":"/nf.jpg","vote_count":0}`,
@@ -93,7 +98,7 @@ func newFake() *fakeTMDb {
 			"poster_path":"/go.jpg","backdrop_path":"/gob.jpg","vote_average":8.1,"vote_count":50,
 			"genres":[{"name":"Drama"}],"networks":[{"name":"North Channel"}],
 			"seasons":[{"season_number":1,"poster_path":"/gos1.jpg"},{"season_number":2,"poster_path":"/gos2.jpg"}],
-			"credits":{"cast":[{"name":"Lena Ok","character":"Gardener","order":0}]},
+			"credits":{"cast":[{"id":21,"name":"Lena Ok","character":"Gardener","order":0}]},
 			"external_ids":{"imdb_id":"tt0000300"},"content_ratings":{"results":[{"iso_3166_1":"US","rating":"TV-14"}]}}`,
 		// Ties: two films called Ember Vale in 2024, one a short; a feature runs 101 minutes.
 		"/search/movie?Ember Vale": `{"results":[{"id":401,"title":"Ember Vale","release_date":"2024-02-01","popularity":5,"vote_count":40},
@@ -110,6 +115,14 @@ func newFake() *fakeTMDb {
 		"/search/movie?Iron Lantern": `{"results":[{"id":601,"title":"Iron Lantern","release_date":"2019-01-01","popularity":80,"vote_count":5000},
 			{"id":602,"title":"Iron Lantern","release_date":"2019-03-01","popularity":2,"vote_count":3}]}`,
 		"/movie/601": `{"id":601,"title":"Iron Lantern","overview":"The famous one."}`,
+		// Every season's cast, which the show's own credits (latest season only) lack:
+		// a regular from earlier seasons with most episodes first, under the part
+		// played most, and an actor the movie above shares.
+		"/tv/300/aggregate_credits": `{"cast":[
+			{"id":21,"name":"Lena Ok","profile_path":"/lena.jpg","order":0,"total_episode_count":2,"roles":[{"character":"Gardener","episode_count":2}]},
+			{"id":22,"name":"Ivo Marsh","profile_path":"/ivo.jpg","order":1,"total_episode_count":7,
+				"roles":[{"character":"Young Ivo","episode_count":1},{"character":"Ivo","episode_count":6}]},
+			{"id":11,"name":"Ada Fenwick","profile_path":"/ada.jpg","order":2,"total_episode_count":1,"roles":[{"character":"","episode_count":1}]}]}`,
 		"/tv/300/season/1": `{"season_number":1,"overview":"The first harvest.","poster_path":"/gos1.jpg","episodes":[
 			{"episode_number":1,"name":"Seedlings","overview":"It begins.","air_date":"2016-09-01","still_path":"/e1.jpg","vote_average":7.9,"vote_count":10},
 			{"episode_number":2,"name":"First Frost","overview":"It gets cold.","air_date":"2016-09-08","still_path":"/e2.jpg"},
@@ -489,5 +502,76 @@ func TestRunMergesBeforeRebuild(t *testing.T) {
 	defer mu.Unlock()
 	if !slices.Equal(order, []string{"merge", "rebuild"}) {
 		t.Fatalf("order = %q, want the merge before the rebuild", order)
+	}
+}
+
+// A show takes its cast from every season, most episodes first, each actor
+// under the part they played most, and every actor with a TMDb id gets it on
+// their tag. Headshots download once per person, however many titles share
+// them, and not again on a refresh.
+func TestCastAcrossSeasonsWithPhotos(t *testing.T) {
+	v := setup(t)
+	movies, shows := v.library("movie"), v.library("show")
+	movie := v.item(movies, "movie", nil, "k", "Lantern Keeper", 2011, nil, nil)
+	show := v.item(shows, "show", nil, "glass orchard", "Glass Orchard", nil, nil, nil)
+	v.run()
+
+	cast := func(id int64) string {
+		t.Helper()
+		return v.str(`SELECT group_concat(value || '/' || IFNULL(role, '') || '/' || IFNULL(person_id, ''), ', ')
+			FROM (SELECT * FROM item_tags WHERE item_id = ? AND kind = 'actor' ORDER BY position)`, id)
+	}
+	if got, want := cast(show), "Ivo Marsh/Ivo/22, Lena Ok/Gardener/21, Ada Fenwick//11"; got != want {
+		t.Errorf("show cast = %q, want %q", got, want)
+	}
+	if got, want := cast(movie), "Ada Fenwick/The Keeper/11, Rui Sato/Ferryman/12"; got != want {
+		t.Errorf("movie cast = %q, want %q", got, want)
+	}
+	for id, want := range map[int64]bool{11: true, 21: true, 22: true, 12: false} {
+		file := v.str(`SELECT cache_path FROM people WHERE tmdb_id = ?`, id)
+		if (file != "") != want {
+			t.Errorf("person %d photo = %q, want one: %v", id, file, want)
+			continue
+		}
+		if want {
+			if _, err := os.Stat(file); err != nil || !strings.HasPrefix(file, filepath.Join(v.e.Dir, "people")+string(filepath.Separator)) {
+				t.Errorf("person %d photo at %q: %v", id, file, err)
+			}
+		}
+	}
+	if n := v.f.fetched["/img/w185/ada.jpg"]; n != 1 {
+		t.Errorf("shared actor's photo downloaded %d times, want 1", n)
+	}
+
+	// A refresh downloads nothing it already has; a new photo replaces the old file.
+	v.f.mu.Lock()
+	v.f.responses["/tv/300/aggregate_credits"] = strings.Replace(v.f.responses["/tv/300/aggregate_credits"], "/lena.jpg", "/lena2.jpg", 1)
+	v.f.mu.Unlock()
+	old := v.str(`SELECT cache_path FROM people WHERE tmdb_id = 21`)
+	v.now = v.now.Add(RefreshMatched + time.Hour)
+	v.run()
+	if n := v.f.fetched["/img/w185/ada.jpg"]; n != 1 {
+		t.Errorf("unchanged photo downloaded again: %d", n)
+	}
+	cur := v.str(`SELECT cache_path FROM people WHERE tmdb_id = 21`)
+	if cur == old || !strings.Contains(cur, "lena2") {
+		t.Errorf("new photo not taken: %q -> %q", old, cur)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("old photo left behind: %v", err)
+	}
+}
+
+// When TMDb cannot give a show's cast across seasons, the latest season's
+// regulars from its plain credits still fill it.
+func TestShowCastFallsBackToCredits(t *testing.T) {
+	v := setup(t)
+	delete(v.f.responses, "/tv/300/aggregate_credits")
+	show := v.item(v.library("show"), "show", nil, "glass orchard", "Glass Orchard", nil, nil, nil)
+	if st := v.run(); st.Matched != 1 {
+		t.Fatalf("stats %+v", st)
+	}
+	if got := v.str(`SELECT group_concat(value || '/' || IFNULL(person_id, '')) FROM item_tags WHERE item_id = ? AND kind = 'actor'`, show); got != "Lena Ok/21" {
+		t.Errorf("cast = %q", got)
 	}
 }

@@ -480,6 +480,48 @@ func (s *Server) artwork(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, path) //nolint:gosec // see above
 }
 
+// castPhoto is an actor's headshot, for the cast of a title the caller can see.
+func (s *Server) castPhoto(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r, "item_id")
+	if !ok {
+		return
+	}
+	person, ok := pathID(w, r, "person_id")
+	if !ok {
+		return
+	}
+	ri := info(r)
+	sums, err := s.Catalog.Summaries(r.Context(), ri.Policy, ri.Session.User.ID, []int64{id})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if len(sums) == 0 {
+		writeError(w, http.StatusNotFound, "not_found", "Not found.")
+		return
+	}
+	var show *int64
+	if sums[0].Kind != "show" {
+		show = sums[0].ShowID
+	}
+	path, err := s.Catalog.CastPhoto(r.Context(), id, show, person)
+	if err != nil && !errors.Is(err, catalog.ErrNotFound) {
+		s.internal(w, r, err)
+		return
+	}
+	// The path comes from the database; serve it only from the metadata folder.
+	if err != nil || s.Artwork == nil || s.Artwork.MetadataDir == "" || !fsafe.Within(s.Artwork.MetadataDir, path) {
+		writeError(w, http.StatusNotFound, "no_artwork", "No photo.")
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	if strings.HasSuffix(path, ".png") {
+		w.Header().Set("Content-Type", "image/png")
+	}
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	http.ServeFile(w, r, path) //nolint:gosec // checked to be inside the metadata folder above
+}
+
 func (s *Server) startPlayback(w http.ResponseWriter, r *http.Request) {
 	var req playback.StartRequest
 	if !readJSON(w, r, &req) {

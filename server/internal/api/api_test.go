@@ -1386,6 +1386,93 @@ func TestItemDetailCast(t *testing.T) {
 	}
 }
 
+// An actor's photo answers only for the cast of a title the caller can see
+// (an episode or season reaches its show's cast), only from the metadata
+// folder, and the details page says which actors have one.
+func TestCastPhoto(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	meta := t.TempDir()
+	f.srv.Artwork.MetadataDir = meta
+	if err := os.MkdirAll(filepath.Join(meta, "people"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	photo := filepath.Join(meta, "people", "7-face.jpg")
+	if err := os.WriteFile(photo, []byte("\xff\xd8\xff headshot"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	escape := filepath.Join(t.TempDir(), "9-elsewhere.jpg")
+	if err := os.WriteFile(escape, []byte("not ours"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := f.db.Exec(q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec(`INSERT INTO people (tmdb_id, name, profile_path, cache_path, updated_at) VALUES
+		(7, 'Series Regular', '/face.jpg', ?, 0), (8, 'No Photo', NULL, NULL, 0), (9, 'Escaper', '/elsewhere.jpg', ?, 0)`, photo, escape)
+	exec(`INSERT INTO item_tags (item_id, kind, value, position, role, person_id) VALUES
+		(?, 'actor', 'Series Regular', 0, 'Neighbour', 7), (?, 'actor', 'No Photo', 0, NULL, 8), (?, 'actor', 'Escaper', 1, NULL, 9),
+		(?, 'actor', 'From An NFO', 2, NULL, NULL)`, f.showID, f.movieID, f.movieID, f.movieID)
+
+	get := func(item, person int64, tok string) int {
+		t.Helper()
+		return f.do("GET", fmt.Sprintf("/api/v1/items/%d/cast/%d/photo", item, person), tok, nil).code
+	}
+	for _, c := range []struct {
+		name         string
+		item, person int64
+		tok          string
+		want         int
+	}{
+		{"show's own cast", f.showID, 7, f.adminTok, 200},
+		{"an episode reaches its show's cast", f.episodeID, 7, f.adminTok, 200},
+		{"a season reaches its show's cast", f.seasonID, 7, f.adminTok, 200},
+		{"a friend with the library", f.showID, 7, f.friendTok, 200},
+		{"a user without the library", f.showID, 7, f.strangerTok, 404},
+		{"not in this title's cast", f.movieID, 7, f.adminTok, 404},
+		{"no photo", f.movieID, 8, f.adminTok, 404},
+		{"a path outside the metadata folder", f.movieID, 9, f.adminTok, 404},
+		{"no such person", f.movieID, 99, f.adminTok, 404},
+	} {
+		if got := get(c.item, c.person, c.tok); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+	if r := f.do("GET", fmt.Sprintf("/api/v1/items/%d/cast/7/photo", f.showID), f.adminTok, nil); string(r.body) != "\xff\xd8\xff headshot" {
+		t.Errorf("photo body = %q", r.body)
+	}
+
+	type member struct {
+		Name     string
+		PersonID *int64 `json:"person_id"`
+		HasPhoto bool   `json:"has_photo"`
+	}
+	cast := func(id int64) map[string]member {
+		t.Helper()
+		var d struct{ Cast []member }
+		f.do("GET", fmt.Sprintf("/api/v1/items/%d", id), f.adminTok, nil).json(t, &d)
+		out := map[string]member{}
+		for _, c := range d.Cast {
+			out[c.Name] = c
+		}
+		return out
+	}
+	ep := cast(f.episodeID)["Series Regular"]
+	if ep.PersonID == nil || *ep.PersonID != 7 || !ep.HasPhoto {
+		t.Errorf("episode's show regular: %+v", ep)
+	}
+	movie := cast(f.movieID)
+	if m := movie["No Photo"]; m.PersonID == nil || *m.PersonID != 8 || m.HasPhoto {
+		t.Errorf("actor without a photo: %+v", m)
+	}
+	if m := movie["From An NFO"]; m.PersonID != nil || m.HasPhoto {
+		t.Errorf("NFO actor: %+v", m)
+	}
+}
+
 // The details panel's facts: writers, countries, the release date and the
 // votes behind each rating. An episode shows its show's writers and countries
 // after its own, like its genres; a rating with no count has no votes entry.
