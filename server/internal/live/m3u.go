@@ -1,4 +1,4 @@
-// Package live is Live TV (milestone 11): channels from the M3U playlists an
+// Package live is IPTV (milestone 11): channels from the M3U playlists an
 // admin lists under live_tv in vcrx.yaml, refreshed on a timer and kept in
 // the channels table. VCRX is the player, never the source: it ships no
 // playlist and points at none. Playlist and stream URLs never leave the

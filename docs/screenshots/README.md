@@ -25,4 +25,4 @@ scripts/screenshots/demo.sh down            # on the host: removes the container
 - only the demo library, never a real one: a poster wall advertises what is on someone's disk;
 - no real names: accounts, profiles, devices, friends' servers;
 - no address bar, IP address, hostname or path;
-- no Live TV page or channel list.
+- no IPTV page or channel list.

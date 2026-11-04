@@ -72,7 +72,7 @@ type Policy struct {
 	// AllowSubtitleDownload lets a non-admin spend the server's OpenSubtitles
 	// quota. Off unless an admin turns it on.
 	AllowSubtitleDownload bool
-	// AllowLiveTV lets a non-admin watch Live TV channels. Off unless an
+	// AllowLiveTV lets a non-admin watch IPTV channels. Off unless an
 	// admin turns it on; a borrower never has it.
 	AllowLiveTV bool
 }
@@ -131,7 +131,7 @@ func grants(ctx context.Context, conn *sql.DB, userID int64) ([]int64, error) {
 	return ids, rows.Err()
 }
 
-// CanWatchLive reports whether the caller may see and watch Live TV channels:
+// CanWatchLive reports whether the caller may see and watch IPTV channels:
 // admins always, others with the grant, a lent tape's borrower never.
 func (p Policy) CanWatchLive() bool {
 	if p.Borrower {

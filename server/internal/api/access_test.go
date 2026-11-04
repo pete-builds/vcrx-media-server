@@ -185,7 +185,7 @@ type walkFixture struct {
 	horrorShow, horrorSeason, horrorEpisode int64 // denied label on the show
 	strictSeason, strictEpisode             int64 // TV-MA episode of a TV-14 show
 	mixedCollection, hiddenCollection       int64
-	// channel is a Live TV channel, seen only with the Live TV grant;
+	// channel is an IPTV channel, seen only with the IPTV grant;
 	// liveRun is the friend's pull of it, started while allowed.
 	channel        int64
 	liveRun        string
@@ -520,7 +520,7 @@ func (w *walkFixture) musicProbes(listen string) []probe {
 	}
 }
 
-// liveProbes cover Live TV: restricting the friend takes away the Live TV
+// liveProbes cover IPTV: restricting the friend takes away the IPTV
 // grant, so the channel list stops naming the channel and its logo is a 404.
 func (w *walkFixture) liveProbes() []probe {
 	return []probe{

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Live TV plays only the playlists listed here. A provider's URL carries the
+// IPTV plays only the playlists listed here. A provider's URL carries the
 // account's credentials, so it can live in a file of its own, and no error
 // message ever repeats it.
 func TestLiveTVSources(t *testing.T) {
