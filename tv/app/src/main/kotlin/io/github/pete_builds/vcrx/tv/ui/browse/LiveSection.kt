@@ -71,7 +71,7 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
 }
 
 /**
- * Live TV in the Browse rail: every channel in the guide's order with its
+ * IPTV in the Browse rail: every channel in the guide's order with its
  * number, logo, what is on now and how far in, and what is next. OK plays it.
  */
 @Composable
@@ -84,7 +84,7 @@ fun LiveSection(focus: BrowseFocus) {
     }
     LoadStateContent(vm.state, onRetry = { vm.load() }) { channels ->
         if (channels.isEmpty()) {
-            EmptyView("No channels", "An admin lists playlists under live_tv on the server, and grants Live TV in Settings.")
+            EmptyView("No channels", "An admin lists playlists under live_tv on the server, and grants IPTV in Settings.")
             return@LoadStateContent
         }
         val context = LocalContext.current
@@ -96,7 +96,7 @@ fun LiveSection(focus: BrowseFocus) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item(key = "head") {
-                Label("Live TV  ·  ${channels.size} channels", style = MaterialTheme.typography.labelMedium, color = Gray,
+                Label("IPTV  ·  ${channels.size} channels", style = MaterialTheme.typography.labelMedium, color = Gray,
                     modifier = Modifier.padding(start = 8.dp, bottom = 8.dp))
             }
             itemsIndexed(channels, key = { _, c -> c.id }) { index, c ->

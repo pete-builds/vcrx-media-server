@@ -307,7 +307,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt *int64 `json:"device_expires_at,omitempty"`
 		// Loan is a lent tape's device's loan: the one title it may play.
 		Loan *meLoan `json:"loan,omitempty"`
-		// LiveTV: the caller may watch Live TV and there are channels to watch.
+		// LiveTV: the caller may watch IPTV and there are channels to watch.
 		LiveTV bool `json:"live_tv"`
 	}{userJSON: toUserJSON(sess.User), Kind: sess.Kind()}
 	if s.liveOn() && info(r).Policy.CanWatchLive() {

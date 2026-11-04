@@ -158,7 +158,7 @@ export function drawNav() {
   const nav = document.getElementById("nav");
   const links = [h("a", { class: "nav-link", href: "#/" }, "Home")];
   for (const lib of state.libraries) links.push(h("a", { class: "nav-link", href: libraryHref(lib) }, lib.name));
-  if (state.me && state.me.live_tv) links.push(h("a", { class: "nav-link", href: "#/live" }, "Live TV"));
+  if (state.me && state.me.live_tv) links.push(h("a", { class: "nav-link", href: "#/live" }, "IPTV"));
   if (state.me && state.me.is_admin) links.push(h("a", { class: "nav-link", href: "#/activity" }, "Activity"));
   // On a phone the top bar has no room for Settings, so the menu carries it.
   links.push(h("a", { class: "nav-link nav-phone-only", href: "#/settings" }, "Settings"));
@@ -188,7 +188,7 @@ function drawTabs() {
   document.getElementById("tabbar").replaceChildren(tab("#/", icon("home"), "Home"),
     ...picked.map((l) => tab(libraryHref(l), libIcon(l), l.name)), search, more);
   const rest = libs.filter((l) => !picked.includes(l)).map((l) => h("a", { class: "sheet-link", href: libraryHref(l) }, libIcon(l), l.name));
-  if (state.me && state.me.live_tv) rest.push(h("a", { class: "sheet-link", href: "#/live" }, icon("tv"), "Live TV"));
+  if (state.me && state.me.live_tv) rest.push(h("a", { class: "sheet-link", href: "#/live" }, icon("tv"), "IPTV"));
   if (state.me && state.me.is_admin) rest.push(h("a", { class: "sheet-link", href: "#/activity" }, icon("activity"), "Activity"));
   rest.push(h("a", { class: "sheet-link", href: "#/settings" }, icon("settings"), "Settings"));
   document.querySelector("#more-sheet nav").replaceChildren(...rest);

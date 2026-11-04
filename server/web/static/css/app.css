@@ -800,7 +800,7 @@ kbd {
   .player .sub-search { right: 12px; top: 56px; }
 }
 
-/* Live TV: one row per channel, what is on now with how far in, and next. */
+/* IPTV: one row per channel, what is on now with how far in, and next. */
 .live-page .toolbar { gap: 16px; flex-wrap: wrap; }
 .live-filter { height: var(--control-sm); background: var(--surface-2); border: 0; border-radius: var(--r-pill); padding: 0 14px; min-width: 220px; color: inherit; }
 .live-list { display: flex; flex-direction: column; gap: 2px; }

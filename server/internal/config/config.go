@@ -190,7 +190,7 @@ type Config struct {
 
 	Libraries []LibrarySpec `yaml:"libraries"`
 
-	// LiveTV is Live TV's playlists (milestone 11). VCRX ships and suggests
+	// LiveTV is IPTV's playlists (milestone 11). VCRX ships and suggests
 	// none: it plays what the admin lists here.
 	LiveTV LiveTVSpec `yaml:"live_tv"`
 
@@ -487,7 +487,7 @@ func (c *Config) validate() error {
 	return errors.Join(errs...)
 }
 
-// LiveRefreshInterval is how often Live TV playlists are read again.
+// LiveRefreshInterval is how often IPTV playlists are read again.
 func (c Config) LiveRefreshInterval() time.Duration {
 	if c.LiveTV.RefreshHours > 0 {
 		return time.Duration(c.LiveTV.RefreshHours) * time.Hour
@@ -495,7 +495,7 @@ func (c Config) LiveRefreshInterval() time.Duration {
 	return 12 * time.Hour
 }
 
-// LiveGuideInterval is how often Live TV guides are read again.
+// LiveGuideInterval is how often IPTV guides are read again.
 func (c Config) LiveGuideInterval() time.Duration {
 	if c.LiveTV.GuideRefreshHours > 0 {
 		return time.Duration(c.LiveTV.GuideRefreshHours) * time.Hour
@@ -514,7 +514,7 @@ func (c Config) LiveMaxStreams() int {
 // LiveStreamDir holds the live HLS segments while channels are watched.
 func (c Config) LiveStreamDir() string { return filepath.Join(c.CacheDir, "live") }
 
-// LogoCacheDir holds Live TV channel logos.
+// LogoCacheDir holds IPTV channel logos.
 func (c Config) LogoCacheDir() string { return filepath.Join(c.CacheDir, "channel-logos") }
 
 // YouTubeTrailers reports whether YouTube trailers are on: asked for, and a
