@@ -44,6 +44,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -80,19 +81,15 @@ import io.github.pete_builds.vcrx.tv.net.Item
 import io.github.pete_builds.vcrx.tv.net.Version
 import io.github.pete_builds.vcrx.tv.settings.ResumeMode
 import io.github.pete_builds.vcrx.tv.ui.LocalAppActions
-import io.github.pete_builds.vcrx.tv.ui.components.Artwork
 import io.github.pete_builds.vcrx.tv.ui.components.BrandButton
 import io.github.pete_builds.vcrx.tv.ui.components.BrandChip
 import io.github.pete_builds.vcrx.tv.ui.components.BrandDialog
 import io.github.pete_builds.vcrx.tv.ui.components.BrandIconButton
 import io.github.pete_builds.vcrx.tv.ui.components.BrandRow
-import io.github.pete_builds.vcrx.tv.ui.components.CardShape
-import io.github.pete_builds.vcrx.tv.ui.components.EmptyView
 import io.github.pete_builds.vcrx.tv.ui.components.FrameCard
 import io.github.pete_builds.vcrx.tv.ui.components.Label
 import io.github.pete_builds.vcrx.tv.ui.components.LoadState
 import io.github.pete_builds.vcrx.tv.ui.components.LoadStateContent
-import io.github.pete_builds.vcrx.tv.ui.components.LoadingView
 import io.github.pete_builds.vcrx.tv.ui.components.Reveal
 import io.github.pete_builds.vcrx.tv.ui.components.SectionTitle
 import io.github.pete_builds.vcrx.tv.ui.components.episodeCode
@@ -114,6 +111,15 @@ class DetailsViewModel(private val graph: AppGraph, private val itemId: Long) : 
         private set
     var episodes by mutableStateOf<LoadState<List<Item>>?>(null)
         private set
+    /** On a show, season or episode page: the episode the strip has focus on, whose facts the header shows. */
+    var focusedId by mutableStateOf<Long?>(null)
+
+    /** Whether the strip has had its first focus: only opening the page moves focus there, not picking a season. */
+    var stripTookFocus = false
+
+    /** Each episode's full details, fetched once it has had focus, for its date, directors and cast. */
+    val episodeDetails = mutableStateMapOf<Long, Item>()
+
     var versionId by mutableStateOf<Long?>(null)
     var actionError by mutableStateOf<String?>(null)
         private set
@@ -136,8 +142,19 @@ class DetailsViewModel(private val graph: AppGraph, private val itemId: Long) : 
                             ?: seasons.firstOrNull()?.id
                         if (wanted != null) loadEpisodes(wanted, quiet)
                     }
-                    "season" -> loadEpisodes(item.id, quiet)
+                    // A season or an episode opens on its show's seasons, at its own.
+                    "season" -> {
+                        (item.showId ?: item.parentId)?.let { seasons = graph.api.children(it) }
+                        loadEpisodes(seasonId ?: item.id, quiet)
+                    }
+                    "episode" -> {
+                        item.showId?.let { seasons = graph.api.children(it) }
+                        if (focusedId == null) focusedId = item.id
+                        (seasonId ?: item.parentId)?.let { loadEpisodes(it, quiet) }
+                    }
                 }
+                // Back from playing or after Mark watched: the focused episode's progress changed.
+                if (quiet) focusedId?.let { id -> runCatching { episodeDetails[id] = graph.api.item(id) } }
                 state = LoadState.Ready(item)
                 loadedAt = SystemClock.elapsedRealtime()
             } catch (e: ApiException) {
@@ -148,6 +165,12 @@ class DetailsViewModel(private val graph: AppGraph, private val itemId: Long) : 
 
     fun refreshIfStale() {
         if (state is LoadState.Ready && SystemClock.elapsedRealtime() - loadedAt > 3_000) load(quiet = true)
+    }
+
+    /** Fetches an episode's full details the first time it has focus. */
+    fun loadEpisodeDetail(id: Long) {
+        if (id in episodeDetails) return
+        viewModelScope.launch { runCatching { graph.api.item(id) }.onSuccess { episodeDetails[id] = it } }
     }
 
     fun selectSeason(id: Long) {
@@ -208,7 +231,11 @@ fun DetailsScreen(itemId: Long) {
         // A focused row stops a page margin short of the screen's bottom edge.
         val density = LocalDensity.current
         val reveal = remember(density) { revealWithMargin(with(density) { REVEAL_MARGIN.toPx() }) }
-        CompositionLocalProvider(LocalBringIntoViewSpec provides reveal) { Details(item, vm, rowScroll) }
+        CompositionLocalProvider(LocalBringIntoViewSpec provides reveal) {
+            // Shows, seasons and episodes get Plex's layout: season pills, the
+            // focused episode's facts, and a sideways strip of episodes.
+            if (item.kind in SHOW_KINDS) ShowDetails(item, vm, rowScroll) else Details(item, vm, rowScroll)
+        }
     }
 }
 
@@ -217,7 +244,6 @@ fun DetailsScreen(itemId: Long) {
 private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSpec) {
     val primaryFocus = remember { FocusRequester() }
     var pickVersion by remember { mutableStateOf(false) }
-    val isContainer = item.kind == "show" || item.kind == "season"
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val headerReveal = remember { BringIntoViewRequester() }
@@ -283,10 +309,7 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
-                            if (isContainer) {
-                                ShowButtons(item, vm, primaryFocus)
-                                TrailerButton(item)
-                            } else {
+                            run {
                                 PlayButtons(item, vm, primaryFocus)
                                 if (item.versions.size > 1) {
                                     val chosen = item.versions.firstOrNull { it.id == vm.versionId } ?: item.versions.first()
@@ -316,26 +339,7 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
                     }
                 }
             }
-            // The rest in the web page's order: seasons and episodes, extras, cast, then Details.
-            if (isContainer && item.kind == "show" && vm.seasons.isNotEmpty()) {
-                item(key = "seasons") {
-                    // Down to the seasons lifts them to the top, so the episodes come
-                    // into view: the chips alone are never cut off, so RevealOnly
-                    // would leave the episode list below the screen.
-                    Box(
-                        Modifier.onFocusChanged { state ->
-                            if (state.hasFocus) {
-                                list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "seasons" }?.index?.let { i ->
-                                    scope.launch { list.animateScrollToItem(i) }
-                                }
-                            }
-                        },
-                    ) { keepRowScroll { SeasonRow(vm) } }
-                }
-            }
-            if (isContainer) {
-                item(key = "episodes") { Box(Modifier.padding(horizontal = PAGE_EDGE)) { EpisodeList(vm) } }
-            }
+            // The rest in the web page's order: extras, cast, then Details.
             if (item.extras.isNotEmpty()) {
                 item(key = "extras") { keepRowScroll { ExtrasRow(item, PAGE_EDGE) } }
             }
@@ -356,7 +360,7 @@ private fun Details(item: Item, vm: DetailsViewModel, rowScroll: BringIntoViewSp
 }
 
 @Composable
-private fun PlayButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusRequester) {
+internal fun PlayButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusRequester) {
     val actions = LocalAppActions.current
     val watch = item.watch
     val resumeMs = watch?.positionMs?.takeIf { it > 0 && !watch.played }
@@ -387,32 +391,8 @@ private fun PlayButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusReq
     }
 }
 
-@Composable
-private fun ShowButtons(item: Item, vm: DetailsViewModel, primaryFocus: FocusRequester) {
-    val actions = LocalAppActions.current
-    val next = item.nextEpisode
-    if (next != null) {
-        // A plain Play: Settings > Playback > Resume decides, and the player asks when set to Ask.
-        val resuming = (next.watch?.positionMs ?: 0) > 0 && vm.resumeMode == ResumeMode.Resume
-        BrandButton(
-            "${if (resuming) "Resume" else "Play"} ${episodeCode(next) ?: next.title}",
-            onClick = { actions.play(next.id, playTitle(next), null) },
-            primary = true,
-            modifier = Modifier.focusRequester(primaryFocus),
-        )
-        WatchedButton(item.watch?.played == true) { vm.toggleWatched(item) }
-    } else {
-        BrandButton(
-            if (item.watch?.played == true) "Mark unwatched" else "Mark watched",
-            onClick = { vm.toggleWatched(item) },
-            primary = true,
-            modifier = Modifier.focusRequester(primaryFocus),
-        )
-    }
-}
-
 /** How far the page's text and rows sit in from the screen's edges. */
-private val PAGE_EDGE = 48.dp
+internal val PAGE_EDGE = 48.dp
 
 /** The header's text column: a little over half the screen, so the backdrop shows on the right. */
 private val HEADER_WIDTH = 520.dp
@@ -422,11 +402,11 @@ internal fun directedBy(item: Item): String? =
     item.directors.takeIf { it.isNotEmpty() }?.let { "Directed by ${it.joinToString(", ")}" }
 
 /** The space a focused row keeps from the top and bottom of the screen. */
-private val REVEAL_MARGIN = 48.dp
+internal val REVEAL_MARGIN = 48.dp
 
 /** The hero's facts in a line, as the web's chips: plain text, boxed facts, then star scores. */
 @Composable
-private fun HeroChipRow(chips: List<HeroChip>) {
+internal fun HeroChipRow(chips: List<HeroChip>) {
     if (chips.isEmpty()) return
     FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         chips.forEach { c ->
@@ -469,7 +449,7 @@ private fun ResumeBarView(bar: ResumeBar) {
  * cannot stop focus, and it would stay below the screen.
  */
 @Composable
-private fun FactsList(facts: List<Fact>) {
+internal fun FactsList(facts: List<Fact>) {
     Column(Modifier.padding(horizontal = PAGE_EDGE - 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionTitle("Details", modifier = Modifier.padding(start = 12.dp))
         FrameCard(onClick = {}, quiet = true, modifier = Modifier.fillMaxWidth()) {
@@ -491,7 +471,7 @@ private fun FactsList(facts: List<Fact>) {
  * circles take focus so the D-pad can reach the panel below.
  */
 @Composable
-private fun CastRow(item: Item) {
+internal fun CastRow(item: Item) {
     val api = LocalContext.current.graph.api
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionTitle("Cast & Crew", modifier = Modifier.padding(start = PAGE_EDGE))
@@ -557,61 +537,6 @@ internal fun castInitials(name: String): String =
     name.split(Regex("\\s+")).filter { it.isNotEmpty() }.take(2).joinToString("") { it.take(1) }.uppercase()
 
 @Composable
-private fun SeasonRow(vm: DetailsViewModel) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("Seasons", modifier = Modifier.padding(start = PAGE_EDGE))
-        LazyRow(
-            Modifier.focusRestorer(),
-            contentPadding = PaddingValues(horizontal = PAGE_EDGE, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            items(vm.seasons, key = { it.id }) { season ->
-                BrandChip(season.title, selected = season.id == vm.seasonId, onClick = { vm.selectSeason(season.id) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun EpisodeList(vm: DetailsViewModel) {
-    val actions = LocalAppActions.current
-    val state = vm.episodes ?: return
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("Episodes")
-        when (state) {
-            LoadState.Loading -> LoadingView(Modifier.padding(24.dp))
-            is LoadState.Failed -> Text(state.error.message ?: "Could not load episodes.", style = MaterialTheme.typography.bodyLarge)
-            is LoadState.Ready -> if (state.value.isEmpty()) {
-                EmptyView("No episodes", "This season has no episodes on the server.")
-            } else {
-                Column(Modifier.focusRestorer().focusGroup(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    state.value.forEach { episode ->
-                        FrameCard(onClick = { actions.openDetails(episode.id) }, quiet = true, modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                Modifier.padding(10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(24.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Box(Modifier.width(240.dp).aspectRatio(CardShape.Wide.aspect)) {
-                                    Artwork(episode.id, if (episode.hasThumb) "thumb" else "backdrop", episode.hasThumb || episode.hasBackdrop, episode.title, 480)
-                                }
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Label(episodeLine(episode), style = MaterialTheme.typography.labelMedium, color = Gray)
-                                    Text(episode.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    episode.overview?.takeIf { it.isNotBlank() }?.let {
-                                        Text(it, style = MaterialTheme.typography.bodyMedium, color = Gray, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun VersionPicker(versions: List<Version>, selected: Long, onPick: (Long) -> Unit, onDismiss: () -> Unit) {
     val first = remember { FocusRequester() }
     BrandDialog("Choose a version", onDismiss) {
@@ -633,7 +558,7 @@ private fun VersionPicker(versions: List<Version>, selected: Long, onPick: (Long
 
 /** Mark watched beside Play: a tick in a circle, green once watched. */
 @Composable
-private fun WatchedButton(played: Boolean, onClick: () -> Unit) {
+internal fun WatchedButton(played: Boolean, onClick: () -> Unit) {
     BrandIconButton(
         Icons.Filled.Check,
         contentDescription = if (played) "Mark unwatched" else "Mark watched",
@@ -649,7 +574,7 @@ private fun WatchedButton(played: Boolean, onClick: () -> Unit) {
  * picture dims once the page scrolls past the header; the wash stays.
  */
 @Composable
-private fun Backdrop(item: Item, dimmed: Boolean) {
+internal fun Backdrop(item: Item, dimmed: Boolean) {
     val api = LocalContext.current.graph.api
     val borrows = item.kind == "episode" || item.kind == "season"
     val artId = if (borrows) item.showId ?: item.id else item.id
@@ -682,13 +607,13 @@ private const val BACKDROP_WIDTH = 0.7f
  * Whether the header fits on screen whole, so scrolling back to the top shows
  * all of it; one taller than the screen would push its buttons off the bottom.
  */
-private fun headerFits(list: LazyListState): Boolean {
+internal fun headerFits(list: LazyListState): Boolean {
     val info = list.layoutInfo
     val header = info.visibleItemsInfo.firstOrNull { it.key == "header" } ?: return false
     return Reveal.fitsAtTop(header.size, info.beforeContentPadding, info.viewportSize.height)
 }
 
-private fun episodeLine(episode: Item): String = listOfNotNull(
+internal fun episodeLine(episode: Item): String = listOfNotNull(
     episodeCode(episode),
     episode.runtimeMs?.let { formatRuntime(it) },
     when {
@@ -711,7 +636,7 @@ private fun versionDetail(v: Version): String = listOfNotNull(
 ).joinToString("   ")
 
 /** What the player shows at the top: the title, with show and episode code for episodes. */
-private fun playTitle(item: Item): String =
+internal fun playTitle(item: Item): String =
     if (item.kind == "episode") listOfNotNull(item.showTitle, episodeCode(item), item.title).joinToString("  ") else item.title
 
 fun formatTime(ms: Long): String {

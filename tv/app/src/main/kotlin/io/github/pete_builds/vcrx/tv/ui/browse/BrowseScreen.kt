@@ -157,14 +157,15 @@ private data class RailEntry(val key: String, val label: String, val icon: Image
  * The rail is a floating pill, centred top to bottom on the left edge, as in
  * Plex (Pete, 2026-11-03: "the menu on the left is actually a floating centred
  * vertically pill. i like that"). Its width at rest (icons only) and with focus
- * in it (icons and labels), and its gap from the screen's edge.
+ * in it (icons and labels), and its gap from the screen's edge. 30% smaller
+ * than the first cut at rest (Pete, 2026-11-03), so it takes less of the picture.
  */
-private val RAIL_CLOSED = 56.dp
-private val RAIL_OPEN = 220.dp
-private val RAIL_INSET = 16.dp
+private val RAIL_CLOSED = 40.dp
+private val RAIL_OPEN = 170.dp
+private val RAIL_INSET = 12.dp
 
 /** One rail button: a circle at rest, a pill with its label when the rail is open. */
-private val RAIL_ITEM = 44.dp
+private val RAIL_ITEM = 30.dp
 
 /** A capsule at rest (radius half its width); the same corners, gentler, once it widens. */
 private val RAIL_SHAPE = RoundedCornerShape(RAIL_CLOSED / 2)
@@ -266,11 +267,11 @@ fun BrowseScreen() {
                 .width(railWidth)
                 .background(Surfaces.Raised.copy(alpha = pillAlpha), RAIL_SHAPE)
                 .border(1.dp, Surfaces.Wash, RAIL_SHAPE)
-                .padding(6.dp)
+                .padding(RAIL_PAD)
                 .onFocusChanged { railHasFocus = it.hasFocus }
                 .focusRestorer(railRequester)
                 .focusGroup(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             // No brand in the pill: anything shown only while it is open would
             // change its height, and a centred pill would then move every icon.
@@ -332,7 +333,7 @@ private fun RailItem(entry: RailEntry, selected: Boolean, open: Boolean, onClick
         Row(
             Modifier.fillMaxHeight().padding(start = (RAIL_ITEM - RAIL_ICON) / 2, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Icon(entry.icon, contentDescription = null, modifier = Modifier.size(RAIL_ICON))
             if (open) Label(entry.label, style = MaterialTheme.typography.labelLarge)
@@ -340,4 +341,7 @@ private fun RailItem(entry: RailEntry, selected: Boolean, open: Boolean, onClick
     }
 }
 
-private val RAIL_ICON = 22.dp
+private val RAIL_ICON = 16.dp
+
+/** The pill's padding around its buttons: (RAIL_CLOSED - RAIL_ITEM) / 2. */
+private val RAIL_PAD = 5.dp
