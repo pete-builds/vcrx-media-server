@@ -16,9 +16,14 @@ class IptvLabelTest {
     private val oldName = Regex("(?i)\\blive[ -]?tv\\b")
     private val wireNames = Regex("\\b(allow_live_tv|live_tv)\\b")
 
-    private fun offenders(lines: List<String>, name: String) =
+    /**
+     * Kotlin labels live in string literals; an XML resource's text sits
+     * between tags, outside any quotes, so an XML line is read whole.
+     */
+    private fun offenders(lines: List<String>, name: String, xml: Boolean = name.endsWith(".xml")) =
         lines.withIndex().filter { (_, line) ->
-            literal.findAll(line).any { oldName.containsMatchIn(wireNames.replace(it.value, "")) }
+            val texts = if (xml) sequenceOf(line) else literal.findAll(line).map { it.value }
+            texts.any { oldName.containsMatchIn(wireNames.replace(it, "")) }
         }.map { (i, line) -> "$name:${i + 1}: ${line.trim()}" }
 
     @Test
@@ -34,13 +39,17 @@ class IptvLabelTest {
     /** The control: the old labels are caught; code names and wire names are not. */
     @Test
     fun controlCatchesTheOldLabel() {
-        val old = listOf(
+        val kotlin = listOf(
             "add(RailEntry(LIVE, \"Live TV\", AppIcons.Live))",
             "Label(\"Live tv  ·  \${channels.size} channels\")",
-            "<string name=\"live\">LiveTV</string>",
             "if (vm.liveTv) add(RailEntry(LIVE, \"IPTV\", AppIcons.Live))",
             "@SerialName(\"live_tv\") val liveTv: Boolean = false,",
         )
-        assertEquals(3, offenders(old, "control").size)
+        assertEquals(2, offenders(kotlin, "control.kt").size)
+        val xml = listOf(
+            "<string name=\"live\">LiveTV</string>",
+            "<string name=\"live\">IPTV</string>",
+        )
+        assertEquals(1, offenders(xml, "control.xml").size)
     }
 }
