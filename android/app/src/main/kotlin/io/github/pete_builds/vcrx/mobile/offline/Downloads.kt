@@ -87,9 +87,16 @@ class Downloads(private val context: Context, private val graph: AppGraph) {
      * For every player: a downloaded key is read from the phone, anything else
      * from the server. Streams are never written into the download cache.
      */
-    val dataSourceFactory: DataSource.Factory = CacheDataSource.Factory()
+    val dataSourceFactory: DataSource.Factory = readingFactory { it }
+
+    /**
+     * [dataSourceFactory] with [network] wrapped around the server side only, so a
+     * downloaded file is read from the phone without it. The audio player uses this
+     * to ask for tracks inside their listen on an invited device.
+     */
+    fun readingFactory(network: (DataSource.Factory) -> DataSource.Factory): DataSource.Factory = CacheDataSource.Factory()
         .setCache(cache)
-        .setUpstreamDataSourceFactory(DefaultDataSource.Factory(context, upstream))
+        .setUpstreamDataSourceFactory(network(DefaultDataSource.Factory(context, upstream)))
         .setCacheWriteDataSinkFactory(null)
 
     private val state = MutableStateFlow<List<DownloadEntry>>(emptyList())

@@ -35,6 +35,8 @@ import io.github.pete_builds.vcrx.mobile.net.musicListen
 import io.github.pete_builds.vcrx.mobile.net.musicQueue
 import io.github.pete_builds.vcrx.mobile.offline.DownloadKeys
 import io.github.pete_builds.vcrx.mobile.offline.DownloadMeta
+import io.github.pete_builds.vcrx.mobile.music.ListenSessions
+import io.github.pete_builds.vcrx.mobile.music.OpenListen
 import io.github.pete_builds.vcrx.mobile.ui.MainActivity
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -55,16 +57,26 @@ class PlaybackService : MediaLibraryService() {
     private val searches = HashMap<String, List<BrowseNode>>()
     private var listen: Pair<String, Long>? = null
 
+    /**
+     * On an invited device the server hands out a track only inside that device's
+     * own listen to it, so every track URL Media3 opens carries its listen's
+     * session (see [ListenSessions]); for the household nothing changes.
+     */
+    private val trackListens = ListenSessions(ListenSessions.TRACKS) { id ->
+        app.api.musicListen(id, musicCapabilities(app.capabilities)).let { OpenListen(it.sessionId, it.heartbeatIntervalMs) }
+    }
+
     override fun onCreate() {
         super.onCreate()
         app = graph
+        refreshStreamOnly()
         val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(app.downloads.dataSourceFactory))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(app.downloads.readingFactory { trackListens.dataSource(it) }))
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
-        player.addListener(listens)
+        player.addListener(listenTracker)
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         session = MediaLibrarySession.Builder(this, player, Callback()).setSessionActivity(open).build()
     }
@@ -78,6 +90,7 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         endListen()
+        closeUnplayed()
         session?.run {
             player.release()
             release()
@@ -88,23 +101,41 @@ class PlaybackService : MediaLibraryService() {
     }
 
     // Each track that starts opens a listen in Activity, as the web and TV players do.
-    private val listens = object : Player.Listener {
+    // On an invited device the listen may already be open: Media3 asked for the
+    // track's data ahead of time, inside it, and this picks up the same one.
+    private val listenTracker = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             endListen()
             val trackId = mediaItem?.mediaMetadata?.extras?.getLong(EXTRA_TRACK_ID) ?: return
             if (trackId == 0L || !app.online.value) return
             scope.launch {
-                runCatching { app.api.musicListen(trackId, musicCapabilities(app.capabilities)) }.getOrNull()?.let {
-                    listen = it.sessionId to trackId
-                    app.events.send(it.sessionId, PlaybackEvent("start", 0))
+                runCatching {
+                    if (trackListens.enabled) {
+                        trackListens.get(trackId).sessionId
+                    } else {
+                        app.api.musicListen(trackId, musicCapabilities(app.capabilities)).sessionId
+                    }
+                }.getOrNull()?.let {
+                    listen = it to trackId
+                    app.events.send(it, PlaybackEvent("start", 0))
                 }
             }
         }
     }
 
+    private fun refreshStreamOnly() {
+        trackListens.enabled = ListenSessions.streamOnly(app.me.value, app.tokens.isInvitedDevice)
+    }
+
+    /** Closes the listens opened ahead for tracks that never played: a new queue, or the player going away. */
+    private fun closeUnplayed() {
+        trackListens.drain().forEach { app.events.send(it, PlaybackEvent("stop", 0)) }
+    }
+
     private fun endListen() {
-        val (sessionId, _) = listen ?: return
+        val (sessionId, trackId) = listen ?: return
         listen = null
+        trackListens.forget(trackId)
         val position = session?.player?.currentPosition ?: 0
         app.events.send(sessionId, PlaybackEvent("stop", position.coerceAtLeast(0)))
     }
@@ -185,6 +216,10 @@ class PlaybackService : MediaLibraryService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
+            // A new queue: end this track's listen and close those opened ahead, as the TV does.
+            endListen()
+            closeUnplayed()
+            refreshStreamOnly()
             val (items, start) = resolve(idsFor(mediaItems), startIndex)
             MediaSession.MediaItemsWithStartPosition(items, start.coerceAtLeast(0), if (start == startIndex) startPositionMs else C.TIME_UNSET)
         }
