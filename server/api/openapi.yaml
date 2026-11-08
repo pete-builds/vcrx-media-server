@@ -356,7 +356,7 @@ paths:
                       kind: { type: string, enum: [user, profile, token], description: "token: an invited device, which never sees the profile picker." }
                       device_expires_at: { type: integer, description: When an invited device's access ends. }
                       loan: { $ref: "#/components/schemas/BorrowerLoan" }
-                      live_tv: { type: boolean, description: "The caller may watch Live TV and there are channels to watch: show the Live TV page." }
+                      live_tv: { type: boolean, description: "The caller may watch IPTV and there are channels to watch: show the IPTV page." }
         "401":
           description: >-
             Not signed in. A lent tape's device whose loan is over gets error loan_ended, with "Be kind, rewind."
@@ -2562,8 +2562,8 @@ paths:
     get:
       operationId: liveChannels
       summary: >-
-        Live TV channels the caller may watch, by number then name: enabled, and still listed by their playlist.
-        Empty without the Live TV grant (admins always have it; a lent tape's borrower never). Stream and playlist
+        IPTV channels the caller may watch, by number then name: enabled, and still listed by their playlist.
+        Empty without the IPTV grant (admins always have it; a lent tape's borrower never). Stream and playlist
         URLs are never sent.
       responses:
         "200":
@@ -2590,7 +2590,7 @@ paths:
       summary: >-
         The guide grid: each channel the caller may watch, in channel order, with the programmes that overlap from to
         to. From the XMLTV guide an admin gives a playlist (xmltv in vcrx.yaml), kept from a day ago to 14 days ahead.
-        Empty without the Live TV grant.
+        Empty without the IPTV grant.
       parameters:
         - { name: from, in: query, schema: { type: integer }, description: Unix milliseconds; now by default. }
         - { name: to, in: query, schema: { type: integer }, description: Unix milliseconds; three hours after from by default, at most a day. }
@@ -2621,7 +2621,7 @@ paths:
       summary: >-
         Watch a channel: starts its stream on the server, or joins the one already running (one pull per channel,
         shared by everyone watching it), and answers with VCRX's own HLS playlist for it. The channel's stream URL is
-        never sent. 404 without the Live TV grant or for a channel turned off; 409 streams_busy when the playlist's
+        never sent. 404 without the IPTV grant or for a channel turned off; 409 streams_busy when the playlist's
         max_streams or the server's live_tv.max_streams are all in use; 502 stream_refused for a stream on a private
         address named by a playlist from the internet.
       parameters:
@@ -3481,7 +3481,7 @@ components:
         allow_transcode: { type: boolean }
         allow_4k_transcode: { type: boolean }
         allow_subtitle_download: { type: boolean, description: May download subtitles from OpenSubtitles (spends the server's daily quota). Default false; admins always may. }
-        allow_live_tv: { type: boolean, description: May watch Live TV channels. Default false; admins always may. }
+        allow_live_tv: { type: boolean, description: May watch IPTV channels. Default false; admins always may. }
     SubtitleHit:
       type: object
       required: [file_id, language_code, release, file_name, hearing_impaired, hash_match, trusted, download_count, matched_by]

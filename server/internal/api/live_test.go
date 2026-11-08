@@ -173,7 +173,7 @@ func TestLiveWatch(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "video/mp4" || n < 8 || string(head[4:8]) != "ftyp" || !bytes.Contains(head[:n], []byte("moof")) {
 		t.Errorf("stream.mp4: %d %q, %d bytes", resp.StatusCode, resp.Header.Get("Content-Type"), n)
 	}
-	// /me tells the web app to show Live TV.
+	// /me tells the web app to show IPTV.
 	if r := f.do("GET", "/api/v1/me", f.friendTok, nil); !strings.Contains(string(r.body), `"live_tv":true`) {
 		t.Errorf("me: %s", r.body)
 	}
