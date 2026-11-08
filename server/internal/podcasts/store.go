@@ -229,20 +229,9 @@ func (s *Store) Unsubscribe(ctx context.Context, userID, podcastID int64) ([]str
 	}
 	var files []string
 	if left == 0 {
-		rows, err := tx.QueryContext(ctx, `SELECT image_file FROM podcasts WHERE id = ? AND image_file != ''
-			UNION SELECT image_file FROM podcast_episodes WHERE podcast_id = ? AND image_file != ''`, podcastID, podcastID)
-		if err != nil {
+		if files, err = imageFiles(ctx, tx, podcastID); err != nil {
 			return nil, err
 		}
-		for rows.Next() {
-			var f string
-			if err := rows.Scan(&f); err != nil {
-				_ = rows.Close()
-				return nil, err
-			}
-			files = append(files, f)
-		}
-		_ = rows.Close()
 		if _, err := tx.ExecContext(ctx, `DELETE FROM podcasts WHERE id = ?`, podcastID); err != nil {
 			return nil, err
 		}
@@ -260,6 +249,25 @@ func (s *Store) Unsubscribe(ctx context.Context, userID, podcastID int64) ([]str
 		}
 	}
 	return orphans, nil
+}
+
+// imageFiles are the artwork files of a show and its episodes.
+func imageFiles(ctx context.Context, tx *sql.Tx, podcastID int64) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT image_file FROM podcasts WHERE id = ? AND image_file != ''
+		UNION SELECT image_file FROM podcast_episodes WHERE podcast_id = ? AND image_file != ''`, podcastID, podcastID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var files []string
+	for rows.Next() {
+		var f string
+		if err := rows.Scan(&f); err != nil {
+			return nil, err
+		}
+		files = append(files, f)
+	}
+	return files, rows.Err()
 }
 
 const podcastCols = `p.id, p.title, p.author, p.description, p.link, p.feed_url, p.explicit, p.image_file != '', p.refreshed_at, p.last_error,

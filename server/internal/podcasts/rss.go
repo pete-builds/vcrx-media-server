@@ -133,7 +133,7 @@ func Parse(r io.Reader, maxEpisodes int) (*Feed, error) {
 		if errors.As(err, &se) || strings.Contains(err.Error(), "expected element type") {
 			return nil, ErrNotAFeed
 		}
-		return nil, fmt.Errorf("%w: %v", ErrNotAFeed, err)
+		return nil, fmt.Errorf("%w: %w", ErrNotAFeed, err)
 	}
 	ch := doc.Channel
 	f := &Feed{

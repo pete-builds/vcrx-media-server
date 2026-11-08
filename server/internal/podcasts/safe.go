@@ -122,7 +122,7 @@ func (g Guard) dialCheck(hostport string, dialed string) error {
 	}
 	ap, err := netip.ParseAddrPort(dialed)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrRefused, err)
+		return fmt.Errorf("%w: %w", ErrRefused, err)
 	}
 	return CheckIP(ap.Addr())
 }
