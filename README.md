@@ -35,6 +35,7 @@ VCRX is a self-hosted media server with its own Google TV app, built from scratc
 | **People** | Local accounts, household profiles with PINs, kids' profiles, invited devices, linked friends' servers. |
 | **Activity** | Now playing, history, stats, stop a stream, webhooks and Discord messages. |
 | **Music** | Albums and compilations from tags, live recordings with venue, source and checksums, gapless playback, a Music section on the TV. |
+| **Podcasts** (optional) | Subscribe by RSS feed URL or OPML, new episodes every few hours, your place saved per person, played through the server so devices never contact podcast hosts. |
 | **Live TV** (in progress) | Your own M3U playlists and XMLTV guides, with one shared pull per channel. |
 | **Clients** | A web app built into the server, the Google TV app, and a REST API described by an OpenAPI 3.1 spec. |
 

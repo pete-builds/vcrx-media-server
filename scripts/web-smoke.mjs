@@ -1317,7 +1317,7 @@ async function podcasts(s, evaluate, ids, ex) {
     if (!input) return null;
     input.value = ${JSON.stringify(feed)};
     document.querySelector(".podcast-add button[type=submit]").click();
-    ${wait(`/^#\/podcasts\/show\/\d+$/.test(location.hash) && document.querySelector(".episodes .episode .episode-play")`, 120)}
+    ${wait(`location.hash.startsWith("#/podcasts/show/") && document.querySelector(".episodes .episode .episode-play")`, 120)}
     return { hash: location.hash, title: document.querySelector(".podcast-page h1")?.textContent || "",
       episodes: [...document.querySelectorAll(".episodes .episode .episode-title")].map((e) => e.textContent),
       art: !!document.querySelector(".podcast-page .music-head img") };`);
