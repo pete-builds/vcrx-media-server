@@ -1,0 +1,18 @@
+# Build outputs and caches
+build/
+**/build/
+.gradle/
+.kotlin/
+.idea/
+*.iml
+local.properties
+captures/
+
+
+# Signing material: never commit a keystore or its password
+signing/
+*.jks
+*.keystore
+*.p12
+*.pass
+

@@ -1,0 +1,115 @@
+package io.github.pete_builds.vcrx.mobile.player
+
+import io.github.pete_builds.vcrx.mobile.net.PlaybackSession
+
+/**
+ * The two ways a session's stream reaches the player. Pure, so it is unit tested.
+ *
+ * Direct: the file itself (or HLS), which Media3 seeks by byte range.
+ * Converted (protocol fmp4): a fragmented MP4 piped from ffmpeg on the server,
+ * with the video copied or re-encoded and the audio copied or converted. It cannot
+ * be seeked by range: the seek endpoint says where a stream from a position starts
+ * (the keyframe at or before it) and the player opens a new stream there.
+ */
+object StreamKinds {
+    const val FMP4 = "fmp4"
+    const val PROGRESSIVE = "progressive"
+
+    fun isConverted(session: PlaybackSession): Boolean = session.stream.protocol == FMP4
+
+    /**
+     * Whether this app can play the session's stream: the file itself, or a converted
+     * fragmented MP4. Anything else (HLS, which the app never asks for, or a protocol
+     * from a newer server) would be opened as if it were the file, so it is refused.
+     */
+    fun isPlayable(session: PlaybackSession): Boolean = session.stream.protocol == PROGRESSIVE || isConverted(session)
+
+    /** What the viewer is told about a converted stream, as the web player labels it; null for direct play. */
+    fun label(session: PlaybackSession): String? = if (!isConverted(session)) {
+        null
+    } else {
+        when (session.decision) {
+            "transcode" -> "Video converted"
+            "audio_transcode" -> "Audio converted"
+            else -> "Repackaged"
+        }
+    }
+
+    /** A stream URL asking for the audio track at stream [index]; unchanged when null (the server chooses). */
+    fun withAudio(url: String, index: Int?): String =
+        if (index == null) url else url + (if ('?' in url) "&" else "?") + "audio=$index"
+
+    /** The seek endpoint: the session's seek_url, or the documented route for servers that omit it. */
+    fun seekPath(session: PlaybackSession): String =
+        session.stream.seekUrl?.takeIf { it.isNotBlank() } ?: "/api/v1/playback/sessions/${session.sessionId}/seek"
+}
+
+/**
+ * Where the player is in the file. Direct play: the player's own position and
+ * duration, untouched. Converted: each stream starts at the start_ms the seek
+ * endpoint answered, so the file position is that start plus the player's own
+ * time, and the duration is the version's, since a stream piped from ffmpeg
+ * carries none. Every position the app shows or reports comes from here.
+ */
+class StreamTimeline(
+    val converted: Boolean,
+    private val fileDurationMs: Long?,
+    private val playerPositionMs: () -> Long,
+    private val playerDurationMs: () -> Long?,
+) {
+    /** Where the current converted stream starts in the file; always 0 for direct play. */
+    var startMs: Long = 0
+        private set
+
+    private var ticket = 0
+
+    fun positionMs(): Long {
+        val player = playerPositionMs()
+        return if (converted) startMs + player.coerceAtLeast(0) else player
+    }
+
+    fun durationMs(): Long? {
+        if (!converted) return playerDurationMs()
+        return fileDurationMs?.takeIf { it > 0 } ?: playerDurationMs()?.let { startMs + it }
+    }
+
+    /** The position to ask the seek endpoint for: the target, kept inside the file. */
+    fun seekTarget(targetMs: Long): Long = SeekSteps.clamp(targetMs, durationMs())
+
+    /** Starts a seek; only the newest one may land, so answers that arrive late are dropped. */
+    fun beginSeek(): Int = ++ticket
+
+    fun isCurrent(seek: Int): Boolean = seek == ticket
+
+    /** Drops any seek in flight, for when playback ends. */
+    fun cancelSeeks() {
+        ticket++
+    }
+
+    /**
+     * The seek endpoint answered [answerStartMs] for [seek]. Returns false, changing
+     * nothing, when a newer seek has started since. Call it just before the new stream
+     * is set on the player, whose own time then restarts at zero.
+     */
+    fun land(seek: Int, answerStartMs: Long): Boolean {
+        if (!converted || !isCurrent(seek)) return false
+        startMs = answerStartMs.coerceAtLeast(0)
+        return true
+    }
+
+    /**
+     * A converted stream that ends well before the file does was cut off (the server
+     * stopped or the connection closed cleanly), not watched to the end. Reporting a
+     * stop at the full duration would mark it played and lose the resume point.
+     */
+    fun endedEarly(): Boolean {
+        if (!converted) return false
+        val duration = fileDurationMs?.takeIf { it > 0 } ?: return false
+        return positionMs() < duration - END_TOLERANCE_MS
+    }
+
+    private companion object {
+        /** ffmpeg's streams can end a few seconds short of the container's duration. */
+        const val END_TOLERANCE_MS = 15_000L
+    }
+}

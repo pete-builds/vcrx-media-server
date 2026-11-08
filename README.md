@@ -36,7 +36,7 @@ VCRX is a self-hosted media server with its own Google TV app, built from scratc
 | **Activity** | Now playing, history, stats, stop a stream, webhooks and Discord messages. |
 | **Music** | Albums and compilations from tags, live recordings with venue, source and checksums, gapless playback, a Music section on the TV. |
 | **Live TV** (in progress) | Your own M3U playlists and XMLTV guides, with one shared pull per channel. |
-| **Clients** | A web app built into the server, the Google TV app, and a REST API described by an OpenAPI 3.1 spec. |
+| **Clients** | A web app built into the server, the Google TV app, an Android phone and tablet app with downloads for offline playback and Android Auto, and a REST API described by an OpenAPI 3.1 spec. |
 
 Every feature in detail: [docs/FEATURES.md](docs/FEATURES.md).
 
@@ -65,6 +65,8 @@ Then open `http://<server-ip>:3750/` in a browser and sign in. Your media is mou
 
 **On the TV:** build the APK with one command and sideload it with ADB, as [tv/README.md](tv/README.md) describes, then enter `http://<server-ip>:3750` and sign in.
 
+**On a phone or tablet:** build the APK with `./android/build-apk.sh` and sideload it, as [android/README.md](android/README.md) describes, then enter the same address and sign in.
+
 Adding users, backups, updates and the optional services (TMDb, OpenSubtitles, Radarr and Sonarr): [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Documentation
@@ -77,6 +79,7 @@ Adding users, backups, updates and the optional services (TMDb, OpenSubtitles, R
 | [Internet access](docs/INTERNET-ACCESS.md) | Reaching VCRX from outside your home through Caddy |
 | [Playback compatibility](docs/PLAYBACK-COMPATIBILITY.md) | What happens to each kind of file on each kind of client, and what has been tested |
 | [TV app](tv/README.md) | Building, installing and using the Google TV app |
+| [Android app](android/README.md) | Building and sideloading the phone and tablet app, downloads, Android Auto |
 | [Development](docs/DEVELOPMENT.md) | Building and testing the server and the web app |
 
 ## Security and privacy in brief
