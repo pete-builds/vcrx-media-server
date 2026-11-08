@@ -21,6 +21,11 @@
 // 30 s, chapters, speed, a sleep timer). A position in a book is seconds from
 // its start across every file; the server keeps it, saved every SAVE_MS
 // while playing and on every pause.
+//
+// A podcast episode plays as a book of one file with no chapters (state.book
+// with podcast set): the same skips, speed and sleep timer, its place saved
+// to /podcasts/episodes/{id}/progress the same way, and its audio played
+// through VCRX's stream route, which passes byte ranges on to the host.
 
 import { api, ApiError } from "../api.js";
 import { h, clock, toast } from "../dom.js";
@@ -45,7 +50,9 @@ const state = {
   // Where the queue came from, for ReplayGain: an album in order uses album gain.
   source: "",
   // The book playing, or null for music: {id, title, author, has_cover,
-  // duration_s, chapters}. Its files are the tracks, each with start_s.
+  // duration_s, chapters}. Its files are the tracks, each with start_s. A
+  // podcast episode is a book with podcast: {id} (the show), one file and
+  // no chapters; its duration_s is 0 until known.
   book: null,
   // Playback speed for books; music always plays at 1.
   rate: 1,
@@ -175,6 +182,25 @@ export async function playBook(bookId, { atS = null, fromStart = false } = {}) {
 
 export const currentBook = () => state.book;
 
+// playEpisode plays a podcast episode (as the API lists it) from the
+// caller's saved place, or from the start when it was played or fromStart.
+export function playEpisode(ep, { fromStart = false } = {}) {
+  const dur = ep.duration_seconds || 0;
+  let pos = fromStart || ep.played ? 0 : ep.position_seconds || 0;
+  if (dur && pos >= dur - 1) pos = 0;
+  const track = { id: ep.id, title: ep.title, start_s: 0, duration_s: dur, duration_ms: Math.round(dur * 1000),
+    stream: { url: ep.stream_url, protocol: "direct", mime_type: ep.mime_type || "" } };
+  start([track], 0, { source: "podcast", book: { id: ep.id, title: ep.title, author: ep.podcast_title, has_cover: true,
+    duration_s: dur, chapters: [], podcast: { id: ep.podcast_id, title: ep.podcast_title } }, atMs: Math.round(pos * 1000) });
+}
+
+// currentEpisode is the podcast episode playing: {id, podcast_id}, or null.
+export const currentEpisode = () => (state.book && state.book.podcast ? { id: state.book.id, podcast_id: state.book.podcast.id } : null);
+
+// bookDur is the book's length in seconds; an episode whose feed gave none
+// goes by what the browser measured.
+const bookDur = () => (state.book && state.book.duration_s) || durMs() / 1000;
+
 // bookPos is where the book is, in seconds from its start.
 export function bookPos() {
   const t = current();
@@ -191,7 +217,7 @@ export function chapterAt(posS) {
 // seekBook moves to a position in the book, changing files when it has to.
 export function seekBook(posS) {
   if (!state.book) return;
-  posS = Math.max(0, Math.min(posS, state.book.duration_s - 0.5));
+  posS = Math.max(0, Math.min(posS, bookDur() - 0.5));
   const at = locate(state.tracks, posS);
   if (at.index === state.order[state.pos]) {
     seek(at.offsetS * 1000);
@@ -271,6 +297,10 @@ let lastSave = 0;
 function saveProgress(keepalive = false, finished) {
   const b = state.book;
   if (!b || !current()) return;
+  if (b.podcast) {
+    saveEpisode(b, keepalive, finished);
+    return;
+  }
   const pos = finished ? b.duration_s : bookPos();
   lastSave = Date.now();
   const body = { position_s: Math.round(pos * 1000) / 1000 };
@@ -280,6 +310,18 @@ function saveProgress(keepalive = false, finished) {
     .catch(() => {});
 }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveProgress(true); });
+
+// saveEpisode sends an episode's place, with the length the browser found
+// (the server keeps it when the feed gave none); at its end, it is played.
+function saveEpisode(b, keepalive, finished) {
+  lastSave = Date.now();
+  const measured = Number.isFinite(el().duration) ? el().duration : 0;
+  const req = finished
+    ? api(`/podcasts/episodes/${b.id}/played`, { method: "PUT", keepalive, body: { played: true } })
+    : api(`/podcasts/episodes/${b.id}/progress`, { method: "PUT", keepalive,
+      body: { position_seconds: Math.round(bookPos() * 1000) / 1000, duration_seconds: Math.round(measured * 1000) / 1000 } });
+  req.then((p) => { debug.saves.push({ episode: b.id, position_s: p.position_seconds, finished: p.played }); }).catch(() => {});
+}
 
 // setShuffle reorders what is left after the current track, or puts the queue
 // back in order, keeping the current track playing either way.
@@ -525,7 +567,8 @@ let listen = null;
 let beat = null;
 
 function beginListen(t, preloaded) {
-  if (!t) return;
+  // A podcast episode is not a listen in Activity: its place is saved instead.
+  if (!t || (state.book && state.book.podcast)) return;
   const me = { trackId: t.id, id: null, started: false, preloaded };
   listen = me;
   const path = state.book ? `/audiobooks/files/${t.id}/sessions` : `/music/tracks/${t.id}/sessions`;
@@ -636,17 +679,31 @@ function draw() {
     return;
   }
   const b = state.book;
-  const coverKey = b ? `book:${b.id}` : String(t.album_id);
-  const art = b ? (b.has_cover ? `/api/v1/audiobooks/books/${b.id}/cover?width=160` : null)
-    : t.has_cover ? `/api/v1/music/albums/${t.album_id}/cover?width=160` : null;
+  const pod = b && b.podcast;
+  const coverKey = pod ? `episode:${b.id}` : b ? `book:${b.id}` : String(t.album_id);
+  const art = coverAt(160);
   if (ui.cover.dataset.album !== coverKey) {
     ui.cover.dataset.album = coverKey;
-    ui.cover.replaceChildren(art ? h("img", { src: art, alt: "" }) : icon(b ? "book" : "disc"));
+    const fallback = icon(pod ? "podcast" : b ? "book" : "disc");
+    const img = art ? h("img", { src: art, alt: "" }) : null;
+    if (img) img.addEventListener("error", () => img.replaceWith(fallback));
+    ui.cover.replaceChildren(img || fallback);
   }
   ui.root.classList.toggle("is-book", !!b);
-  for (const n of [ui.back15, ui.fwd30, ui.chPrev, ui.chNext, ui.speed, ui.sleepSel]) n.hidden = !b;
+  ui.root.classList.toggle("is-podcast", !!pod);
+  for (const n of [ui.back15, ui.fwd30, ui.speed, ui.sleepSel]) n.hidden = !b;
+  for (const n of [ui.chPrev, ui.chNext]) n.hidden = !b || !!pod;
   for (const n of [ui.shuffle, ui.repeat, ui.queueBtn, ui.prev, ui.next]) n.hidden = !!b;
-  if (b) {
+  if (pod) {
+    ui.title.textContent = b.title || "";
+    ui.title.href = `#/podcasts/show/${pod.id}`;
+    ui.artist.textContent = pod.title || "";
+    ui.artist.href = `#/podcasts/show/${pod.id}`;
+    ui.speed.value = String(state.rate);
+    if (!state.sleep) ui.sleepSel.value = "";
+    delete ui.root.dataset.book;
+    ui.root.dataset.episode = String(b.id);
+  } else if (b) {
     const i = chapterAt(bookPos());
     ui.title.textContent = i >= 0 ? b.chapters[i].title : t.title || "";
     ui.title.href = `#/audiobooks/book/${b.id}`;
@@ -656,7 +713,9 @@ function draw() {
     ui.speed.value = String(state.rate);
     ui.sleepSel.value = !state.sleep ? "" : state.sleep.chapterEnd != null ? "chapter" : ui.sleepSel.value;
     ui.root.dataset.book = String(b.id);
+    delete ui.root.dataset.episode;
   } else {
+    delete ui.root.dataset.episode;
     ui.title.textContent = t.title || "";
     ui.title.href = `#/music/album/${t.album_id}`;
     ui.artist.textContent = t.artist_name || "";
@@ -681,10 +740,19 @@ function draw() {
   mediaSession(t);
 }
 
+// coverAt is the art of what is playing at width w: the album's, the
+// book's, or the episode's (its own, else its show's); null when none.
+function coverAt(w) {
+  const b = state.book, t = current();
+  if (b && b.podcast) return `/api/v1/podcasts/episodes/${b.id}/artwork`;
+  if (b) return b.has_cover ? `/api/v1/audiobooks/books/${b.id}/cover?width=${w}` : null;
+  return t && t.has_cover ? `/api/v1/music/albums/${t.album_id}/cover?width=${w}` : null;
+}
+
 // barPosMs and barDurMs are what the seek bar shows: the track, or for a
 // book the whole book.
 const barPosMs = () => (state.book ? Math.round(bookPos() * 1000) : posMs());
-const barDurMs = () => (state.book ? Math.round(state.book.duration_s * 1000) : durMs());
+const barDurMs = () => (state.book ? Math.round(bookDur() * 1000) : durMs());
 
 function drawTime() {
   if (!ui.root || ui.dragging) return;
@@ -693,7 +761,7 @@ function drawTime() {
   ui.bar.value = String(Math.min(barPosMs(), d));
   ui.time.textContent = clock(barPosMs());
   ui.dur.textContent = clock(d);
-  if (state.book && ui.root.dataset.chapter !== String(chapterAt(bookPos()))) {
+  if (state.book && !state.book.podcast && ui.root.dataset.chapter !== String(chapterAt(bookPos()))) {
     ui.root.dataset.chapter = String(chapterAt(bookPos()));
     changed();
   }
@@ -719,15 +787,16 @@ function mediaSession(t) {
   navigator.mediaSession.playbackState = el().paused ? "paused" : "playing";
   const b = state.book;
   // A book's lock screen shows the chapter, so it changes with the chapter.
-  const key = b ? `book:${b.id}:${chapterAt(bookPos())}` : t.id;
+  const key = b && b.podcast ? `episode:${b.id}` : b ? `book:${b.id}:${chapterAt(bookPos())}` : t.id;
   if (sessionTrack === key) return;
   sessionTrack = key;
-  const coverAt = (w) => (b ? `/api/v1/audiobooks/books/${b.id}/cover?width=${w}` : `/api/v1/music/albums/${t.album_id}/cover?width=${w}`);
-  const artwork = (b ? b.has_cover : t.has_cover) ? [96, 240, 480].map((w) => ({ src: new URL(coverAt(w), location.href).href,
-    sizes: `${w}x${w}`, type: "image/jpeg" })) : [];
+  // An episode's artwork is whatever image its feed had, one size.
+  const artwork = b && b.podcast ? [{ src: new URL(coverAt(0), location.href).href }]
+    : coverAt(96) ? [96, 240, 480].map((w) => ({ src: new URL(coverAt(w), location.href).href, sizes: `${w}x${w}`, type: "image/jpeg" })) : [];
   const i = b ? chapterAt(bookPos()) : -1;
-  const meta = b ? { title: i >= 0 ? b.chapters[i].title : b.title, artist: b.author, album: b.title, artwork }
-    : { title: t.title || "", artist: t.artist_name || "", album: t.album_title || "", artwork };
+  const meta = b && b.podcast ? { title: b.title, artist: b.podcast.title, album: b.podcast.title, artwork }
+    : b ? { title: i >= 0 ? b.chapters[i].title : b.title, artist: b.author, album: b.title, artwork }
+      : { title: t.title || "", artist: t.artist_name || "", album: t.album_title || "", artwork };
   try {
     navigator.mediaSession.metadata = new MediaMetadata(meta);
   } catch (e) {

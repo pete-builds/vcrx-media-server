@@ -173,3 +173,40 @@ body.has-music-bar .toast { bottom: calc(var(--music-bar-h) + var(--tabbar-h) + 
 @media (max-width: 720px) {
   .mb-select { max-width: 6.5em; font-size: 12px; }
 }
+
+/* Podcasts: shows in the square grid with an unplayed count, the add and
+   search forms, and episode lists with their place and played state. */
+.podcast-art { position: relative; }
+.podcast-tools { display: grid; gap: 14px; max-width: 760px; margin: 0 0 28px; }
+.podcast-add { display: grid; gap: 6px; }
+.podcast-add label { color: var(--muted); font-size: 14px; }
+.podcast-add-row { display: flex; gap: 10px; }
+.podcast-add-row input { flex: 1; min-width: 0; }
+.podcast-search .small { margin: 6px 0 0; font-size: 13px; }
+.podcast-results { list-style: none; margin: 8px 0 0; padding: 0; }
+.podcast-results li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.podcast-result { display: flex; flex-direction: column; min-width: 0; }
+.podcast-opml { display: flex; gap: 10px; flex-wrap: wrap; }
+.podcast-head { margin: 0 0 8px; font-size: 20px; }
+.podcast-error { margin: 10px 0 0; color: #e8b4a0; }
+.episodes { list-style: none; margin: 0 0 28px; padding: 0; max-width: 960px; }
+.episode { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: start; padding: 12px 6px; border-bottom: 1px solid var(--line); }
+.episode-play { margin-top: 2px; }
+.episode-body { min-width: 0; }
+.episode-show { display: block; color: var(--muted); font-size: 13px; text-decoration: none; }
+.episode-title { font-weight: 600; overflow-wrap: anywhere; }
+.episode.is-current .episode-title { color: var(--accent); }
+.episode-facts { font-size: 13px; margin-top: 2px; }
+.episode-state svg { width: 13px; height: 13px; fill: currentColor; vertical-align: -2px; margin-right: 2px; }
+.episode-state.is-new { color: var(--accent); }
+.episode-progress { position: static; margin: 8px 0 0; max-width: 320px; box-shadow: none; }
+.episode-desc {
+  margin: 6px 0 0; color: #c6c6cc; font-size: 14px; line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.podcast-page .music-head .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+@media (max-width: 720px) {
+  .episode { grid-template-columns: auto 1fr; }
+  .episode-mark { grid-column: 2; justify-self: start; }
+  .podcast-add-row { flex-wrap: wrap; }
+}

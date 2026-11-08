@@ -21,9 +21,13 @@ export function whenSignedOut(fn) { onSignedOut = fn; }
 let onRewind = () => {};
 export function whenRewound(fn) { onRewind = fn; }
 
-export async function api(path, { method = "GET", body, signal, keepalive } = {}) {
+// raw, {type, data}, sends data as it is instead of a JSON body (an OPML file).
+export async function api(path, { method = "GET", body, raw, signal, keepalive } = {}) {
   const opts = { method, headers: { ...CLIENT_HEADER }, credentials: "same-origin", signal, keepalive };
-  if (body !== undefined) {
+  if (raw) {
+    opts.headers["Content-Type"] = raw.type;
+    opts.body = raw.data;
+  } else if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }

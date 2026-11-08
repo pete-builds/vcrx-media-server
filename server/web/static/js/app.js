@@ -18,6 +18,7 @@ import { searchSuggest } from "./suggest.js";
 import { installShortcuts } from "./shortcuts.js";
 import { musicLibraryView, musicArtistView, musicAlbumView } from "./views/music.js";
 import { audiobookLibraryView, audiobookView } from "./views/audiobooks.js";
+import { podcastsView, podcastShowView } from "./views/podcasts.js";
 import { installMusicPlayer, clear as clearMusic } from "./music/player.js";
 import { pickerView, drawProfileButton } from "./views/profiles.js";
 import { pairView, inviteView } from "./views/devices.js";
@@ -47,6 +48,8 @@ const routes = [
   [/^\/music\/album\/(\d+)$/, () => musicAlbumView],
   [/^\/audiobooks\/(\d+)$/, () => audiobookLibraryView],
   [/^\/audiobooks\/book\/(\d+)$/, () => audiobookView],
+  [/^\/podcasts$/, () => podcastsView],
+  [/^\/podcasts\/show\/(\d+)$/, () => podcastShowView],
   [/^\/profiles$/, () => pickerView],
   [/^\/pair\/([A-Za-z-]{1,16})$/, () => pairView],
   [/^\/invite\/([A-Za-z2-7-]{16,64})$/, () => inviteView],
@@ -162,6 +165,7 @@ export function drawNav() {
   const links = [h("a", { class: "nav-link", href: "#/" }, "Home")];
   for (const lib of state.libraries) links.push(h("a", { class: "nav-link", href: libraryHref(lib) }, lib.name));
   if (state.me && state.me.live_tv) links.push(h("a", { class: "nav-link", href: "#/live" }, "Live TV"));
+  if (state.me && state.me.podcasts) links.push(h("a", { class: "nav-link", href: "#/podcasts" }, "Podcasts"));
   if (state.me && state.me.is_admin) links.push(h("a", { class: "nav-link", href: "#/activity" }, "Activity"));
   // On a phone the top bar has no room for Settings, so the menu carries it.
   links.push(h("a", { class: "nav-link nav-phone-only", href: "#/settings" }, "Settings"));
@@ -192,6 +196,7 @@ function drawTabs() {
     ...picked.map((l) => tab(libraryHref(l), libIcon(l), l.name)), search, more);
   const rest = libs.filter((l) => !picked.includes(l)).map((l) => h("a", { class: "sheet-link", href: libraryHref(l) }, libIcon(l), l.name));
   if (state.me && state.me.live_tv) rest.push(h("a", { class: "sheet-link", href: "#/live" }, icon("tv"), "Live TV"));
+  if (state.me && state.me.podcasts) rest.push(h("a", { class: "sheet-link", href: "#/podcasts" }, icon("podcast"), "Podcasts"));
   if (state.me && state.me.is_admin) rest.push(h("a", { class: "sheet-link", href: "#/activity" }, icon("activity"), "Activity"));
   rest.push(h("a", { class: "sheet-link", href: "#/settings" }, icon("settings"), "Settings"));
   document.querySelector("#more-sheet nav").replaceChildren(...rest);

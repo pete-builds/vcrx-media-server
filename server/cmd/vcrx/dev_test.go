@@ -17,8 +17,10 @@ func TestDevOverridesAreNotInNormalBuilds(t *testing.T) {
 	if f := devHomeDate(slog.New(slog.NewTextHandler(io.Discard, nil))); f != nil {
 		t.Fatalf("a normal build pinned Home's date to %v", f())
 	}
-	if ok, _ := devCommand("dev-seed", nil); ok {
-		t.Fatal("a normal build has the dev-seed command")
+	for _, cmd := range []string{"dev-seed", "dev-feeds"} {
+		if ok, _ := devCommand(cmd, []string{"/tmp", "127.0.0.1:0"}); ok {
+			t.Fatalf("a normal build has the %s command", cmd)
+		}
 	}
 }
 

@@ -16,6 +16,9 @@
 # A second one (its own VCRX_DEV_DIR and VCRX_PORT, and VCRX_DEV_NAME to tell
 # them apart) can be linked to the first as a friend's server: both allow
 # peers on loopback.
+#
+# Podcasts are on, with one sample show served from loopback on port
+# $VCRX_PORT + 1000 (VCRX_DEV_FEED_PORT); subscribe to the URL it prints.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -285,6 +288,58 @@ nfo "$media/TV/Lamplight Lane" tvshow.nfo 7.9 45000 '<genre>Mystery</genre>'
 nfo "$media/TV/North Ferry" tvshow.nfo 8.1 67000 '<genre>Drama</genre>'
 nfo "$media/TV/Signal Hill" tvshow.nfo 7.4 21000 '<genre>Comedy</genre>'
 
+# Podcasts: a sample show of two short episodes, served from loopback by
+# "vcrx dev-feeds" (development builds only) on $VCRX_DEV_FEED_PORT, by
+# default the server's port plus 1000. The server never fetches podcasts from
+# a non-public address; podcasts.allow_hosts below lets it reach this one
+# host, and exists for development only.
+feeds="$dir/feeds"
+feed_port="${VCRX_DEV_FEED_PORT:-$((port + 1000))}"
+feed_base="http://127.0.0.1:$feed_port"
+if [ ! -f "$feeds/episode-2.mp3" ]; then
+  song "$feeds/episode-1.mp3" 20 "sine=frequency=300" libmp3lame -metadata title="Episode One"
+  song "$feeds/episode-2.mp3" 15 "sine=frequency=360" libmp3lame -metadata title="Episode Two"
+  ffmpeg -loglevel error -y -f lavfi -i "color=c=0x2b4a3a:s=600x600" -frames:v 1 "$feeds/show.png"
+  ffmpeg -loglevel error -y -f lavfi -i "color=c=0x4a2b3a:s=600x600" -frames:v 1 "$feeds/episode-2.png"
+fi
+rfc2822() { date -u -d "@$1" -R 2> /dev/null || date -u -r "$1" -R; } # GNU date, else BSD date
+now="$(date +%s)"
+cat > "$feeds/feed.xml" << XML
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+<channel>
+<title>Harbor Radio Hour</title>
+<link>https://podcast.example.com/harbor-radio</link>
+<description>An invented show of two short tones, for trying the podcast player.</description>
+<language>en</language>
+<itunes:author>Dev Harbor</itunes:author>
+<itunes:explicit>false</itunes:explicit>
+<itunes:image href="$feed_base/show.png"/>
+<item>
+  <title>Episode Two: Fog Signals</title>
+  <guid isPermaLink="false">harbor-radio-2</guid>
+  <pubDate>$(rfc2822 "$((now - 3600))")</pubDate>
+  <description><![CDATA[<p>The second invented episode: <b>fifteen seconds</b> of tone.</p>]]></description>
+  <itunes:duration>0:15</itunes:duration>
+  <itunes:season>1</itunes:season>
+  <itunes:episode>2</itunes:episode>
+  <itunes:image href="$feed_base/episode-2.png"/>
+  <enclosure url="$feed_base/episode-2.mp3" type="audio/mpeg" length="$(wc -c < "$feeds/episode-2.mp3" | tr -d ' ')"/>
+</item>
+<item>
+  <title>Episode One: Tide Tables</title>
+  <guid isPermaLink="false">harbor-radio-1</guid>
+  <pubDate>$(rfc2822 "$((now - 86400))")</pubDate>
+  <description>The first invented episode: twenty seconds of tone.</description>
+  <itunes:duration>20</itunes:duration>
+  <itunes:season>1</itunes:season>
+  <itunes:episode>1</itunes:episode>
+  <enclosure url="$feed_base/episode-1.mp3" type="audio/mpeg" length="$(wc -c < "$feeds/episode-1.mp3" | tr -d ' ')"/>
+</item>
+</channel>
+</rss>
+XML
+
 cat > "$dir/config/vcrx.yaml" << YAML
 server_name: ${VCRX_DEV_NAME:-VCRX Dev}
 # Two dev servers on this machine may link as friends' servers. Never in
@@ -320,6 +375,11 @@ libraries:
     kind: audiobook
     path: $media/Audiobooks
     scan_interval_minutes: 60
+podcasts:
+  enabled: true
+  # Development only: the sample feed above, on loopback. A real server
+  # leaves this out, and podcasts come from public addresses only.
+  allow_hosts: ["127.0.0.1:$feed_port"]
 YAML
 
 export VCRX_CONFIG_DIR="$dir/config" VCRX_CACHE_DIR="$dir/cache" VCRX_MEDIA_ROOTS="$media"
@@ -339,9 +399,12 @@ if ! grep -qw dev <<< "$users"; then
   echo devpassword | "$dir/vcrx" user add -username dev -admin
 fi
 echo "dev-server: http://127.0.0.1:$port/ (admin dev / devpassword; this machine signs in automatically)"
+"$dir/vcrx" dev-feeds "$feeds" "127.0.0.1:$feed_port" &
+feeder=$!
+echo "dev-server: sample podcast feed at $feed_base/feed.xml"
 "$dir/vcrx" serve &
 server=$!
-trap 'kill "$server" 2> /dev/null' EXIT INT TERM
+trap 'kill "$server" "$feeder" 2> /dev/null' EXIT INT TERM
 # The server creates the libraries from vcrx.yaml at startup; scan them once
 # now rather than waiting for the first scheduled scan.
 for _ in $(seq 1 50); do
