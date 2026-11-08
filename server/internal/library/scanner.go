@@ -145,7 +145,7 @@ func normalize(lib Library, opt Options) (Library, Options, error) {
 	if lib.Grouping == "" {
 		lib.Grouping = "folder"
 	}
-	if lib.Kind != KindMovie && lib.Kind != KindShow && lib.Kind != KindMusic {
+	if lib.Kind != KindMovie && lib.Kind != KindShow && lib.Kind != KindMusic && lib.Kind != KindAudiobook {
 		return lib, opt, fmt.Errorf("library %q: unknown kind %q", lib.Name, lib.Kind)
 	}
 	if lib.Grouping != "folder" && lib.Grouping != "title_year" {
@@ -266,8 +266,9 @@ func (s *Scanner) execute(ctx context.Context, lib Library, opt Options, run Run
 	s.log().Info("scan finished", "library", lib.Name, "run", run.ID, "status", run.Status, "seen", run.Seen, "added", run.Added,
 		"changed", run.Changed, "missing", run.Missing, "failed", run.Failed, "unplayable", len(run.Unplayable), "took", s.now().Sub(start).Round(time.Millisecond).String(),
 		"error", run.Error)
-	// Recently added notices list movies and episodes; music has its own rows.
-	if s.OnAdded != nil && run.Status == StatusOK && run.Added > 0 && lib.Kind != KindMusic {
+	// Recently added notices list movies and episodes; music and audiobooks
+	// have their own pages.
+	if s.OnAdded != nil && run.Status == StatusOK && run.Added > 0 && lib.Kind != KindMusic && lib.Kind != KindAudiobook {
 		s.OnAdded(context.WithoutCancel(ctx), lib, run, before)
 	}
 	if s.OnFinished != nil && run.Status == StatusOK {
@@ -396,8 +397,11 @@ func (s *Scanner) scan(ctx context.Context, lib Library, opt Options, run *Run) 
 	if s.Prober == nil {
 		return "", errors.New("scanner has no prober")
 	}
-	if lib.Kind == KindMusic {
+	switch lib.Kind {
+	case KindMusic:
 		return s.scanMusic(ctx, lib, opt, run)
+	case KindAudiobook:
+		return s.scanAudiobooks(ctx, lib, opt, run)
 	}
 	log := s.log().With("library", lib.Name, "run", run.ID)
 	if err := checkRoot(lib.RootPath); err != nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/db"
 	"github.com/pete-builds/vcrx-media-server/server/internal/fsafe"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
+	"github.com/pete-builds/vcrx-media-server/server/internal/policy"
 )
 
 func pathID(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
@@ -576,14 +577,17 @@ func (s *Server) playbackEvent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// A listen is the same: the caller must still be allowed the track.
-	if ok, err := s.musicListenAllowed(r.Context(), ri.Policy, ri.Session.User.ID, r.PathValue("session_id")); err != nil || !ok {
-		if err != nil {
-			s.internal(w, r, err)
+	// A listen is the same: the caller must still be allowed the track, or
+	// the book's file.
+	for _, allowed := range []func(context.Context, policy.Policy, int64, string) (bool, error){s.musicListenAllowed, s.audiobookListenAllowed} {
+		if ok, err := allowed(r.Context(), ri.Policy, ri.Session.User.ID, r.PathValue("session_id")); err != nil || !ok {
+			if err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			writeError(w, http.StatusNotFound, "not_found", "Unknown playback session.")
 			return
 		}
-		writeError(w, http.StatusNotFound, "not_found", "Unknown playback session.")
-		return
 	}
 	err := s.Playback.RecordEvent(r.Context(), ri.Session.User.ID, r.PathValue("session_id"), ev)
 	if err == nil && (ev.Type == "stop" || ev.Type == "error") {

@@ -61,6 +61,12 @@ func (c *Covers) ArtistImage(ctx context.Context, pol policy.Policy, artistID in
 	return c.render(ctx, src, snapWidth(width))
 }
 
+// Render returns the path of a cached JPEG of a picture under root: an image
+// file, or the picture embedded in an audio file. Audiobook covers share it.
+func (c *Covers) Render(ctx context.Context, root, rel string, width int) (string, error) {
+	return c.render(ctx, &coverSource{Root: root, Path: rel}, snapWidth(width))
+}
+
 func (c *Covers) render(ctx context.Context, src *coverSource, width int) (string, error) {
 	abs, err := fsafe.ResolveUnder(src.Root, cleanRel(src.Path))
 	if err != nil {

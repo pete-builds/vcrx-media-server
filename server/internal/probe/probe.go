@@ -119,8 +119,9 @@ func (f *FFprobe) run(ctx context.Context, path string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// The file: prefix stops ffprobe reading a name as a protocol or an option.
+	// Chapters are an audiobook's table of contents; video ignores them.
 	cmd := exec.CommandContext(ctx, f.bin(), "-v", "error", "-print_format", "json",
-		"-show_format", "-show_streams", "file:"+path)
+		"-show_format", "-show_streams", "-show_chapters", "file:"+path)
 	var stdout, stderr limitedBuffer
 	stdout.max, stderr.max = maxOutput, 8<<10
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

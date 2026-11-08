@@ -194,6 +194,8 @@ type walkFixture struct {
 	posters        []int64
 	// A music library the restricted friend is not granted.
 	music musicIDs
+	// And an audiobook library.
+	books bookIDs
 	// Extras hidden with their film (a denied label) or by the ceiling (4K).
 	hiddenExtras []int64
 }
@@ -206,6 +208,7 @@ func newWalkFixture(t *testing.T) *walkFixture {
 	f.srv.PINs = household.NewLimiter(household.PINWindow)
 	withHLS(t, f, remux.New("ffmpeg", "ffprobe", 2, nil))
 	w.music = withMusic(t, f)
+	w.books = withAudiobooks(t, f)
 	w.channel = withLive(t, f)
 	withLiveStream(t, f, w.channel)
 	now := time.Now().UnixMilli()
@@ -388,7 +391,7 @@ func newWalkFixture(t *testing.T) *walkFixture {
 
 // open lets the friend see everything; restrict applies the policy under test.
 func (w *walkFixture) open() {
-	w.setAccess([]int64{w.movies, w.tv, w.vault, w.music.library}, map[string]any{"allow_transcode": true, "allow_4k_transcode": true, "allow_live_tv": true})
+	w.setAccess([]int64{w.movies, w.tv, w.vault, w.music.library, w.books.library}, map[string]any{"allow_transcode": true, "allow_4k_transcode": true, "allow_live_tv": true})
 }
 
 func (w *walkFixture) restrict() {
@@ -468,6 +471,24 @@ func (w *walkFixture) startListen(tok string, track int64) string {
 	return out.SessionID
 }
 
+// startBookListen opens a listen to a book's file, after saving a place in
+// the book so it is in Continue listening.
+func (w *walkFixture) startBookListen(tok string) string {
+	w.t.Helper()
+	if r := w.do("PUT", fmt.Sprintf("/api/v1/audiobooks/books/%d/progress", w.books.multi), tok, map[string]any{"position_s": 1}); r.code != 200 {
+		w.t.Fatalf("progress on book %d: %d %s", w.books.multi, r.code, r.body)
+	}
+	var out struct {
+		SessionID string `json:"session_id"`
+	}
+	r := w.do("POST", fmt.Sprintf("/api/v1/audiobooks/files/%d/sessions", w.books.multiFiles[0]), tok, map[string]any{"capabilities": musicBrowserCaps()})
+	r.json(w.t, &out)
+	if r.code != 201 {
+		w.t.Fatalf("listen on book file %d: %d %s", w.books.multiFiles[0], r.code, r.body)
+	}
+	return out.SessionID
+}
+
 // startExtraSession opens a converted-stream session on an extra.
 func (w *walkFixture) startExtraSession(tok string, extra int64) string {
 	w.t.Helper()
@@ -486,9 +507,37 @@ func (w *walkFixture) startExtraSession(tok string, extra int64) string {
 // probes lists every call the walk makes. sessions are the friend's, opened
 // while the friend could still play the hidden things; adminSession is not the
 // friend's at all.
-func (w *walkFixture) probes(sessions []string, adminSession, listen string) []probe {
-	ps := append(w.musicProbes(listen), w.liveProbes()...)
+func (w *walkFixture) probes(sessions []string, adminSession, listen, bookListen string) []probe {
+	ps := append(append(w.musicProbes(listen), w.bookProbes(bookListen)...), w.liveProbes()...)
 	return append(ps, w.videoProbes(sessions, adminSession)...)
+}
+
+// bookProbes cover the audiobook routes: every one names the library, a book
+// or a file in the Audiobooks library the restricted friend is not granted,
+// and the lists stop mentioning it. The friend's listen, opened while
+// allowed, is cut off, and their progress can be neither read nor written.
+func (w *walkFixture) bookProbes(listen string) []probe {
+	b := w.books
+	caps := map[string]any{"capabilities": musicBrowserCaps()}
+	return []probe{
+		at("GET /api/v1/audiobooks/libraries/{library_id}/books", b.library),
+		at("GET /api/v1/audiobooks/libraries/{library_id}/books", b.library).query("sort=recent&state=in_progress"),
+		at("GET /api/v1/audiobooks/continue").hides("Second Steps"),
+		at("GET /api/v1/audiobooks/books/{book_id}", b.m4b),
+		at("GET /api/v1/audiobooks/books/{book_id}/cover", b.m4b).query("width=96"),
+		at("GET /api/v1/audiobooks/books/{book_id}/progress", b.multi),
+		at("PUT /api/v1/audiobooks/books/{book_id}/progress", b.multi).with(map[string]any{"position_s": 1}),
+		at("POST /api/v1/audiobooks/books/{book_id}/finished", b.m4b),
+		at("DELETE /api/v1/audiobooks/books/{book_id}/finished", b.m4b),
+		at("POST /api/v1/audiobooks/books/{book_id}/queue", b.multi).with(caps),
+		at("POST /api/v1/audiobooks/files/{file_id}/sessions", b.m4bFile).with(caps),
+		at("GET /api/v1/audiobooks/files/{file_id}/file", b.m4bFile),
+		at("HEAD /api/v1/audiobooks/files/{file_id}/file", b.m4bFile),
+		at("GET /api/v1/audiobooks/files/{file_id}/stream", b.m4bFile).query("codec=aac"),
+		at("HEAD /api/v1/audiobooks/files/{file_id}/stream", b.m4bFile).query("codec=aac"),
+		at("GET /api/v1/libraries").hides(`"name":"Audiobooks"`),
+		at("POST /api/v1/playback/sessions/{session_id}/events", listen).with(map[string]any{"type": "progress", "position_ms": 1000}),
+	}
 }
 
 // musicProbes cover the music routes: every one names a library, artist,
@@ -803,6 +852,7 @@ func accessWalk(t *testing.T, kind string) {
 	}
 	sessions = append(sessions, w.startSession(w.friendTok, w.movieID, &w.v4k))
 	listen := w.startListen(w.friendTok, w.music.flac)
+	bookListen := w.startBookListen(w.friendTok)
 	// And a live channel, watched while the grant lasts.
 	w.liveRun = startLiveWatch(t, w.fixture, w.friendTok, w.channel)
 	// And on the extras about to be hidden: a trailer session has no version,
@@ -811,7 +861,7 @@ func accessWalk(t *testing.T, kind string) {
 		sessions = append(sessions, w.startExtraSession(w.friendTok, x))
 	}
 	adminSession := w.startSession(w.adminTok, w.movieID, &w.v1080)
-	ps := w.probes(sessions, adminSession, listen)
+	ps := w.probes(sessions, adminSession, listen, bookListen)
 	checkCoverage(t, w.srv.Routes(), ps, kind)
 
 	call := func(p probe, tok string) resp {

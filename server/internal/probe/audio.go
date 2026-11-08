@@ -32,6 +32,16 @@ type AudioResult struct {
 	// EmbeddedCover is true when the file carries a picture (an attached_pic
 	// stream), which serves as album art when the folder has none.
 	EmbeddedCover bool
+	// Chapters are the file's own chapter marks (an M4B's, or an MP3's CHAP
+	// frames), in order. Most music has none.
+	Chapters []Chapter
+}
+
+// Chapter is one chapter mark inside a file, in milliseconds from its start.
+type Chapter struct {
+	Title   string `json:"title"`
+	StartMs int64  `json:"start_ms"`
+	EndMs   int64  `json:"end_ms"`
 }
 
 // ErrNoAudio means the file holds no audio stream.
@@ -60,6 +70,17 @@ func ParseAudio(data []byte, path string) (*AudioResult, error) {
 		Tags:       map[string]string{},
 	}
 	addTags(r.Tags, out.Format.Tags)
+	for _, c := range out.Chapters {
+		ch := Chapter{StartMs: secondsToMs(c.StartTime), EndMs: secondsToMs(c.EndTime)}
+		for k, v := range c.Tags {
+			if strings.EqualFold(k, "title") {
+				ch.Title = strings.TrimSpace(v)
+			}
+		}
+		if ch.EndMs > ch.StartMs {
+			r.Chapters = append(r.Chapters, ch)
+		}
+	}
 	var audio *ffStream
 	for i := range out.Streams {
 		s := &out.Streams[i]
