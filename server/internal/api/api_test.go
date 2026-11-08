@@ -187,12 +187,19 @@ func (r resp) json(t *testing.T, v any) {
 	}
 }
 
+// rawBody is a request body sent as it is, not as JSON (an OPML upload).
+type rawBody []byte
+
 func (f *fixture) do(method, path, token string, body any, hdr ...string) resp {
 	f.t.Helper()
 	var rd io.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
+	switch b := body.(type) {
+	case nil:
+	case rawBody:
 		rd = bytes.NewReader(b)
+	default:
+		j, _ := json.Marshal(b)
+		rd = bytes.NewReader(j)
 	}
 	req := httptest.NewRequest(method, path, rd)
 	req.RemoteAddr = "192.168.1.50:40000"
