@@ -78,15 +78,21 @@ class MusicPlayer private constructor(private val context: Context, private val 
     private var player: ExoPlayer? = null
     private var caps: Capabilities? = null
     private var listenSession: String? = null
+    private var listenTrack: Long? = null
     private var listenJob: Job? = null
+    private val listens = ListenSessions(Regex("/api/v1/music/tracks/(\\d+)/")) { id ->
+        graph.api.musicListen(id, capabilities()).let { OpenListen(it.sessionId, it.heartbeatIntervalMs) }
+    }
     private var ticker: Job? = null
 
     suspend fun playAlbum(albumId: Long, startTrackId: Long? = null, shuffle: Boolean = false) {
+        listens.enabled = streamOnly(graph)
         val tracks = fetch(MusicQueueRequest(albumId = albumId, capabilities = capabilities()))
         start(tracks, tracks.indexOfFirst { it.id == startTrackId }.coerceAtLeast(0), shuffle)
     }
 
     suspend fun playArtist(artistId: Long) {
+        listens.enabled = streamOnly(graph)
         start(fetch(MusicQueueRequest(artistId = artistId, shuffle = true, capabilities = capabilities())), 0, false)
     }
 
@@ -109,6 +115,8 @@ class MusicPlayer private constructor(private val context: Context, private val 
         val wanted = all.getOrNull(startIndex)
         val start = playable.indexOf(wanted).coerceAtLeast(0)
         val q = MusicQueue(playable, start, shuffle).also { it.repeat = queue?.repeat ?: Repeat.Off }
+        endListen()
+        closeUnplayed(listens) { id -> graph.playbackEvents.send(id, PlaybackEvent(type = "stop", positionMs = 0)) }
         queue = q
         load(0L)
         publish(message = if (skipped > 0) "$skipped tracks cannot play on this TV and were left out." else null)
@@ -120,7 +128,7 @@ class MusicPlayer private constructor(private val context: Context, private val 
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
         ExoPlayer.Builder(context, renderers)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http), DefaultExtractorsFactory()))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(listens.dataSource(DefaultDataSource.Factory(context, http)), DefaultExtractorsFactory()))
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true)
             .build()
@@ -212,6 +220,7 @@ class MusicPlayer private constructor(private val context: Context, private val 
     /** Stops the music and empties the queue. */
     fun stop() {
         endListen()
+        closeUnplayed(listens) { id -> graph.playbackEvents.send(id, PlaybackEvent(type = "stop", positionMs = 0)) }
         ticker?.cancel()
         player?.run {
             removeListener(listener)
@@ -262,14 +271,19 @@ class MusicPlayer private constructor(private val context: Context, private val 
         val track = queue?.current ?: return
         listenJob = scope.launch {
             val session = try {
-                graph.api.musicListen(track.id, capabilities())
+                if (listens.enabled) {
+                    listens.get(track.id)
+                } else {
+                    graph.api.musicListen(track.id, capabilities()).let { OpenListen(it.sessionId, it.heartbeatIntervalMs) }
+                }
             } catch (e: ApiException) {
                 publish(message = e.message)
                 return@launch
             }
             listenSession = session.sessionId
+            listenTrack = track.id
             report("start")
-            val beat = session.heartbeatIntervalMs.coerceAtLeast(5_000)
+            val beat = session.heartbeatMs.coerceAtLeast(5_000)
             while (isActive) {
                 delay(beat)
                 if (player?.isPlaying == true) report("progress")
@@ -280,6 +294,8 @@ class MusicPlayer private constructor(private val context: Context, private val 
     private fun endListen() {
         listenJob?.cancel()
         listenJob = null
+        listenTrack?.let { listens.forget(it) }
+        listenTrack = null
         val id = listenSession ?: return
         listenSession = null
         graph.playbackEvents.send(id, PlaybackEvent(type = "stop", positionMs = player?.currentPosition ?: 0, durationMs = duration()))
