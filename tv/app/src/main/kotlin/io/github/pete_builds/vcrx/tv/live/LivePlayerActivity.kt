@@ -56,7 +56,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Live TV: one channel playing from the server's own live HLS playlist. Up
+ * IPTV: one channel playing from the server's own live HLS playlist. Up
  * and Down (or the remote's channel keys) change channel in the guide's order,
  * showing the next channel at once and tuning it once the presses stop; OK
  * shows what is on; Back leaves. Leaving a channel tells the server, so a

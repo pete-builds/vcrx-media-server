@@ -1,4 +1,4 @@
-// What Live TV shows and how the remote moves through channels. Pure, so the
+// What IPTV shows and how the remote moves through channels. Pure, so the
 // rules are unit tested without a TV.
 package io.github.pete_builds.vcrx.tv.live
 

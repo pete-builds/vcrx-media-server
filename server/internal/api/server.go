@@ -85,7 +85,7 @@ type Server struct {
 	// Audiobooks serves audiobook libraries (audiobooks.go).
 	Audiobooks *Audiobooks
 
-	// Live is Live TV's channels (live.go).
+	// Live is IPTV's channels (live.go).
 	Live *Live
 
 	AdminAllowRemote bool

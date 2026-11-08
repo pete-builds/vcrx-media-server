@@ -13,7 +13,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/live"
 )
 
-// Live is Live TV (milestone 11): the channels from the admin's playlists.
+// Live is IPTV (milestone 11): the channels from the admin's playlists.
 // Nil lists no channels, as if no playlist were set up.
 type Live struct {
 	Store     *live.Store
@@ -24,7 +24,7 @@ type Live struct {
 	Streams *live.Streams
 }
 
-// liveRoutes are Live TV's routes. A viewer's routes list and show only what
+// liveRoutes are IPTV's routes. A viewer's routes list and show only what
 // policy.CanWatchLive allows; stream and playlist URLs are never sent.
 func (s *Server) liveRoutes() []route {
 	return []route{
