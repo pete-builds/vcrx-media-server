@@ -623,6 +623,9 @@ type StreamSession struct {
 	Terminated *string
 	// ExtraID is set instead of VersionID when the session plays an extra.
 	ExtraID int64
+	// TrackID or BookFileID is set instead when the session is a listen to
+	// a music track or an audiobook's file (ForFile only).
+	TrackID, BookFileID int64
 }
 
 // ForStream loads a session the user owns for its converted stream.
@@ -643,6 +646,24 @@ func (s *Service) ForStream(ctx context.Context, userID int64, sessionID string)
 	if caps.Valid {
 		_ = json.Unmarshal([]byte(caps.String), &out.Caps)
 	}
+	return out, nil
+}
+
+// ForFile loads a session the user owns with whatever it plays: a version, an
+// extra, a music track or an audiobook's file. The stream only rule for
+// invited devices matches it against the file asked for.
+func (s *Service) ForFile(ctx context.Context, userID int64, sessionID string) (StreamSession, error) {
+	var out StreamSession
+	var vid, xid, tid, bid, ended sql.NullInt64
+	err := s.DB.QueryRowContext(ctx, `SELECT version_id, extra_id, track_id, book_file_id, decision, ended_at, terminated_message
+		FROM playback_sessions WHERE id = ? AND user_id = ?`, sessionID, userID).Scan(&vid, &xid, &tid, &bid, &out.Decision, &ended, &out.Terminated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, ErrSessionNotFound
+	}
+	if err != nil {
+		return out, err
+	}
+	out.VersionID, out.ExtraID, out.TrackID, out.BookFileID, out.Ended = vid.Int64, xid.Int64, tid.Int64, bid.Int64, ended.Valid
 	return out, nil
 }
 

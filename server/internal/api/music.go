@@ -244,6 +244,11 @@ func (s *Server) musicTrack(w http.ResponseWriter, r *http.Request) (*music.File
 			return nil, "", false
 		}
 	}
+	// An invited device plays a track only inside its own listen to it,
+	// direct or converted, as it plays a film only inside its session.
+	if !s.streamOnly(w, r, session, func(ss playback.StreamSession) bool { return ss.TrackID == id }) {
+		return nil, "", false
+	}
 	f, err := s.Music.Catalog.File(r.Context(), info(r).Policy, id)
 	if err != nil {
 		s.musicErr(w, r, err)
