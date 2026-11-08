@@ -259,18 +259,25 @@ func (s *Server) musicFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	file, fi, err := fsafe.OpenUnder(f.Root, f.Path)
+	s.serveAudioFile(w, r, f.Root, f.Path, music.MimeFor(f.Container, f.Codec), session, "track", f.TrackID, "The music file cannot be read right now.")
+}
+
+// serveAudioFile serves one audio file under a library root for direct play,
+// tied to its listen so stopping the session ends the read. what and id name
+// it in the log.
+func (s *Server) serveAudioFile(w http.ResponseWriter, r *http.Request, root, rel, mime, session, what string, id int64, unavailable string) {
+	file, fi, err := fsafe.OpenUnder(root, rel)
 	if err != nil {
 		if errors.Is(err, fsafe.ErrOutsideRoot) {
-			s.Log.Error("refused file outside library root", "track", f.TrackID, "path", f.Path, "root", f.Root)
+			s.Log.Error("refused file outside library root", what, id, "path", rel, "root", root)
 		} else {
-			s.Log.Warn("music file unavailable", "track", f.TrackID, "err", err)
+			s.Log.Warn("audio file unavailable", what, id, "err", err)
 		}
-		writeError(w, http.StatusNotFound, "file_unavailable", "The music file cannot be read right now.")
+		writeError(w, http.StatusNotFound, "file_unavailable", unavailable)
 		return
 	}
 	defer func() { _ = file.Close() }()
-	w.Header().Set("Content-Type", music.MimeFor(f.Container, f.Codec))
+	w.Header().Set("Content-Type", mime)
 	w.Header().Set("Cache-Control", "private, no-transform")
 	var body io.ReadSeeker = file
 	if session != "" {
@@ -280,7 +287,7 @@ func (s *Server) musicFile(w http.ResponseWriter, r *http.Request) {
 		defer s.streams.remove(session, &cancel)
 		body = ctxReader{ctx: ctx, rs: file}
 	}
-	http.ServeContent(w, r, filepath.Base(f.Path), fi.ModTime(), body)
+	http.ServeContent(w, r, filepath.Base(rel), fi.ModTime(), body)
 }
 
 // musicStream converts a track to AAC or Opus as ffmpeg reads it, from
@@ -291,6 +298,12 @@ func (s *Server) musicStream(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.streamAudioFile(w, r, f.Root, f.Path, session, "track", f.TrackID, "The music file cannot be read right now.")
+}
+
+// streamAudioFile converts one audio file under a library root as ffmpeg
+// reads it. The caller has checked access to the file.
+func (s *Server) streamAudioFile(w http.ResponseWriter, r *http.Request, root, rel, session, what string, id int64, unavailable string) {
 	pol := info(r).Policy
 	if !pol.IsAdmin && !pol.AllowTranscode {
 		writeError(w, http.StatusForbidden, "playback_refused", "Your account is not allowed to have files converted on the server.")
@@ -304,9 +317,9 @@ func (s *Server) musicStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "codec must be aac, or opus when the server has it.")
 		return
 	}
-	abs, err := fsafe.ResolveUnder(f.Root, f.Path)
+	abs, err := fsafe.ResolveUnder(root, rel)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "file_unavailable", "The music file cannot be read right now.")
+		writeError(w, http.StatusNotFound, "file_unavailable", unavailable)
 		return
 	}
 	w.Header().Set("Content-Type", remux.AudioMime(codec))
@@ -329,7 +342,7 @@ func (s *Server) musicStream(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, remux.ErrBusy):
 		writeError(w, http.StatusServiceUnavailable, "busy", "The server is converting as many streams as it allows. Try again shortly.")
 	case err != nil:
-		s.Log.Warn("converted music failed", "track", f.TrackID, "err", err)
+		s.Log.Warn("converted audio failed", what, id, "err", err)
 	}
 }
 

@@ -122,9 +122,17 @@ async function main() {
   const ids = await evaluate(`
     const j = (p) => fetch("/api/v1" + p).then((r) => r.json());
     const libs = (await j("/libraries")).libraries;
-    const out = { libs: libs.filter((l) => l.kind !== "music").map((l) => l.id), movie: null, show: null, direct: null, converted: null,
-      transcoded: null, music: null, liveAlbum: null, alacAlbum: null, artist: null };
+    const out = { libs: libs.filter((l) => l.kind !== "music" && l.kind !== "audiobook").map((l) => l.id), movie: null, show: null, direct: null,
+      converted: null, transcoded: null, music: null, liveAlbum: null, alacAlbum: null, artist: null, books: null, m4b: null, mp3Book: null };
     for (const l of libs) {
+      if (l.kind === "audiobook") {
+        out.books = l.id;
+        const books = (await j("/audiobooks/libraries/" + l.id + "/books")).books;
+        const by = (t) => books.find((b) => b.title === t);
+        out.m4b = by("The Sample Book") ? by("The Sample Book").id : null;
+        out.mp3Book = by("First Steps") ? by("First Steps").id : null;
+        continue;
+      }
       if (l.kind === "music") {
         out.music = l.id;
         const albums = (await j("/music/libraries/" + l.id + "/albums?limit=50")).albums;
@@ -230,6 +238,13 @@ async function main() {
       [`/music/album/${ids.liveAlbum}`, ".tracklist .track .track-btn"],
       [`/music/artist/${ids.artist}`, ".music-head h1"],
       ["/search?q=tide", ".music-results .tracklist .track"],
+    ] : []),
+    // Audiobooks: the library's covers and filters, and a book's chapters.
+    ...(ids.books ? [
+      [`/audiobooks/${ids.books}`, ".book-grid .book-card"],
+      [`/audiobooks/${ids.books}?sort=author&state=unplayed`, ".book-filters select"],
+      [`/audiobooks/book/${ids.m4b}`, ".chapters .track .track-btn"],
+      [`/audiobooks/book/${ids.mp3Book}`, ".music-facts dd a"],
     ] : []),
     ["/settings/devices", ".scope-form"],
     ["/settings/friends", ".link-form"],
@@ -505,7 +520,8 @@ async function main() {
   }
   if (!ids0.some((id) => id.startsWith("because_you_watched:"))) fail("home rows", `no Because You Watched row; rows: ${ids0.join(" ")}`);
   for (const r of rowsBefore) {
-    if (r.id !== "continue_watching" && r.cards < 4) fail("home rows", `${r.id} shows ${r.cards} titles, fewer than four`);
+    // Rows of the viewer's own progress show whatever is in progress.
+    if (r.id !== "continue_watching" && r.id !== "continue_listening" && r.cards < 4) fail("home rows", `${r.id} shows ${r.cards} titles, fewer than four`);
   }
   const halloween = rowsBefore.find((r) => r.id === "seasonal:halloween");
   if (halloween && !halloween.titles.some((t) => /Hollow Pines|Lantern Hour|Grave Weather/.test(t))) {
@@ -665,6 +681,7 @@ async function main() {
   if (exceptions.length) fail("season tabs", `threw: ${exceptions[0]}`);
 
   await music(s, evaluate, press, ids, { reset: () => { exceptions = []; }, first: () => exceptions[0] });
+  await audiobooks(s, evaluate, ids, { reset: () => { exceptions = []; }, first: () => exceptions[0] });
   // Extras: Harbor Lights has a -trailer file and two extras folders, and Quiet
   // Street a theme.mp3 (scripts/dev-server.sh). None may become a title of its
   // own. The film's page shows an Extras row and a Trailer button; the trailer,
@@ -1170,6 +1187,109 @@ async function music(s, evaluate, press, ids, ex) {
 
   await evaluate(`const b = document.querySelector("#music-bar .mb-btn[aria-label^='Stop']"); if (b) b.click();`);
   if (ex.first()) fail("music", `threw: ${ex.first()}`);
+}
+
+// Audiobooks: Play on a book's page with a real mouse click starts the M4B in
+// the player bar, now a book player; the next chapter and a 30 s skip move
+// through the book; speed reaches the audio element; pausing saves the place
+// in the book to the server; the book then shows in Home's Continue
+// listening; and the multi-file book plays its second file from a position
+// inside it.
+async function audiobooks(s, evaluate, ids, ex) {
+  if (!ids.books || !ids.m4b || !ids.mp3Book) {
+    fail("audiobooks", "no audiobook library with The Sample Book and First Steps (run against scripts/dev-server.sh)");
+    return;
+  }
+  const wait = (cond, n = 60) => `for (let i = 0; i < ${n} && !(${cond}); i++) await new Promise((r) => setTimeout(r, 150));`;
+  console.log(`audiobooks: play #/audiobooks/book/${ids.m4b}`);
+  ex.reset();
+  const reset = `const { api } = await import("/js/api.js");
+    await api("/audiobooks/books/${ids.m4b}/finished", { method: "DELETE" });
+    await api("/audiobooks/books/${ids.mp3Book}/finished", { method: "DELETE" });`;
+  await evaluate(reset);
+  await s("Page.navigate", { url: `${base}/#/audiobooks/book/${ids.m4b}` });
+  const btn = await evaluate(`${wait(`document.querySelector(".book-page .btn-primary")`)}
+    const b = document.querySelector(".book-page .btn-primary");
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    return { x, y, label: b.textContent, hit: document.elementFromPoint(x, y)?.closest("button") === b };`);
+  if (!btn) {
+    fail("audiobooks", "the book page has no Play button");
+    return;
+  }
+  if (!btn.hit) fail("audiobooks", "the Play button is covered by something else");
+  await s("Input.dispatchMouseEvent", { type: "mouseMoved", x: btn.x, y: btn.y });
+  await s("Input.dispatchMouseEvent", { type: "mousePressed", x: btn.x, y: btn.y, button: "left", clickCount: 1 });
+  await s("Input.dispatchMouseEvent", { type: "mouseReleased", x: btn.x, y: btn.y, button: "left", clickCount: 1 });
+  const playing = `(() => { const a = [...document.querySelectorAll("audio.mb-audio")].find((e) => e.getAttribute("src") && !e.paused); return a ? a.currentTime : -1; })()`;
+  const started = await evaluate(`${wait(`${playing} > 0.5`)}
+    const bar = document.getElementById("music-bar");
+    const shown = (sel) => { const e = bar && bar.querySelector(sel); return !!e && !e.hidden; };
+    return { t: ${playing}, book: bar ? bar.dataset.book : null, title: bar ? bar.querySelector(".mb-title").textContent : "",
+      skip: shown("[aria-label='Back 15 seconds']") && shown("[aria-label='Forward 30 seconds']"), shuffle: shown("[aria-label='Shuffle']"),
+      session: navigator.mediaSession && navigator.mediaSession.metadata ? navigator.mediaSession.metadata.title : "" };`);
+  if (!(started.t > 0.5)) fail("audiobooks", `the book did not start playing (t=${started.t})`);
+  if (started.book !== String(ids.m4b)) fail("audiobooks", `the bar is not playing the book (book=${started.book})`);
+  if (started.title !== "Opening") fail("audiobooks", `the bar shows "${started.title}", not the first chapter`);
+  if (!started.skip || started.shuffle) fail("audiobooks", "the bar does not show the book controls in place of the music ones");
+  if (started.session !== "Opening") fail("audiobooks", `the lock screen shows "${started.session}", not the chapter`);
+
+  // Next chapter, then speed, then a 30 s skip past the end of a short book.
+  const moved = await evaluate(`
+    const p = await import("/js/music/player.js");
+    document.querySelector("#music-bar [aria-label='Next chapter']").click();
+    ${wait(`p.bookPos() >= 8 && document.querySelector("#music-bar .mb-title").textContent === "The Middle"`)}
+    const chapter = document.querySelector("#music-bar .mb-title").textContent;
+    const sel = document.querySelector("#music-bar select[aria-label='Playback speed']");
+    sel.value = "1.5";
+    sel.dispatchEvent(new Event("change"));
+    const rate = [...document.querySelectorAll("audio.mb-audio")].find((e) => e.getAttribute("src")).playbackRate;
+    return { pos: p.bookPos(), chapter, rate };`);
+  if (moved.chapter !== "The Middle") fail("audiobooks", `Next chapter shows "${moved.chapter}" at ${moved.pos} s`);
+  if (moved.rate !== 1.5) fail("audiobooks", `speed 1.5 did not reach the audio (${moved.rate})`);
+
+  // Pausing saves the place to the server.
+  const saved = await evaluate(`
+    const p = await import("/js/music/player.js");
+    const n = p.debug.saves.length;
+    await new Promise((r) => setTimeout(r, 600));
+    document.querySelector("#music-bar .mb-play").click();
+    ${wait(`p.debug.saves.length > n`)}
+    const want = p.bookPos();
+    let got = null;
+    for (let i = 0; i < 20; i++) {
+      got = await fetch("/api/v1/audiobooks/books/${ids.m4b}/progress").then((r) => r.json());
+      if (Math.abs(got.position_s - want) < 0.5) break;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return { want, got };`);
+  if (!(saved.got.position_s >= 8) || Math.abs(saved.got.position_s - saved.want) > 0.5 || saved.got.finished) {
+    fail("audiobooks", `pausing at ${saved.want} s saved ${JSON.stringify(saved.got)}`);
+  }
+  console.log(`  paused at ${saved.want.toFixed(1)} s, server has ${saved.got.position_s} s`);
+
+  // Home shows it in Continue listening.
+  await s("Page.navigate", { url: `${base}/#/` });
+  const row = await evaluate(`${wait(`document.querySelector('[data-row="continue_listening"] .book-card')`)}
+    return [...document.querySelectorAll('[data-row="continue_listening"] .book-card')].map((a) => a.getAttribute("href"));`);
+  if (!row.includes(`#/audiobooks/book/${ids.m4b}`)) fail("audiobooks", `Continue listening on Home lists ${JSON.stringify(row)}`);
+
+  // The two-file book, from 14 s: 2 s into its second 12 s file.
+  const multi = await evaluate(`
+    const p = await import("/js/music/player.js");
+    await p.playBook(${ids.mp3Book}, { atS: 14 });
+    ${wait(`${playing} > 0.3`)}
+    const c = p.current();
+    return { title: document.querySelector("#music-bar .mb-title").textContent, index: c ? c.index : -1, pos: p.bookPos() };`);
+  if (multi.index !== 1 || multi.title !== "Departure" || !(multi.pos >= 14)) fail("audiobooks", `14 s into First Steps played ${JSON.stringify(multi)}`);
+
+  // Stopping saves the place once more; the resets wait for that, so later
+  // steps see a Home without Continue listening.
+  await evaluate(`const b = document.querySelector("#music-bar .mb-btn[aria-label^='Stop']"); if (b) b.click();
+    await new Promise((r) => setTimeout(r, 800));
+    ${reset}`);
+  if (ex.first()) fail("audiobooks", `threw: ${ex.first()}`);
 }
 
 const safariUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
@@ -1775,5 +1895,5 @@ if (failures.length) {
 }
 console.log("\nweb-smoke: every page, every playback path (HLS included), Continue Watching removal, search as you type, the shortcuts list, " +
   "the Home feature and rows, Customize Home, season tabs, the manifest and icons, the phone tab bar and Back, the History section, the trailer, extras and theme music, " +
-  "Skip Intro and Next Episode, the invite and pairing loop, lending a tape, music (playing across pages, gapless hand-over, Space)" +
+  "Skip Intro and Next Episode, the invite and pairing loop, lending a tape, music (playing across pages, gapless hand-over, Space), audiobooks (chapters, speed, saved place, Continue listening)" +
   (peer ? ", and linking, badging, playing and unlinking a friend's server" : "") + " passed");

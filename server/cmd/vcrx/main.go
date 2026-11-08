@@ -34,6 +34,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/api"
 	"github.com/pete-builds/vcrx-media-server/server/internal/arr"
 	"github.com/pete-builds/vcrx-media-server/server/internal/artwork"
+	"github.com/pete-builds/vcrx-media-server/server/internal/audiobook"
 	"github.com/pete-builds/vcrx-media-server/server/internal/auth"
 	"github.com/pete-builds/vcrx-media-server/server/internal/catalog"
 	"github.com/pete-builds/vcrx-media-server/server/internal/collections"
@@ -406,6 +407,10 @@ func serve() error {
 	mcat := &music.Catalog{DB: a.db}
 	srv.Music = &api.Music{Catalog: mcat, Player: &music.Player{DB: a.db, Catalog: mcat, Remux: rmx},
 		Covers: &music.Covers{Catalog: mcat, FFmpeg: cfg.FFmpegPath, CacheDir: filepath.Join(cfg.ArtworkCacheDir(), "music")}}
+	// Audiobook libraries: the same decisions, conversion and cover renderer.
+	bcat := &audiobook.Catalog{DB: a.db}
+	srv.Audiobooks = &api.Audiobooks{Catalog: bcat, Player: &audiobook.Player{DB: a.db, Catalog: bcat, Remux: rmx},
+		Covers: &music.Covers{Catalog: mcat, FFmpeg: cfg.FFmpegPath, CacheDir: filepath.Join(cfg.ArtworkCacheDir(), "audiobooks")}}
 	// The weekly newsletter checks once a minute whether its time has come; it
 	// does nothing until switched on in Settings.
 	srv.Newsletter = &newsletter.Service{DB: a.db, Hooks: hooks, Log: log.With("component", "newsletter")}

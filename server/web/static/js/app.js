@@ -17,6 +17,7 @@ import { loginView } from "./views/login.js";
 import { searchSuggest } from "./suggest.js";
 import { installShortcuts } from "./shortcuts.js";
 import { musicLibraryView, musicArtistView, musicAlbumView } from "./views/music.js";
+import { audiobookLibraryView, audiobookView } from "./views/audiobooks.js";
 import { installMusicPlayer, clear as clearMusic } from "./music/player.js";
 import { pickerView, drawProfileButton } from "./views/profiles.js";
 import { pairView, inviteView } from "./views/devices.js";
@@ -44,6 +45,8 @@ const routes = [
   [/^\/music\/(\d+)$/, () => musicLibraryView],
   [/^\/music\/artist\/(\d+)$/, () => musicArtistView],
   [/^\/music\/album\/(\d+)$/, () => musicAlbumView],
+  [/^\/audiobooks\/(\d+)$/, () => audiobookLibraryView],
+  [/^\/audiobooks\/book\/(\d+)$/, () => audiobookView],
   [/^\/profiles$/, () => pickerView],
   [/^\/pair\/([A-Za-z-]{1,16})$/, () => pairView],
   [/^\/invite\/([A-Za-z2-7-]{16,64})$/, () => inviteView],
@@ -173,7 +176,7 @@ function drawTabs() {
   const libs = state.libraries;
   const picked = [libs.find((l) => l.kind === "movie"), libs.find((l) => l.kind === "show")].filter(Boolean);
   for (const l of libs) if (picked.length < 2 && !picked.includes(l)) picked.push(l);
-  const libIcon = (l) => icon(l.kind === "show" ? "tv" : l.kind === "music" ? "music" : "movie");
+  const libIcon = (l) => icon({ show: "tv", music: "music", audiobook: "book" }[l.kind] || "movie");
   const tab = (href, ic, label) => h("a", { class: "tab", href }, ic, h("span", {}, label));
   const search = tab("#/search", icon("search"), "Search");
   // Focus the box inside the tap itself: an iPhone opens the keyboard only for
@@ -206,9 +209,11 @@ function setSheet(open) {
   }
 }
 
-// A music library has its own pages.
+// A music or audiobook library has its own pages.
 export function libraryHref(lib) {
-  return lib.kind === "music" ? `#/music/${lib.id}` : `#/library/${lib.id}`;
+  if (lib.kind === "music") return `#/music/${lib.id}`;
+  if (lib.kind === "audiobook") return `#/audiobooks/${lib.id}`;
+  return `#/library/${lib.id}`;
 }
 
 // The top bar is see-through over a page's hero art until the page scrolls.

@@ -2,6 +2,7 @@ import { api } from "../api.js";
 import { h, card } from "../dom.js";
 import { state, go } from "../app.js";
 import { musicLibraryView } from "./music.js";
+import { audiobookLibraryView } from "./audiobooks.js";
 
 const PAGE = 120;
 
@@ -11,6 +12,7 @@ export async function libraryView({ match, params }) {
   const id = Number(match[1]);
   const lib = state.libraries.find((l) => l.id === id);
   if (lib && lib.kind === "music") return musicLibraryView({ match, params });
+  if (lib && lib.kind === "audiobook") return audiobookLibraryView({ match, params });
   const sort = params.get("sort") || "title";
   const order = params.get("order") || (sort === "title" ? "asc" : "desc");
   const unwatched = params.get("unwatched") === "1";

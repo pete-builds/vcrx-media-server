@@ -45,6 +45,9 @@ class RequestContractTest {
         Body("post", "/api/v1/music/tracks/{track_id}/sessions", MusicListenRequest.serializer()),
         Body("put", "/api/v1/podcasts/episodes/{episode_id}/progress", PodcastProgressRequest.serializer()),
         Body("put", "/api/v1/podcasts/episodes/{episode_id}/played", PodcastPlayedRequest.serializer()),
+        Body("post", "/api/v1/audiobooks/books/{book_id}/queue", AudiobookQueueRequest.serializer()),
+        Body("post", "/api/v1/audiobooks/files/{file_id}/sessions", AudiobookListenRequest.serializer()),
+        Body("put", "/api/v1/audiobooks/books/{book_id}/progress", AudiobookProgressRequest.serializer()),
     )
 
     private val spec: Map<*, *> by lazy {
@@ -75,12 +78,12 @@ class RequestContractTest {
     }
 
     /**
-     * The table above names every class ServerApi and MusicApi encode as a body, so a
+     * The table above names every class ServerApi, MusicApi and AudiobookApi encode as a body, so a
      * new request cannot skip this check by not being listed.
      */
     @Test
     fun everyEncodedBodyIsListed() {
-        val sources = listOf("ServerApi.kt", "MusicApi.kt", "PodcastApi.kt").map { File("src/main/kotlin/io/github/pete_builds/vcrx/tv/net/$it").readText() }
+        val sources = listOf("ServerApi.kt", "MusicApi.kt", "AudiobookApi.kt", "PodcastApi.kt").map { File("src/main/kotlin/io/github/pete_builds/vcrx/tv/net/$it").readText() }
         val sent = sources.flatMap { source ->
             // ServerApi.post or put(path, body, serializer): the path is a literal, unlike OkHttp's post(EMPTY_BODY).
             Regex("""(?:post|put)\("[^"\n]*",[^\n]*?,\s*(\w+)\.serializer\(\)\)""").findAll(source).map { it.groupValues[1] } +

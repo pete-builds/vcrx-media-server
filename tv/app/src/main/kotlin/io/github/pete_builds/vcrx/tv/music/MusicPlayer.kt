@@ -120,6 +120,7 @@ class MusicPlayer private constructor(private val context: Context, private val 
             publish(message = "This episode has no audio to play.")
             return
         }
+        AudiobookPlayer.stopIfRunning()
         endListen()
         finishEpisode()
         episode = e
@@ -169,6 +170,8 @@ class MusicPlayer private constructor(private val context: Context, private val 
     }
 
     private fun start(all: List<MusicTrack>, startIndex: Int, shuffle: Boolean) {
+        // One thing plays at a time: music stops a book, as a book stops music.
+        AudiobookPlayer.stopIfRunning()
         finishEpisode()
         // Tracks this device cannot play, and the server will not convert for
         // this account, stay out of the queue; the screen says how many.
