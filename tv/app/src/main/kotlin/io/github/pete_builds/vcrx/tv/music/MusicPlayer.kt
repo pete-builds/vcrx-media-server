@@ -96,6 +96,8 @@ class MusicPlayer private constructor(private val context: Context, private val 
     private suspend fun fetch(request: MusicQueueRequest): List<MusicTrack> = graph.api.musicQueue(request)
 
     private fun start(all: List<MusicTrack>, startIndex: Int, shuffle: Boolean) {
+        // One thing plays at a time: music stops a book, as a book stops music.
+        AudiobookPlayer.stopIfRunning()
         // Tracks this device cannot play, and the server will not convert for
         // this account, stay out of the queue; the screen says how many.
         val playable = all.filter { it.stream != null }

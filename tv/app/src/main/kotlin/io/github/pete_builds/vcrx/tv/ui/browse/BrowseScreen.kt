@@ -70,6 +70,7 @@ import io.github.pete_builds.vcrx.tv.ui.theme.Gray
 import io.github.pete_builds.vcrx.tv.ui.theme.Motion
 import io.github.pete_builds.vcrx.tv.ui.theme.Surfaces
 import io.github.pete_builds.vcrx.tv.ui.theme.White
+import io.github.pete_builds.vcrx.tv.ui.audiobooks.AudiobookSection
 import io.github.pete_builds.vcrx.tv.ui.music.MusicSection
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -192,7 +193,7 @@ fun BrowseScreen() {
         libraries.forEach {
             val icon = when (it.kind) {
                 "show" -> AppIcons.Tv
-                "music" -> AppIcons.Audio
+                "music", "audiobook" -> AppIcons.Audio
                 else -> AppIcons.Movie
             }
             add(RailEntry(librarySection(it.id), it.name, icon))
@@ -229,6 +230,7 @@ fun BrowseScreen() {
                     val library = libraries.firstOrNull { librarySection(it.id) == section }
                     when {
                         library != null && library.kind == "music" -> MusicSection(library, vm.focus)
+                        library != null && library.kind == "audiobook" -> AudiobookSection(library, vm.focus)
                         library != null && library.kind == "show" -> ShowLibrarySection(library, vm.focus)
                         library != null -> LibrarySection(library, vm.focus)
                         vm.libraries is LoadState.Loading -> LoadingView()
