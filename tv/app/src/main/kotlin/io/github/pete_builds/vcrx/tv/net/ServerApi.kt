@@ -269,6 +269,9 @@ class ServerApi(
     internal fun <B> post(path: String, body: B, serializer: KSerializer<B>): Request =
         Request.Builder().url(url(path)).post(json.encodeToString(serializer, body).toRequestBody(JSON)).build()
 
+    internal fun <B> put(path: String, body: B, serializer: KSerializer<B>): Request =
+        Request.Builder().url(url(path)).put(json.encodeToString(serializer, body).toRequestBody(JSON)).build()
+
     private class Exchange(val status: Int, val body: ByteArray, val retryAfter: Int?, val authorization: String?)
 
     /** Runs the call and returns the raw answer, for the routes that are not JSON. */

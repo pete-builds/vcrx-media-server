@@ -63,6 +63,14 @@ object AppIcons {
         moveTo(13.8f, 7f); lineTo(17.8f, 3f); lineTo(16.4f, 1.6f); lineTo(12.4f, 5.6f); close()
     }
 
+    /** Podcasts: a microphone on its stand. */
+    val Podcast: ImageVector = icon("Podcast") {
+        rect(9f, 2f, 6f, 11f)
+        moveTo(5f, 10f); lineTo(7f, 10f); lineTo(7f, 12f); lineTo(17f, 12f); lineTo(17f, 10f); lineTo(19f, 10f); lineTo(19f, 14f)
+        lineTo(13f, 14f); lineTo(13f, 19f); lineTo(16f, 19f); lineTo(16f, 21f); lineTo(8f, 21f); lineTo(8f, 19f); lineTo(11f, 19f)
+        lineTo(11f, 14f); lineTo(5f, 14f); close()
+    }
+
     private fun icon(name: String, evenOdd: Boolean = false, block: PathBuilder.() -> Unit): ImageVector =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
             .path(

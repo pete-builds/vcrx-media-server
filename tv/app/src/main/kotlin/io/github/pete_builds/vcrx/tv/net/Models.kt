@@ -54,6 +54,9 @@ data class User(
     @SerialName("is_admin") val isAdmin: Boolean = false,
     /** From GET /me: the user may watch Live TV and there are channels. */
     @SerialName("live_tv") val liveTv: Boolean = false,
+    /** From GET /me: podcasts are on and this user may use them. Absent (an older server): false. */
+    val podcasts: Boolean = false,
+    @SerialName("podcast_search") val podcastSearch: Boolean = false,
 )
 
 @Serializable

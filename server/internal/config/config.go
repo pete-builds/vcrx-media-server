@@ -46,6 +46,25 @@ type LiveTVSpec struct {
 	MaxStreams int `yaml:"max_streams"`
 }
 
+// PodcastsSpec is the podcasts section of vcrx.yaml. Podcasts are off by
+// default: on, any account user can make the server fetch a feed URL they type.
+type PodcastsSpec struct {
+	// Enabled turns podcasts on for accounts and household profiles. Invited
+	// devices and linked servers never get them.
+	Enabled bool `yaml:"enabled"`
+	// RefreshHours is how often subscribed feeds are read again (4 by default).
+	RefreshHours int `yaml:"refresh_hours"`
+	// MaxEpisodes is how many of a feed's newest episodes are kept (500 by default).
+	MaxEpisodes int `yaml:"max_episodes"`
+	// Search turns on finding shows in Apple's podcast directory, which sends
+	// the search words to itunes.apple.com. Off by default.
+	Search bool `yaml:"search"`
+	// AllowHosts are host:port pairs fetched even though they are not public
+	// addresses. For development only (scripts/dev-server.sh serves a sample
+	// feed on loopback); leave it empty on a real server.
+	AllowHosts []string `yaml:"allow_hosts"`
+}
+
 // LiveSourceSpec is one M3U playlist: m3u is an http(s) URL or an absolute
 // path to a playlist file. A URL that carries an account's credentials goes
 // in a file of its own instead (m3u_url_file), the way secrets do, so
@@ -193,6 +212,9 @@ type Config struct {
 	// LiveTV is Live TV's playlists (milestone 11). VCRX ships and suggests
 	// none: it plays what the admin lists here.
 	LiveTV LiveTVSpec `yaml:"live_tv"`
+
+	// Podcasts are RSS subscriptions that account users add by URL.
+	Podcasts PodcastsSpec `yaml:"podcasts"`
 
 	// CollectionsDir holds the smart collection YAML files. Empty means
 	// $VCRX_CONFIG_DIR/collections. VCRX_COLLECTIONS_DIR overrides it.
@@ -356,6 +378,9 @@ func Load() (Config, error) {
 	boolean("VCRX_OPENSUBTITLES_STUB", &c.OpenSubtitlesStub)
 	list("VCRX_SUBTITLE_LANGUAGES", &c.SubtitleLanguages)
 	boolean("VCRX_SUBTITLE_AUTO_FETCH", &c.SubtitleAutoFetch)
+	boolean("VCRX_PODCASTS", &c.Podcasts.Enabled)
+	boolean("VCRX_PODCASTS_SEARCH", &c.Podcasts.Search)
+	list("VCRX_PODCASTS_ALLOW_HOSTS", &c.Podcasts.AllowHosts)
 
 	for i := range c.LiveTV.Sources {
 		src := &c.LiveTV.Sources[i]
@@ -460,6 +485,17 @@ func (c *Config) validate() error {
 	if h := c.LiveTV.GuideRefreshHours; h < 0 || h > 168 {
 		errs = append(errs, fmt.Errorf("live_tv.guide_refresh_hours %d must be 1 to 168, or 0 for the default", h))
 	}
+	if h := c.Podcasts.RefreshHours; h < 0 || h > 168 {
+		errs = append(errs, fmt.Errorf("podcasts.refresh_hours %d must be 1 to 168, or 0 for the default", h))
+	}
+	if n := c.Podcasts.MaxEpisodes; n < 0 || n > 5000 {
+		errs = append(errs, fmt.Errorf("podcasts.max_episodes %d must be 1 to 5000, or 0 for the default", n))
+	}
+	for _, h := range c.Podcasts.AllowHosts {
+		if strings.TrimSpace(h) == "" || strings.ContainsAny(h, "/ ") {
+			errs = append(errs, fmt.Errorf("podcasts.allow_hosts %q must be a host or host:port", h))
+		}
+	}
 	seen := map[string]bool{}
 	for _, s := range c.LiveTV.Sources {
 		switch {
@@ -510,6 +546,18 @@ func (c Config) LiveMaxStreams() int {
 	}
 	return 4
 }
+
+// PodcastRefreshInterval is how often subscribed feeds are read again.
+func (c Config) PodcastRefreshInterval() time.Duration {
+	if c.Podcasts.RefreshHours > 0 {
+		return time.Duration(c.Podcasts.RefreshHours) * time.Hour
+	}
+	return 4 * time.Hour
+}
+
+// PodcastArtDir holds podcast artwork. It is cache: it is fetched again
+// from the feeds when lost.
+func (c Config) PodcastArtDir() string { return filepath.Join(c.CacheDir, "podcast-art") }
 
 // LiveStreamDir holds the live HLS segments while channels are watched.
 func (c Config) LiveStreamDir() string { return filepath.Join(c.CacheDir, "live") }

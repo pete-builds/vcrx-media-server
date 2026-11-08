@@ -5,6 +5,7 @@ import androidx.navigation.NavController
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
+import io.github.pete_builds.vcrx.tv.ui.podcasts.PodcastShowScreen
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -16,11 +17,16 @@ data class MusicArtistRoute(val artistId: Long)
 @Serializable
 object NowPlayingRoute
 
+@Serializable
+data class PodcastShowRoute(val podcastId: Long)
+
 /** Navigation between the music screens, kept apart from AppActions. */
 class MusicNav(private val nav: NavController) {
     fun openAlbum(albumId: Long) = nav.navigate(MusicAlbumRoute(albumId))
 
     fun openArtist(artistId: Long) = nav.navigate(MusicArtistRoute(artistId))
+
+    fun openPodcast(podcastId: Long) = nav.navigate(PodcastShowRoute(podcastId))
 
     /** Now Playing once on the stack: opening it again returns to the same screen. */
     fun openNowPlaying() = nav.navigate(NowPlayingRoute) { launchSingleTop = true }
@@ -33,4 +39,5 @@ fun NavGraphBuilder.musicScreens() {
     composable<MusicAlbumRoute> { entry -> MusicAlbumScreen(entry.toRoute<MusicAlbumRoute>().albumId) }
     composable<MusicArtistRoute> { entry -> MusicArtistScreen(entry.toRoute<MusicArtistRoute>().artistId) }
     composable<NowPlayingRoute> { NowPlayingScreen() }
+    composable<PodcastShowRoute> { entry -> PodcastShowScreen(entry.toRoute<PodcastShowRoute>().podcastId) }
 }

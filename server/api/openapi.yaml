@@ -357,6 +357,14 @@ paths:
                       device_expires_at: { type: integer, description: When an invited device's access ends. }
                       loan: { $ref: "#/components/schemas/BorrowerLoan" }
                       live_tv: { type: boolean, description: "The caller may watch Live TV and there are channels to watch: show the Live TV page." }
+                      podcasts:
+                        type: boolean
+                        description: >-
+                          Podcasts are turned on (podcasts.enabled in vcrx.yaml) and the caller may use them: an account or a
+                          household profile, never an invited device or a linked server. Show the Podcasts page.
+                      podcast_search:
+                        type: boolean
+                        description: Podcast search (podcasts.search) is on, so GET /api/v1/podcasts/search answers. Off, add shows by feed URL.
         "401":
           description: >-
             Not signed in. A lent tape's device whose loan is over gets error loan_ended, with "Be kind, rewind."
@@ -2750,6 +2758,310 @@ paths:
         "204": { description: Saved }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts:
+    get:
+      operationId: podcastSubscriptions
+      summary: >-
+        The caller's podcast subscriptions, by title, with how many episodes they have not played and how many are new.
+        Podcasts answer accounts and household profiles only: an invited device or a linked server gets 403
+        accounts_only, and every podcast route answers 404 while podcasts are off (podcasts.enabled in vcrx.yaml). A
+        profile under a content rating ceiling below R (a kids profile) does not see shows or episodes marked explicit.
+      responses:
+        "200":
+          description: The subscriptions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [podcasts]
+                properties:
+                  podcasts: { type: array, items: { $ref: "#/components/schemas/Podcast" } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: podcastSubscribe
+      summary: >-
+        Subscribe by feed URL. The server fetches the feed now (http or https, public addresses only, at most 10 MB and
+        30 seconds), keeps it once for everyone, and reads it again every few hours while anyone is subscribed. 201 for
+        a new subscription, 200 when the caller already had it. 400 bad_url for a URL that is not http(s); 422
+        feed_failed with the reason when the feed cannot be fetched or is not RSS; 403 explicit when a kids profile
+        asks for a show marked explicit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, description: The RSS feed's http(s) URL. }
+      responses:
+        "200": { description: Already subscribed, content: { application/json: { schema: { $ref: "#/components/schemas/PodcastResult" } } } }
+        "201": { description: Subscribed, content: { application/json: { schema: { $ref: "#/components/schemas/PodcastResult" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts/new:
+    get:
+      operationId: podcastNewEpisodes
+      summary: >-
+        New episodes across the caller's subscriptions, newest first: published in the last 30 days, not played and not
+        started.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 }, description: 50 by default. }
+      responses:
+        "200":
+          description: The episodes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [episodes]
+                properties:
+                  episodes: { type: array, items: { $ref: "#/components/schemas/PodcastEpisode" } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts/search:
+    get:
+      operationId: podcastSearch
+      summary: >-
+        Search Apple's podcast directory (the iTunes Search API) for shows to subscribe to. Only when podcasts.search
+        is on in vcrx.yaml, which it is not by default: then the server sends the search words to itunes.apple.com.
+        Off, 404 search_off. Results carry feed URLs and no artwork, so no client loads anything from Apple.
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, maxLength: 200 } }
+      responses:
+        "200":
+          description: Shows found.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [title, feed_url]
+                      properties:
+                        title: { type: string }
+                        author: { type: string }
+                        feed_url: { type: string }
+                        genre: { type: string }
+                        explicit: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts/opml:
+    get:
+      operationId: podcastExportOPML
+      summary: The caller's subscriptions as an OPML file, for moving them to another podcast app.
+      responses:
+        "200": { description: OPML 2.0, content: { text/x-opml: {} } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: podcastImportOPML
+      summary: >-
+        Subscribe to every feed in an OPML file (the body, at most 1 MB, at most 100 feeds), fetching each one as a
+        subscription by URL does. Feeds that fail are listed with their reason; the rest are subscribed.
+      requestBody:
+        required: true
+        content:
+          text/x-opml: { schema: { type: string } }
+          application/xml: { schema: { type: string } }
+          text/xml: { schema: { type: string } }
+      responses:
+        "200":
+          description: The import's outcome.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [added, already, failed]
+                properties:
+                  added: { type: integer }
+                  already: { type: integer }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      required: [url, reason]
+                      properties:
+                        url: { type: string }
+                        reason: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts/shows/{podcast_id}:
+    get:
+      operationId: podcastShow
+      summary: >-
+        A show the caller subscribes to, and a page of its episodes, newest first. 404 for a show the caller does not
+        subscribe to, whoever else does.
+      parameters:
+        - { name: podcast_id, in: path, required: true, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 }, description: 50 by default. }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: The show.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [podcast, episodes, total]
+                properties:
+                  podcast: { $ref: "#/components/schemas/Podcast" }
+                  episodes: { type: array, items: { $ref: "#/components/schemas/PodcastEpisode" } }
+                  total: { type: integer, description: Episodes the caller may see in all. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: podcastUnsubscribe
+      summary: >-
+        Unsubscribe. The caller's progress on its episodes goes too. A show nobody subscribes to any more is deleted
+        from the server with its artwork.
+      parameters:
+        - { name: podcast_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Unsubscribed }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts/shows/{podcast_id}/refresh:
+    post:
+      operationId: podcastRefresh
+      summary: >-
+        Read the show's feed again now, instead of waiting for the next scheduled refresh. A feed read in the last
+        minute is not read again. A failed read keeps the episodes as they were and says why in last_error.
+      parameters:
+        - { name: podcast_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: The show after the refresh, content: { application/json: { schema: { $ref: "#/components/schemas/PodcastResult" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts/shows/{podcast_id}/artwork:
+    get:
+      operationId: podcastArtwork
+      summary: The show's artwork, downloaded by the server from its feed. Clients never load it from the podcast's host.
+      parameters:
+        - { name: podcast_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: The artwork, content: { image/png: {}, image/jpeg: {}, image/webp: {}, image/gif: {} } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts/episodes/{episode_id}:
+    get:
+      operationId: podcastEpisode
+      summary: One episode of a show the caller subscribes to, with the caller's progress.
+      parameters:
+        - { name: episode_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The episode.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [episode]
+                properties:
+                  episode: { $ref: "#/components/schemas/PodcastEpisode" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts/episodes/{episode_id}/progress:
+    get:
+      operationId: podcastProgress
+      summary: The caller's place in an episode.
+      parameters:
+        - { name: episode_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: The progress, content: { application/json: { schema: { $ref: "#/components/schemas/PodcastProgress" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: podcastSetProgress
+      summary: >-
+        Save the caller's place in an episode, in seconds. Players send it every 15 seconds or so, and on pause. A
+        place within 30 seconds of the end (when the duration is known) marks the episode played.
+      parameters:
+        - { name: episode_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [position_seconds]
+              properties:
+                position_seconds: { type: number, minimum: 0 }
+                duration_seconds: { type: number, minimum: 0, description: "What the player measured, used when the feed gave no duration." }
+      responses:
+        "200": { description: Saved, content: { application/json: { schema: { $ref: "#/components/schemas/PodcastProgress" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts/episodes/{episode_id}/played:
+    put:
+      operationId: podcastSetPlayed
+      summary: Mark an episode played or not played. Either way its saved place goes back to the start.
+      parameters:
+        - { name: episode_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [played]
+              properties:
+                played: { type: boolean }
+      responses:
+        "200": { description: Saved, content: { application/json: { schema: { $ref: "#/components/schemas/PodcastProgress" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts/episodes/{episode_id}/artwork:
+    get:
+      operationId: podcastEpisodeArtwork
+      summary: The episode's own artwork when its feed gives one, else the show's. Downloaded by the server.
+      parameters:
+        - { name: episode_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: The artwork, content: { image/png: {}, image/jpeg: {}, image/webp: {}, image/gif: {} } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/podcasts/episodes/{episode_id}/stream:
+    get:
+      operationId: podcastStream
+      summary: >-
+        The episode's audio, fetched by the server from the podcast's host as the client reads it, so clients never
+        contact the host and the web app's media stays same-origin. Range requests pass through (206 with
+        Content-Range when the host supports them); Content-Type and Content-Length are the host's. A full GET is the
+        whole file, which is how the phone app downloads an episode to play offline. 502 when the host cannot be
+        reached or answers with an error; the host's address is checked as a subscription's is.
+      parameters:
+        - { name: episode_id, in: path, required: true, schema: { type: integer } }
+        - { name: Range, in: header, schema: { type: string } }
+      responses:
+        "200": { description: The whole file, content: { audio/mpeg: {}, audio/mp4: {}, audio/aac: {}, audio/ogg: {}, application/octet-stream: {} } }
+        "206": { description: Part of the file }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "416": { description: The range is outside the file }
+        "502": { $ref: "#/components/responses/Error" }
+    head:
+      operationId: podcastStreamHead
+      summary: The stream's headers without its body.
+      parameters:
+        - { name: episode_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: The headers }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     bearer:
@@ -2771,6 +3083,60 @@ components:
       description: Error
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   schemas:
+    Podcast:
+      type: object
+      required: [id, title, feed_url, explicit, has_artwork, episode_count, unplayed_count, new_count, subscribed_at]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        author: { type: string }
+        description: { type: string, description: Plain text; the feed's HTML is stripped. }
+        link: { type: string, description: The show's website, as the feed gives it. }
+        feed_url: { type: string, description: The URL the caller subscribed with. }
+        explicit: { type: boolean }
+        has_artwork: { type: boolean }
+        artwork_url: { type: string, description: "/api/v1/podcasts/shows/{id}/artwork when has_artwork." }
+        episode_count: { type: integer, description: Episodes the caller may see. }
+        unplayed_count: { type: integer }
+        new_count: { type: integer, description: "Published in the last 30 days, not played and not started." }
+        latest_published_at: { type: [integer, "null"], description: Unix milliseconds. }
+        subscribed_at: { type: integer, description: Unix milliseconds. }
+        refreshed_at: { type: [integer, "null"], description: When the feed was last read successfully, Unix milliseconds. }
+        last_error: { type: [string, "null"], description: Why the last read failed; null when it worked. }
+    PodcastResult:
+      type: object
+      required: [podcast]
+      properties:
+        podcast: { $ref: "#/components/schemas/Podcast" }
+    PodcastEpisode:
+      type: object
+      required: [id, podcast_id, podcast_title, title, explicit, stream_url, artwork_url, position_seconds, played, new]
+      properties:
+        id: { type: integer }
+        podcast_id: { type: integer }
+        podcast_title: { type: string }
+        title: { type: string }
+        description: { type: string, description: Plain text; the feed's HTML is stripped. }
+        published_at: { type: [integer, "null"], description: Unix milliseconds. }
+        duration_seconds: { type: [integer, "null"] }
+        season: { type: [integer, "null"] }
+        episode: { type: [integer, "null"] }
+        episode_type: { type: string, description: "full, trailer or bonus (Podcasting 2.0 and iTunes)." }
+        explicit: { type: boolean }
+        mime_type: { type: string, description: "The enclosure's type as the feed gives it, such as audio/mpeg." }
+        size_bytes: { type: [integer, "null"], description: The enclosure's length as the feed gives it. }
+        stream_url: { type: string, description: "/api/v1/podcasts/episodes/{id}/stream: play or download through VCRX." }
+        artwork_url: { type: string, description: "/api/v1/podcasts/episodes/{id}/artwork." }
+        position_seconds: { type: number, description: The caller's saved place. }
+        played: { type: boolean }
+        new: { type: boolean, description: "Published in the last 30 days, not played and not started." }
+    PodcastProgress:
+      type: object
+      required: [position_seconds, played]
+      properties:
+        position_seconds: { type: number }
+        played: { type: boolean }
+        duration_seconds: { type: [integer, "null"] }
     Channel:
       type: object
       required: [id, name, has_logo]

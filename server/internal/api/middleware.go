@@ -263,6 +263,10 @@ func (s *Server) gate(rt route) http.Handler {
 				return
 			}
 		}
+		if rt.access == accounts && (sess.TokenID != 0 || sess.Peer) {
+			writeError(w, http.StatusForbidden, "accounts_only", "Podcasts are for accounts and household profiles, not invited devices or linked servers.")
+			return
+		}
 		if rt.access == householdOnly && sess.TokenID != 0 {
 			// An invited device is its own principal: the profile picker and
 			// profile switching are never its to see.

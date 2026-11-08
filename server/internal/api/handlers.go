@@ -309,7 +309,14 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		Loan *meLoan `json:"loan,omitempty"`
 		// LiveTV: the caller may watch Live TV and there are channels to watch.
 		LiveTV bool `json:"live_tv"`
+		// Podcasts: podcasts are on and the caller is an account or a
+		// profile; PodcastSearch: the Apple directory search is on too.
+		Podcasts      bool `json:"podcasts"`
+		PodcastSearch bool `json:"podcast_search"`
 	}{userJSON: toUserJSON(sess.User), Kind: sess.Kind()}
+	if s.podcastsOn() && sess.TokenID == 0 && !sess.Peer {
+		out.Podcasts, out.PodcastSearch = true, s.Podcasts.Service.Search
+	}
 	if s.liveOn() && info(r).Policy.CanWatchLive() {
 		has, err := s.Live.Store.HasChannels(r.Context())
 		if err != nil {
