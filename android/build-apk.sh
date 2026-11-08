@@ -49,7 +49,9 @@ make_keystore() {
   umask 077
   head -c 48 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-48 > "$pass_file"
   local dname="CN=VCRX for Android, O=VCRX Media Server"
-  if command -v keytool > /dev/null 2>&1; then
+  # Run keytool rather than look for it: macOS ships a /usr/bin/keytool stub that
+  # only says "Unable to locate a Java Runtime" when there is no JDK.
+  if keytool -help > /dev/null 2>&1; then
     keytool -genkeypair -keystore "$keystore" -storetype PKCS12 -alias vcrx-mobile \
       -keyalg RSA -keysize 4096 -validity 36500 -dname "$dname" \
       -storepass:file "$pass_file" -keypass:file "$pass_file" > /dev/null
