@@ -49,7 +49,7 @@ Open `http://<server>:3750/` in a browser. It is part of the server: no separate
 - **Music:** albums, artists, a queue, shuffle, and background playback with notification and lock screen controls.
 - **IPTV:** the channel list with now and next, and a player.
 - **Downloads:** a movie, an episode or a whole album, over Wi-Fi only unless you switch that off. With the server out of reach the app opens on Downloads and everything there plays offline; progress made offline reaches the server once it answers again (Watched, or a resume point).
-- **Android Auto:** Continue listening, Music (recently added, artists, albums), Downloads, search and voice requests. Audiobooks and Podcasts appear there once the server has those libraries. Sideloaded apps need Unknown sources in Android Auto's developer settings.
+- **Android Auto:** Continue listening, Music (recently added, artists, albums), Downloads, search and voice requests. Audiobooks and Podcasts come in a follow-up. Sideloaded apps need Unknown sources in Android Auto's developer settings.
 
 ## Music
 

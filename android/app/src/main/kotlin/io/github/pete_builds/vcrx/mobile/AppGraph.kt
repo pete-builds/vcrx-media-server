@@ -91,15 +91,16 @@ class AppGraph(private val context: Context) {
     fun canDownload(): Boolean = DownloadEligibility.allowed(me.value, tokens.isInvitedDevice)
 
     /** What the server offers this session, for the bottom bar and Android Auto's root. */
-    fun features(): Features {
-        val kinds = libraries.value.map { it.kind.lowercase() }
-        return Features(
-            music = "music" in kinds,
-            audiobooks = kinds.any { "audiobook" in it },
-            podcasts = kinds.any { "podcast" in it },
-            hasDownloads = true,
-        )
-    }
+    fun features(): Features = Features(
+        music = libraries.value.any { it.kind == "music" },
+        // Audiobooks and podcasts stay off until the phone has their screens and
+        // Auto nodes, which follow once those server APIs are on main: an empty tab
+        // in the car is worse than none. The browse tree already places them
+        // (BrowseTreeTest); the follow-up sets these from the library kinds.
+        audiobooks = false,
+        podcasts = false,
+        hasDownloads = true,
+    )
 
     /**
      * Asks the server who this is. Unreachable marks the app offline; any answer

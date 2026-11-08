@@ -15,7 +15,7 @@ No telemetry, analytics, crash reporting, Google Play services, ads or accounts.
 | IPTV | The server's channels with what is on now and next; tap one to watch. Shown when `/api/v1/me` says `live_tv`. |
 | Downloads | Download a movie, an episode, or a whole album. Media3 `DownloadManager` and `DownloadService` with a progress notification, Wi-Fi only by default (a switch on the Downloads screen), storage used and free, delete. |
 | Offline | When the server cannot be reached the app opens on Downloads, and everything there plays with no network (airplane mode included). Progress made offline is kept on the phone and sent when the server answers again: watched to the end becomes Watched, anything else a resume point. |
-| Android Auto | Continue listening, Music (Recently added, Artists, Albums), Downloads, and Audiobooks and Podcasts once the server has those libraries. Grids for albums, lists for tracks, search, voice requests, artwork through a content provider. Audio only. |
+| Android Auto | Continue listening, Music (Recently added, Artists, Albums) and Downloads. Audiobooks and Podcasts come in a follow-up, once those server APIs are on main. Grids for albums, lists for tracks, search, voice requests, artwork through a content provider. Audio only. |
 
 Invited devices stream but never download, by design: the Download buttons are hidden when `/api/v1/me` answers `kind: token` (or the device joined by invite), and the server refuses those devices the whole-file routes anyway (`streamOnly` in `server/internal/api/invites.go`).
 
