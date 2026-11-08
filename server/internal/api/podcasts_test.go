@@ -274,7 +274,7 @@ func TestPodcastSubscribeRefusesPrivateAddresses(t *testing.T) {
 	svc := podcasts.NewService(f.srv.Podcasts.Service.Store, g, t.TempDir())
 	f.srv.Podcasts.Service = svc
 
-	for _, u := range []string{inside.URL + "/feed.xml", "http://localhost/feed.xml", "http://10.1.2.3/feed.xml", "http://[::1]/feed.xml",
+	for _, u := range []string{inside.URL + "/feed.xml", "http://localhost/feed.xml", "http://10.9.9.9/feed.xml", "http://[::1]/feed.xml",
 		"http://169.254.169.254/latest/meta-data/", "file:///etc/passwd", "gopher://feeds.example.com/x"} {
 		if r := f.do("POST", "/api/v1/podcasts", f.friendTok, map[string]any{"url": u}); r.code != 400 || !strings.Contains(string(r.body), "bad_url") {
 			t.Errorf("%s: %d %s", u, r.code, r.body)

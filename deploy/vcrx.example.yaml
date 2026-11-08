@@ -94,6 +94,17 @@ server_name: VCRX
 #      xmltv_url_file: /config/provider-guide-url.txt
 #      max_streams: 2
 
+# Podcasts: accounts and household profiles subscribe to RSS feeds by URL or
+# OPML, and the server fetches them (only from public internet addresses) and
+# plays episodes through itself. Off by default. search sends what someone
+# types into podcast search to Apple's iTunes Search API, also off by default.
+# See docs/SECURITY-AND-PRIVACY.md for what podcasts send where.
+#podcasts:
+#  enabled: true
+#  refresh_hours: 4
+#  max_episodes: 500
+#  search: false
+
 # Radarr and Sonarr webhooks find the folder by name in a library. If they see
 # the NAS at another path and folder names differ, map their prefix to VCRX's.
 #arr_path_map:
