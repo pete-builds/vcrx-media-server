@@ -82,7 +82,7 @@ type Server struct {
 	// Music serves music libraries (music.go).
 	Music *Music
 
-	// Live is Live TV's channels (live.go).
+	// Live is IPTV's channels (live.go).
 	Live *Live
 
 	AdminAllowRemote bool
