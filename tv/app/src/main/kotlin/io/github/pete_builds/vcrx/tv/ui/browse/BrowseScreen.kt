@@ -109,7 +109,7 @@ class BrowseViewModel(private val graph: AppGraph) : ViewModel() {
     var isAdmin by mutableStateOf(false)
         private set
 
-    /** Live TV in the rail: the user may watch it and there are channels. */
+    /** IPTV in the rail: the user may watch it and there are channels. */
     var liveTv by mutableStateOf(false)
         private set
 
@@ -206,7 +206,7 @@ fun BrowseScreen() {
             }
             add(RailEntry(librarySection(it.id), it.name, icon))
         }
-        if (vm.liveTv) add(RailEntry(LIVE, "Live TV", AppIcons.Live))
+        if (vm.liveTv) add(RailEntry(LIVE, "IPTV", AppIcons.Live))
         if (vm.podcasts) add(RailEntry(PODCASTS, "Podcasts", AppIcons.Podcast))
         add(RailEntry(SEARCH, "Search", Icons.Filled.Search))
         if (vm.isAdmin) add(RailEntry(ACTIVITY, "Activity", Icons.Filled.PlayArrow))

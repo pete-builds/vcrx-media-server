@@ -415,7 +415,7 @@ func serve() error {
 	// does nothing until switched on in Settings.
 	srv.Newsletter = &newsletter.Service{DB: a.db, Hooks: hooks, Log: log.With("component", "newsletter")}
 	go srv.Newsletter.Run(ctx)
-	// Live TV: the admin's M3U playlists, read now and every refresh_hours.
+	// IPTV: the admin's M3U playlists, read now and every refresh_hours.
 	// Logos come only from public addresses (a playlist names them).
 	liveStore := &live.Store{DB: a.db}
 	var sources []live.SourceSpec

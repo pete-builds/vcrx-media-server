@@ -68,11 +68,11 @@ server_name: VCRX
 # pre-roll in its playback settings sees one at random before each movie.
 #preroll_dir: /media/Pre-Roll
 
-# Live TV: channels from M3U playlists you have the right to watch. VCRX ships
+# IPTV: channels from M3U playlists you have the right to watch. VCRX ships
 # no playlist and suggests none. m3u is an http(s) URL or an absolute path to a
 # file; a URL with an account's password in it goes in a file of its own
 # (m3u_url_file), never here. Playlists are read at startup and every
-# refresh_hours (12). Viewers need the Live TV grant (Settings > Users);
+# refresh_hours (12). Viewers need the IPTV grant (Settings > Users);
 # admins always have it. xmltv is the playlist's guide, optional, a URL or a
 # file, gzipped or not (xmltv_url_file for a URL with a key in it), read every
 # guide_refresh_hours (6) and matched to channels by tvg-id, else by name. A
@@ -123,4 +123,11 @@ libraries:
   #- name: Music
   #  kind: music
   #  path: /media/Music
+  #  scan_interval_minutes: 60
+  # Audiobooks: set VCRX_AUDIOBOOKS_DIR in .env first. A book is one file with
+  # its own chapters (an M4B) or a folder of files, under Author/Book or
+  # Author/Series/Book; loose files at the top work too.
+  #- name: Audiobooks
+  #  kind: audiobook
+  #  path: /media/Audiobooks
   #  scan_interval_minutes: 60

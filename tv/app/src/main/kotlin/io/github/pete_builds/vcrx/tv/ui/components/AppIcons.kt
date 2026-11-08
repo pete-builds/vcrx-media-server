@@ -55,7 +55,7 @@ object AppIcons {
         rect(8f, 18f, 8f, 2f)
     }
 
-    /** Live TV: a set with rabbit ears, which never meet so the even-odd fill stays solid. */
+    /** IPTV: a set with rabbit ears, which never meet so the even-odd fill stays solid. */
     val Live: ImageVector = icon("Live", evenOdd = true) {
         rect(2f, 7f, 20f, 14f)
         rect(4f, 9f, 16f, 10f)

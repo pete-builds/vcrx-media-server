@@ -88,16 +88,7 @@ func withAudiobooks(t *testing.T, f *fixture) bookIDs {
 	q(`SELECT id FROM audiobook_books WHERE title = 'The Sample Book'`, &ids.m4b)
 	q(`SELECT id FROM audiobook_books WHERE title = 'Second Steps'`, &ids.multi)
 	q(`SELECT id FROM audiobook_files WHERE book_id = (SELECT id FROM audiobook_books WHERE title = 'The Sample Book')`, &ids.m4bFile)
-	rows, err := f.db.Query(`SELECT id FROM audiobook_files WHERE book_id = ? ORDER BY position`, ids.multi)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for rows.Next() {
-		var id int64
-		_ = rows.Scan(&id)
-		ids.multiFiles = append(ids.multiFiles, id)
-	}
-	_ = rows.Close()
+	ids.multiFiles = queryIDs(t, f, `SELECT id FROM audiobook_files WHERE book_id = ? ORDER BY position`, ids.multi)
 	rmx := f.srv.Remux
 	if rmx == nil {
 		rmx = remux.New("ffmpeg", "ffprobe", 2, nil)
@@ -241,20 +232,31 @@ func grantAll(t *testing.T, f *fixture) {
 	if err := f.db.QueryRow(`SELECT id FROM users WHERE username = 'friend'`).Scan(&friendID); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := f.db.Query(`SELECT id FROM libraries`)
+	if err := f.srv.Admin.SetGrants(context.Background(), friendID, queryIDs(t, f, `SELECT id FROM libraries`)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// queryIDs runs a query that selects one id column and returns the ids.
+func queryIDs(t *testing.T, f *fixture, q string, args ...any) []int64 {
+	t.Helper()
+	rows, err := f.db.Query(q, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var libs []int64
+	defer func() { _ = rows.Close() }()
+	var ids []int64
 	for rows.Next() {
 		var id int64
-		_ = rows.Scan(&id)
-		libs = append(libs, id)
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
 	}
-	_ = rows.Close()
-	if err := f.srv.Admin.SetGrants(context.Background(), friendID, libs); err != nil {
+	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
+	return ids
 }
 
 // A friend without the grant gets 404 everywhere and an empty Continue

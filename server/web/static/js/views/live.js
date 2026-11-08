@@ -1,4 +1,4 @@
-// Live TV: the channels the viewer may watch with what is on now and next
+// IPTV: the channels the viewer may watch with what is on now and next
 // (GET /live/channels), and a player that pulls one (POST .../watch). Safari
 // plays VCRX's HLS playlist natively; every other browser plays the same pull
 // as one fragmented MP4 (stream.mp4), so no HLS library is needed. Up and
@@ -36,7 +36,7 @@ export async function liveView() {
   const data = await api("/live/channels");
   const channels = data.channels || [];
   if (!channels.length) {
-    return { el: h("div", { class: "empty" }, "No channels. An admin lists playlists under live_tv in vcrx.yaml, and grants Live TV in Settings, Users."), title: "Live TV" };
+    return { el: h("div", { class: "empty" }, "No channels. An admin lists playlists under live_tv in vcrx.yaml, and grants IPTV in Settings, Users."), title: "IPTV" };
   }
   const now = Date.now();
   const list = h("div", { class: "live-list" }, channels.map((c) => channelRow(c, now)));
@@ -52,7 +52,7 @@ export async function liveView() {
     }
     count.textContent = q ? `${shown} of ${channels.length} channels` : `${channels.length} channels`;
   });
-  const el = h("div", { class: "live-page" }, h("div", { class: "toolbar" }, h("h1", {}, "Live TV"), filter, count), list);
+  const el = h("div", { class: "live-page" }, h("div", { class: "toolbar" }, h("h1", {}, "IPTV"), filter, count), list);
   // What is on now changes; refresh the list every minute while it is open.
   const timer = setInterval(async () => {
     try {
@@ -65,7 +65,7 @@ export async function liveView() {
       }
     } catch (e) { /* the next minute tries again */ }
   }, 60000);
-  return { el, title: "Live TV", cleanup: () => clearInterval(timer) };
+  return { el, title: "IPTV", cleanup: () => clearInterval(timer) };
 }
 
 export async function livePlayerView({ match }) {

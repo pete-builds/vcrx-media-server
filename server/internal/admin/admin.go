@@ -292,7 +292,7 @@ type UserPolicy struct {
 	Allow4KTranscode bool     `json:"allow_4k_transcode"`
 	// AllowSubtitleDownload lets the user download subtitles from OpenSubtitles.
 	AllowSubtitleDownload bool `json:"allow_subtitle_download"`
-	// AllowLiveTV lets the user watch Live TV channels.
+	// AllowLiveTV lets the user watch IPTV channels.
 	AllowLiveTV bool `json:"allow_live_tv"`
 }
 

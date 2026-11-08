@@ -167,7 +167,7 @@ function userRow(u, libraries, labels, redraw) {
   const subDl = h("label", { class: "check", title: "Spends the server's daily OpenSubtitles quota" },
     h("input", { type: "checkbox", checked: p.allow_subtitle_download }), "May download subtitles");
   const liveTv = h("label", { class: "check", title: "Channels from the playlists under live_tv in vcrx.yaml" },
-    h("input", { type: "checkbox", checked: p.allow_live_tv }), "May watch Live TV");
+    h("input", { type: "checkbox", checked: p.allow_live_tv }), "May watch IPTV");
   const deny = labelChecks(labels, p.deny_labels);
   const allow = labelChecks(labels, p.allow_labels);
   const labelsBlock = labels.length || deny.length

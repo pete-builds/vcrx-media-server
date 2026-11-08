@@ -4,7 +4,7 @@
 
 **Your media. Your hardware. Your rules.**
 
-VCRX is a self-hosted media server with its own Google TV app, built from scratch. Point it at your movies, shows and music, and watch them in a browser or on your TV.
+VCRX is a self-hosted media server with its own Google TV app, built from scratch. Point it at your movies, shows, music and audiobooks, and watch them in a browser or on your TV.
 
 - **Nothing phones home.** No subscriptions, ads, telemetry or vendor accounts, and no required cloud service. It starts, scans and plays with the internet unplugged.
 - **Access rules down to the file.** A friend can see the 1080p copy of a film and never the 4K one. Limit each person by library, resolution, content rating and label, and every route enforces it.
@@ -28,15 +28,16 @@ VCRX is a self-hosted media server with its own Google TV app, built from scratc
 
 | | |
 |---|---|
-| **Libraries** | Movies, TV and music. Incremental scans that trust your NFO files and local artwork first; TMDb and IMDb ratings if you want them. Automatic franchise collections. |
+| **Libraries** | Movies, TV, music and audiobooks. Incremental scans that trust your NFO files and local artwork first; TMDb and IMDb ratings if you want them. Automatic franchise collections. |
 | **Playback** | Direct play whenever the device can. Otherwise the server converts on the fly: audio to AAC, video to H.264, HLS for Safari. Subtitles from the file, beside it, or OpenSubtitles. |
 | **Home** | Rows built for each person: Continue Watching, Recently Added, Because You Watched, seasonal picks, Top Rated and more. Rearrange them and the layout follows you to the TV. |
 | **Skip Intro and Credits** | Found overnight by matching each season's audio, or read from chapters and NFO markers. |
 | **People** | Local accounts, household profiles with PINs, kids' profiles, invited devices, linked friends' servers. |
 | **Activity** | Now playing, history, stats, stop a stream, webhooks and Discord messages. |
 | **Music** | Albums and compilations from tags, live recordings with venue, source and checksums, gapless playback, a Music section on the TV. |
+| **Audiobooks** | Books in one file with chapters or a folder of files, author, narrator and series, one saved place per book, speed and a sleep timer, Continue listening on Home and the TV. |
 | **Podcasts** (optional) | Subscribe by RSS feed URL or OPML, new episodes every few hours, your place saved per person, played through the server so devices never contact podcast hosts. |
-| **Live TV** (in progress) | Your own M3U playlists and XMLTV guides, with one shared pull per channel. |
+| **IPTV** (in progress) | Your own M3U playlists and XMLTV guides, with one shared pull per channel. |
 | **Clients** | A web app built into the server, the Google TV app, and a REST API described by an OpenAPI 3.1 spec. |
 
 Every feature in detail: [docs/FEATURES.md](docs/FEATURES.md).
@@ -73,7 +74,7 @@ Adding users, backups, updates and the optional services (TMDb, OpenSubtitles, R
 | Guide | What it covers |
 |---|---|
 | [Installing and running](docs/INSTALL.md) | Setup, users and access, the CLI, configuration, backups and restore, updating, optional services |
-| [Features](docs/FEATURES.md) | The web app, playback, Home, music, collections, overlays, trailers, Skip Intro, activity and notifications |
+| [Features](docs/FEATURES.md) | The web app, playback, Home, music, audiobooks, collections, overlays, trailers, Skip Intro, activity and notifications |
 | [Security and privacy](docs/SECURITY-AND-PRIVACY.md) | Sign-in, invites, linked servers, and exactly what leaves your network |
 | [Internet access](docs/INTERNET-ACCESS.md) | Reaching VCRX from outside your home through Caddy |
 | [Playback compatibility](docs/PLAYBACK-COMPATIBILITY.md) | What happens to each kind of file on each kind of client, and what has been tested |
