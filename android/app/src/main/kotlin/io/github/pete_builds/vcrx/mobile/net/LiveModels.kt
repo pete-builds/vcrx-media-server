@@ -15,7 +15,7 @@ data class LiveProgram(
     val episode: String? = null,
 )
 
-/** A Live TV channel as GET /live/channels lists it: never its stream URL. */
+/** An IPTV channel as GET /live/channels lists it: never its stream URL. */
 @Serializable
 data class LiveChannel(
     val id: Long,

@@ -52,7 +52,7 @@ data class User(
     val username: String,
     @SerialName("display_name") val displayName: String? = null,
     @SerialName("is_admin") val isAdmin: Boolean = false,
-    /** From GET /me: the user may watch Live TV and there are channels. */
+    /** From GET /me: the user may watch IPTV (the live_tv grant) and there are channels. */
     @SerialName("live_tv") val liveTv: Boolean = false,
     /** From GET /me: "user", "profile" or "token". A token is an invited device, which streams but never downloads. */
     val kind: String = "",
