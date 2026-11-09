@@ -22,6 +22,9 @@ cat > "$stub/docker" << 'S'
 #!/usr/bin/env bash
 [ "${1:-} ${2:-}" = "buildx version" ] && exit 0
 echo "docker $*" >> "$STUB_LOG"
+# keytool in a container: the keystore comes back base64 on stdout.
+[ "${1:-}" = run ] && echo a2V5c3RvcmU=
+exit 0
 S
 chmod +x "$stub/docker"
 export PATH="$stub:$PATH" STUB_LOG="$work/docker.log"
@@ -42,4 +45,14 @@ mkdir -p "$work/shallow/tv/signing" && keys "$work/shallow"
 if bash "$work/shallow/tv/build-apk.sh" > "$work/out" 2>&1; then fail "built from a shallow clone"; fi
 grep -q "shallow" "$work/out" || fail "no reason given: $(cat "$work/out")"
 [ ! -s "$work/docker.log" ] || fail "ran docker for a shallow clone: $(cat "$work/docker.log")"
+# No key yet and a keytool that cannot run (macOS's stub with no JDK): the key is
+# made in a container instead, and the build goes on.
+: > "$work/docker.log"
+rm -rf "$work/repo/tv/signing"
+echo "ARG JDK_IMAGE=jdk" > "$work/repo/tv/Dockerfile"
+printf '#!/bin/sh\necho "Unable to locate a Java Runtime." >&2\nexit 1\n' > "$stub/keytool"
+chmod +x "$stub/keytool"
+(cd "$work/repo" && bash tv/build-apk.sh > "$work/out" 2>&1) || fail "no working keytool stopped the build: $(cat "$work/out")"
+grep -q "^docker run " "$work/docker.log" || fail "keytool was not run in a container: $(cat "$work/docker.log")"
+[ -s "$work/repo/tv/signing/vcrx-tv.jks" ] || fail "no keystore made"
 echo "build-apk_test: ok"
