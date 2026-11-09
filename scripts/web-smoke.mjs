@@ -967,6 +967,7 @@ async function main() {
   }
   await profilePicker(s, evaluate, () => exceptions, (v) => { exceptions = v; });
   await inviteLoop(s, evaluate, () => exceptions, (v) => { exceptions = v; });
+  await invitedListening(s, evaluate, ids);
   if (peer) await friendsLoop(s, evaluate, () => exceptions, (v) => { exceptions = v; });
   else console.log("friends' servers: skipped (set VCRX_SMOKE_PEER to a second dev server)");
   await s("Page.navigate", { url: `${base}/#/` });
@@ -1713,6 +1714,92 @@ async function inviteLoop(s, evaluate, getExceptions, setExceptions) {
     await send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
   }
   if (getExceptions().length) fail("invite", `threw: ${getExceptions()[0]}`);
+}
+
+// An invited device is stream only for music and audiobooks too: granted
+// Music and Audiobooks, it plays an album and a book in the player bar, each
+// file asked for inside its own listen (session= on the URL), and the same
+// file outside a listen is refused as stream_only.
+async function invitedListening(s, evaluate, ids) {
+  if (!ids.music || !ids.liveAlbum || !ids.books || !ids.m4b) {
+    fail("invited listening", "no music or audiobook library (run against scripts/dev-server.sh)");
+    return;
+  }
+  console.log("invited device: music and an audiobook, stream only");
+  const minted = await evaluate(`
+    const r = await fetch("/api/v1/admin/devices", { method: "POST", headers: { "X-VCRX-Client": "web", "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Smoke Speaker", expires_in_days: 1, library_ids: [${ids.music}, ${ids.books}], allow_transcode: true }) });
+    const b = await r.json().catch(() => null);
+    return { status: r.status, invite: b && b.invite, id: b && b.device && b.device.id };`);
+  if (minted.status !== 201 || !minted.invite) {
+    fail("invited listening", `minting the device answered ${minted.status}`);
+    return;
+  }
+  const { browserContextId } = await send("Target.createBrowserContext");
+  const { targetId } = await send("Target.createTarget", { url: "about:blank", browserContextId });
+  const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
+  const d = (m, p) => send(m, p, sessionId);
+  const devErrors = [];
+  listeners.push((m) => {
+    if (m.sessionId === sessionId && m.method === "Runtime.exceptionThrown") devErrors.push(m.params.exceptionDetails.text);
+  });
+  const devEval = async (expr) => {
+    const r = await d("Runtime.evaluate", { expression: `(async () => { ${expr} })()`, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+    return r.result.value;
+  };
+  const wait = (cond, n = 60) => `for (let i = 0; i < ${n} && !(${cond}); i++) await new Promise((r) => setTimeout(r, 150));`;
+  const playing = `(() => { const a = [...document.querySelectorAll("audio.mb-audio")].find((e) => e.getAttribute("src") && !e.paused); return a ? a : null; })()`;
+  try {
+    await d("Runtime.enable");
+    await d("Page.enable");
+    await d("Emulation.setAutoplayPolicy", { autoplayPolicy: "no-user-gesture-required" }).catch(() => {});
+    // Joined the way a person joins: the invite link and its Join button.
+    await d("Page.navigate", { url: `${base}/#/invite/${minted.invite}` });
+    const join = await devEval(`
+      ${wait(`document.querySelector(".invite-page button")`)}
+      const b = document.querySelector(".invite-page button");
+      if (!b) return "no Join button: " + document.getElementById("view").innerText.slice(0, 160);
+      b.click();
+      ${wait(`!location.hash.startsWith("#/invite/")`, 40)}
+      return (await fetch("/api/v1/me")).status;`);
+    if (join !== 200) {
+      fail("invited listening", `joining by the invite: ${join}`);
+      return;
+    }
+    await d("Page.navigate", { url: `${base}/#/` });
+    const heard = await devEval(`
+      ${wait(`document.querySelector("#nav")`)}
+      const me = await fetch("/api/v1/me").then((r) => r.json());
+      const p = await import("/js/music/player.js");
+      await p.playAlbum(${ids.liveAlbum});
+      ${wait(`${playing} && ${playing}.currentTime > 0.5`)}
+      const a = ${playing};
+      const track = p.current();
+      const bare = track ? await fetch("/api/v1/music/tracks/" + track.id + "/file").then(async (r) => ({ status: r.status, code: (await r.json().catch(() => ({}))).error })) : null;
+      const album = { kind: me.kind, t: a ? a.currentTime : -1, src: a ? a.getAttribute("src") : "", bare };
+      await p.playBook(${ids.m4b}, { fromStart: true });
+      ${wait(`${playing} && /audiobooks/.test(${playing}.getAttribute("src")) && ${playing}.currentTime > 0.5`)}
+      const b = ${playing};
+      const book = { t: b ? b.currentTime : -1, src: b ? b.getAttribute("src") : "" };
+      const st = document.querySelector("#music-bar .mb-btn[aria-label^='Stop']");
+      if (st) st.click();
+      return { album, book };`);
+    if (heard.album.kind !== "token") fail("invited listening", `the browser is ${heard.album.kind}, not the invited device`);
+    if (!(heard.album.t > 0.5)) fail("invited listening", `the album did not play on the invited device (t=${heard.album.t})`);
+    if (!/[?&]session=/.test(heard.album.src)) fail("invited listening", `the track was asked for outside its listen: ${heard.album.src}`);
+    if (!heard.album.bare || heard.album.bare.status !== 403 || heard.album.bare.code !== "stream_only") {
+      fail("invited listening", `the track with no listen answered ${JSON.stringify(heard.album.bare)}, not 403 stream_only`);
+    }
+    if (!(heard.book.t > 0.5)) fail("invited listening", `the book did not play on the invited device (t=${heard.book.t})`);
+    if (!/[?&]session=/.test(heard.book.src)) fail("invited listening", `the book's file was asked for outside its listen: ${heard.book.src}`);
+    console.log(`  album played to ${heard.album.t.toFixed(1)} s and the book to ${heard.book.t.toFixed(1)} s, each in its listen; a bare track URL: ${heard.album.bare.status} ${heard.album.bare.code}`);
+    if (devErrors.length) fail("invited listening", `the invited device threw: ${devErrors[0]}`);
+  } finally {
+    await send("Target.closeTarget", { targetId }).catch(() => {});
+    await send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
+    if (minted.id) await evaluate(`await fetch("/api/v1/admin/devices/${minted.id}", { method: "DELETE", headers: { "X-VCRX-Client": "web" } }); return true;`);
+  }
 }
 
 // Lend a tape: the admin lends a movie from its page and gets the card; the

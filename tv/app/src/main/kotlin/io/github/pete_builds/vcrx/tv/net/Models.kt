@@ -57,6 +57,8 @@ data class User(
     /** From GET /me: podcasts are on and this user may use them. Absent (an older server): false. */
     val podcasts: Boolean = false,
     @SerialName("podcast_search") val podcastSearch: Boolean = false,
+    /** From GET /me: user, profile, or token for an invited device, which is stream only. */
+    val kind: String = "user",
 )
 
 @Serializable

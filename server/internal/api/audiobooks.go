@@ -263,6 +263,11 @@ func (s *Server) audiobookSource(w http.ResponseWriter, r *http.Request) (*audio
 			return nil, "", false
 		}
 	}
+	// An invited device plays a book's file only inside its own listen to
+	// that file, as for music.
+	if !s.streamOnly(w, r, session, func(ss playback.StreamSession) bool { return ss.BookFileID == id }) {
+		return nil, "", false
+	}
 	f, err := s.Audiobooks.Catalog.Source(r.Context(), info(r).Policy, id)
 	if err != nil {
 		s.audiobookErr(w, r, err)

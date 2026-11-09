@@ -31,6 +31,7 @@ import { api, ApiError } from "../api.js";
 import { h, clock, toast } from "../dom.js";
 import { micon as icon } from "./icons.js";
 import { audioCapabilities } from "../caps.js";
+import { state as app } from "../app.js";
 
 const PRELOAD_S = 20;
 const SAVE_MS = 15000;
@@ -412,6 +413,23 @@ function srcWithStart(stream, ms) {
   return stream.url + (stream.url.includes("?") ? "&" : "?") + "start_ms=" + Math.round(ms);
 }
 
+// An invited device is stream only: the server hands it a file only inside
+// its own open listen to that file, so it waits for the listen before it
+// loads a track, and loads no next track ahead of time.
+function streamOnly() {
+  return !!(app.me && app.me.kind === "token");
+}
+
+// withSession names the listen a stream URL belongs to.
+function withSession(url, session) {
+  return session ? url + (url.includes("?") ? "&" : "?") + "session=" + encodeURIComponent(session) : url;
+}
+
+// listenFor is the open listen's session when it is for track t.
+function listenFor(t) {
+  return listen && t && listen.trackId === t.id ? listen.id : null;
+}
+
 function gainFor(t) {
   if (!t.replaygain) return 1;
   const g = state.source === "album" && !state.shuffle ? (t.replaygain.album_gain ?? t.replaygain.track_gain) : t.replaygain.track_gain;
@@ -441,14 +459,18 @@ function loadCurrent(atMs, autoplay) {
   }
   const old = el();
   let preloaded = false;
-  if (atMs === 0 && idle().dataset.trackId === String(t.id)) {
+  // An invited device loads the track once its listen is open (beginListen).
+  const deferred = streamOnly() ? { atMs, autoplay } : null;
+  if (!deferred && atMs === 0 && idle().dataset.trackId === String(t.id)) {
     cur = 1 - cur;
     preloaded = true;
   } else {
-    el().src = srcWithStart(t.stream, atMs);
+    if (!deferred) {
+      el().src = srcWithStart(t.stream, atMs);
+      if (t.stream.protocol !== "converted" && atMs > 0) el().currentTime = atMs / 1000;
+    }
     el().dataset.offset = t.stream.protocol === "converted" ? String(atMs / 1000) : "0";
     el().dataset.trackId = String(t.id);
-    if (t.stream.protocol !== "converted" && atMs > 0) el().currentTime = atMs / 1000;
   }
   if (old !== el()) {
     old.pause();
@@ -458,15 +480,15 @@ function loadCurrent(atMs, autoplay) {
   }
   el().volume = state.book ? 1 : gainFor(t);
   el().playbackRate = state.book ? state.rate : 1;
-  if (autoplay) el().play().catch((e) => { if (e.name !== "AbortError") toast("Press play to start the music."); });
-  beginListen(t, preloaded);
+  if (autoplay && !deferred) el().play().catch((e) => { if (e.name !== "AbortError") toast("Press play to start the music."); });
+  beginListen(t, preloaded, deferred);
   changed();
 }
 
 // preloadNext fills the idle element with the next track once the playing
 // one is near its end.
 function preloadNext() {
-  if (state.repeat === "one") return;
+  if (state.repeat === "one" || streamOnly()) return;
   const p = nextPos();
   if (p < 0) return;
   const t = state.tracks[state.order[p]];
@@ -551,7 +573,7 @@ export function seek(ms) {
   if (t.stream.protocol === "converted") {
     // A converted stream cannot seek by range: ask for a new one from there.
     const playing = !el().paused;
-    el().src = srcWithStart(t.stream, ms);
+    el().src = withSession(srcWithStart(t.stream, ms), listenFor(t));
     el().dataset.offset = String(ms / 1000);
     if (playing) el().play().catch(() => {});
   } else {
@@ -566,8 +588,11 @@ export function seek(ms) {
 let listen = null;
 let beat = null;
 
-function beginListen(t, preloaded) {
+// beginListen opens a listen in Activity for track t. deferred, for an
+// invited device, is where to load the track from once the listen is open.
+function beginListen(t, preloaded, deferred = null) {
   // A podcast episode is not a listen in Activity: its place is saved instead.
+  // Invited devices never get podcasts, so no load is ever deferred for one.
   if (!t || (state.book && state.book.podcast)) return;
   const me = { trackId: t.id, id: null, started: false, preloaded };
   listen = me;
@@ -580,6 +605,11 @@ function beginListen(t, preloaded) {
         return;
       }
       me.id = s.session_id;
+      if (deferred) {
+        el().src = withSession(srcWithStart(t.stream, deferred.atMs), me.id);
+        if (t.stream.protocol !== "converted" && deferred.atMs > 0) el().currentTime = deferred.atMs / 1000;
+        if (deferred.autoplay) el().play().catch((e) => { if (e.name !== "AbortError") toast("Press play to start the music."); });
+      }
       if (!el().paused) report("start");
       me.started = !el().paused;
       clearInterval(beat);
