@@ -73,6 +73,17 @@ func (r *Refresher) Register(ctx context.Context) error {
 		}
 		r.ids[src.Name], r.maxs[id] = id, src.MaxStreams
 	}
+	keep := make([]int64, 0, len(r.ids))
+	for _, id := range r.ids {
+		keep = append(keep, id)
+	}
+	n, err := r.Store.RetireUnlisted(ctx, keep)
+	if err != nil {
+		return fmt.Errorf("live_tv: retiring removed sources: %w", err)
+	}
+	if n > 0 {
+		r.log().Info("live tv: channels of sources no longer in vcrx.yaml marked gone", "channels", n)
+	}
 	return nil
 }
 

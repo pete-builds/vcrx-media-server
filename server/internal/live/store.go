@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -54,6 +55,27 @@ func (s *Store) now() int64 {
 		return s.Now().UnixMilli()
 	}
 	return time.Now().UnixMilli()
+}
+
+// RetireUnlisted marks gone every channel of a source vcrx.yaml no longer
+// names. Such a source is never refreshed again, so without this its
+// channels would stay listed forever, pointing at streams nobody maintains.
+// Gone, not deleted, as Sync does: the admin page still shows them, and
+// listing the source again brings its channels back on the next refresh.
+func (s *Store) RetireUnlisted(ctx context.Context, keep []int64) (int64, error) {
+	q := `UPDATE channels SET gone = 1 WHERE gone = 0`
+	args := make([]any, 0, len(keep))
+	if len(keep) > 0 {
+		q += ` AND source_id NOT IN (?` + strings.Repeat(`, ?`, len(keep)-1) + `)`
+		for _, id := range keep {
+			args = append(args, id)
+		}
+	}
+	res, err := s.DB.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // EnsureSource adds a playlist named in vcrx.yaml, or updates its URL and
