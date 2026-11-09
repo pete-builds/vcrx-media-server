@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,6 +109,92 @@ func TestMusicMigrationRebuildsLibrariesSafely(t *testing.T) {
 	}
 	if _, err := conn.Exec(`INSERT INTO items (library_id, kind, group_key, title, sort_title, added_at, updated_at) VALUES (99, 'movie', 'k', 't', 't', 0, 0)`); err == nil {
 		t.Error("an item in a library that does not exist was accepted")
+	}
+}
+
+// versionOf is the version of the migration whose file name ends in suffix.
+func versionOf(t *testing.T, suffix string) int {
+	t.Helper()
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms {
+		if strings.HasSuffix(m.name, suffix) {
+			return m.version
+		}
+	}
+	t.Fatalf("no migration ending %s", suffix)
+	return 0
+}
+
+// orphanDB is a database just before the audiobooks migration (a Go step,
+// so the foreign key check runs) with rows written by run while foreign keys
+// were off: the shape a delete made by hand leaves behind.
+func orphanDB(t *testing.T, run func(exec func(string, ...any))) (*sql.DB, string) {
+	t.Helper()
+	dir := t.TempDir()
+	conn, err := Open(filepath.Join(dir, "vcrx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	ctx := context.Background()
+	if _, err := migrateTo(ctx, conn, "", quiet(), versionOf(t, "_audiobooks.sql")-1); err != nil {
+		t.Fatal(err)
+	}
+	c, err := conn.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := c.ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec(`PRAGMA foreign_keys = OFF`)
+	exec(`INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES (1, 'owner', 'x', 0, 0)`)
+	exec(`INSERT INTO auth_sessions (id, user_id, token_hash, created_at, last_seen_at, expires_at) VALUES (7, 1, x'01', 0, 0, 0)`)
+	exec(`INSERT INTO playback_sessions (id, user_id, auth_session_id, decision, decision_reason, started_at, last_event_at)
+		VALUES ('s1', 1, 7, 'direct_play', 'ok', 0, 0)`)
+	run(exec)
+	exec(`PRAGMA foreign_keys = ON`)
+	return conn, dir
+}
+
+// A sign-in deleted by hand with foreign keys off left playback history
+// pointing at it (seen on a real server, 2026-11-09: the audiobooks migration
+// refused to run and the server would not start). The reference is ON DELETE
+// SET NULL, so the migration clears it, as the delete would have, and goes on.
+func TestMigrationClearsDanglingSetNullReferences(t *testing.T) {
+	conn, dir := orphanDB(t, func(exec func(string, ...any)) {
+		exec(`DELETE FROM auth_sessions WHERE id = 7`)
+	})
+	if _, err := Migrate(context.Background(), conn, filepath.Join(dir, "backups"), quiet()); err != nil {
+		t.Fatalf("migrate with a dangling SET NULL reference: %v", err)
+	}
+	var n int
+	var auth sql.NullInt64
+	if err := conn.QueryRow(`SELECT COUNT(*), MAX(auth_session_id) FROM playback_sessions WHERE id = 's1'`).Scan(&n, &auth); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || auth.Valid {
+		t.Fatalf("playback history: %d rows, auth_session_id %v; want the row kept with the reference cleared", n, auth)
+	}
+}
+
+// A dangling reference the schema does not say to clear (auth_sessions.user_id
+// is ON DELETE CASCADE) is still refused: clearing it would invent a state no
+// delete could have produced.
+func TestMigrationStillRefusesOtherDanglingReferences(t *testing.T) {
+	conn, dir := orphanDB(t, func(exec func(string, ...any)) {
+		exec(`DELETE FROM users WHERE id = 1`)
+	})
+	_, err := Migrate(context.Background(), conn, filepath.Join(dir, "backups"), quiet())
+	if err == nil || !strings.Contains(err.Error(), "foreign key check failed: auth_sessions") {
+		t.Fatalf("err = %v, want the auth_sessions orphan refused", err)
 	}
 }
 
