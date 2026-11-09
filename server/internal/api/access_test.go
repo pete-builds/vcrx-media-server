@@ -196,6 +196,10 @@ type walkFixture struct {
 	music musicIDs
 	// And an audiobook library.
 	books bookIDs
+	// listens are the friend's own listens to the tracks and the book's file
+	// the walk plays, keyed "track:<id>" and "file:<id>": an invited device
+	// reaches an audio file only inside its own listen to it.
+	listens map[string]string
 	// Extras hidden with their film (a denied label) or by the ceiling (4K).
 	hiddenExtras []int64
 }
@@ -489,6 +493,45 @@ func (w *walkFixture) startBookListen(tok string) string {
 	return out.SessionID
 }
 
+// startFileListen opens a listen to one of a book's files.
+func (w *walkFixture) startFileListen(tok string, file int64) string {
+	w.t.Helper()
+	var out struct {
+		SessionID string `json:"session_id"`
+	}
+	r := w.do("POST", fmt.Sprintf("/api/v1/audiobooks/files/%d/sessions", file), tok, map[string]any{"capabilities": musicBrowserCaps()})
+	r.json(w.t, &out)
+	if r.code != 201 {
+		w.t.Fatalf("listen on book file %d: %d %s", file, r.code, r.body)
+	}
+	return out.SessionID
+}
+
+// audioFile probes an audio file route (route names its method) inside the
+// friend's own listen to that file, and, for the household's own devices,
+// by the bare URL as well, as for a version's file.
+func (w *walkFixture) audioFile(route, key string, id int64, query string) []probe {
+	sid, ok := w.listens[fmt.Sprintf("%s:%d", key, id)]
+	if !ok {
+		w.t.Fatalf("no walk listen on %s %d", key, id)
+	}
+	with := func(q string) string {
+		if query == "" {
+			return q
+		}
+		return query + "&" + q
+	}
+	ps := []probe{at(route, id).query(with("session=" + sid))}
+	if !w.isToken() {
+		p := at(route, id)
+		if query != "" {
+			p = p.query(query)
+		}
+		ps = append(ps, p)
+	}
+	return ps
+}
+
 // startExtraSession opens a converted-stream session on an extra.
 func (w *walkFixture) startExtraSession(tok string, extra int64) string {
 	w.t.Helper()
@@ -519,7 +562,7 @@ func (w *walkFixture) probes(sessions []string, adminSession, listen, bookListen
 func (w *walkFixture) bookProbes(listen string) []probe {
 	b := w.books
 	caps := map[string]any{"capabilities": musicBrowserCaps()}
-	return []probe{
+	ps := []probe{
 		at("GET /api/v1/audiobooks/libraries/{library_id}/books", b.library),
 		at("GET /api/v1/audiobooks/libraries/{library_id}/books", b.library).query("sort=recent&state=in_progress"),
 		at("GET /api/v1/audiobooks/continue").hides("Second Steps"),
@@ -531,13 +574,13 @@ func (w *walkFixture) bookProbes(listen string) []probe {
 		at("DELETE /api/v1/audiobooks/books/{book_id}/finished", b.m4b),
 		at("POST /api/v1/audiobooks/books/{book_id}/queue", b.multi).with(caps),
 		at("POST /api/v1/audiobooks/files/{file_id}/sessions", b.m4bFile).with(caps),
-		at("GET /api/v1/audiobooks/files/{file_id}/file", b.m4bFile),
-		at("HEAD /api/v1/audiobooks/files/{file_id}/file", b.m4bFile),
-		at("GET /api/v1/audiobooks/files/{file_id}/stream", b.m4bFile).query("codec=aac"),
-		at("HEAD /api/v1/audiobooks/files/{file_id}/stream", b.m4bFile).query("codec=aac"),
 		at("GET /api/v1/libraries").hides(`"name":"Audiobooks"`),
 		at("POST /api/v1/playback/sessions/{session_id}/events", listen).with(map[string]any{"type": "progress", "position_ms": 1000}),
 	}
+	ps = append(ps, w.audioFile("GET /api/v1/audiobooks/files/{file_id}/file", "file", b.m4bFile, "")...)
+	ps = append(ps, w.audioFile("HEAD /api/v1/audiobooks/files/{file_id}/file", "file", b.m4bFile, "")...)
+	ps = append(ps, w.audioFile("GET /api/v1/audiobooks/files/{file_id}/stream", "file", b.m4bFile, "codec=aac")...)
+	return append(ps, w.audioFile("HEAD /api/v1/audiobooks/files/{file_id}/stream", "file", b.m4bFile, "codec=aac")...)
 }
 
 // musicProbes cover the music routes: every one names a library, artist,
@@ -547,7 +590,7 @@ func (w *walkFixture) bookProbes(listen string) []probe {
 func (w *walkFixture) musicProbes(listen string) []probe {
 	m := w.music
 	caps := map[string]any{"capabilities": musicBrowserCaps()}
-	return []probe{
+	ps := []probe{
 		at("GET /api/v1/music/libraries/{library_id}/artists", m.library),
 		at("GET /api/v1/music/libraries/{library_id}/albums", m.library),
 		at("GET /api/v1/music/libraries/{library_id}/albums", m.library).query("live=false&sort=added"),
@@ -559,14 +602,14 @@ func (w *walkFixture) musicProbes(listen string) []probe {
 		at("POST /api/v1/music/queue").with(map[string]any{"artist_id": m.artist, "capabilities": musicBrowserCaps()}),
 		at("POST /api/v1/music/queue").with(map[string]any{"track_ids": []int64{m.flac, m.alac}, "capabilities": musicBrowserCaps()}),
 		at("POST /api/v1/music/tracks/{track_id}/sessions", m.flac).with(caps),
-		at("GET /api/v1/music/tracks/{track_id}/file", m.flac),
-		at("HEAD /api/v1/music/tracks/{track_id}/file", m.flac),
-		at("GET /api/v1/music/tracks/{track_id}/stream", m.alac).query("codec=aac"),
-		at("HEAD /api/v1/music/tracks/{track_id}/stream", m.alac).query("codec=aac"),
 		at("GET /api/v1/music/search").query("q=o").hides("Low Tide", "Apogee", "Glass Harbor", "Cedar Static"),
 		at("GET /api/v1/libraries").hides(`"name":"Music"`),
 		at("POST /api/v1/playback/sessions/{session_id}/events", listen).with(map[string]any{"type": "progress", "position_ms": 1000}),
 	}
+	ps = append(ps, w.audioFile("GET /api/v1/music/tracks/{track_id}/file", "track", m.flac, "")...)
+	ps = append(ps, w.audioFile("HEAD /api/v1/music/tracks/{track_id}/file", "track", m.flac, "")...)
+	ps = append(ps, w.audioFile("GET /api/v1/music/tracks/{track_id}/stream", "track", m.alac, "codec=aac")...)
+	return append(ps, w.audioFile("HEAD /api/v1/music/tracks/{track_id}/stream", "track", m.alac, "codec=aac")...)
 }
 
 // liveProbes cover IPTV: restricting the friend takes away the IPTV
@@ -853,6 +896,11 @@ func accessWalk(t *testing.T, kind string) {
 	sessions = append(sessions, w.startSession(w.friendTok, w.movieID, &w.v4k))
 	listen := w.startListen(w.friendTok, w.music.flac)
 	bookListen := w.startBookListen(w.friendTok)
+	w.listens = map[string]string{
+		fmt.Sprintf("track:%d", w.music.flac):   listen,
+		fmt.Sprintf("track:%d", w.music.alac):   w.startListen(w.friendTok, w.music.alac),
+		fmt.Sprintf("file:%d", w.books.m4bFile): w.startFileListen(w.friendTok, w.books.m4bFile),
+	}
 	// And a live channel, watched while the grant lasts.
 	w.liveRun = startLiveWatch(t, w.fixture, w.friendTok, w.channel)
 	// And on the extras about to be hidden: a trailer session has no version,

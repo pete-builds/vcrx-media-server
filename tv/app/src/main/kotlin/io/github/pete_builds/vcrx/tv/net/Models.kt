@@ -54,6 +54,8 @@ data class User(
     @SerialName("is_admin") val isAdmin: Boolean = false,
     /** From GET /me: the user may watch IPTV and there are channels. */
     @SerialName("live_tv") val liveTv: Boolean = false,
+    /** From GET /me: user, profile, or token for an invited device, which is stream only. */
+    val kind: String = "user",
 )
 
 @Serializable

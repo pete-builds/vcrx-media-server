@@ -734,7 +734,12 @@ func TestPlaybackRecordsThePrincipal(t *testing.T) {
 func TestNoTokenRouteServesAWholeFile(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	d := f.invite(map[string]any{"allow_transcode": true})
+	// Music and audiobooks are files too, so the device is granted a library
+	// of each; without the grant the walk would prove nothing for them.
+	m := withMusic(t, f)
+	b := withAudiobooks(t, f)
+	d := f.invite(map[string]any{"allow_transcode": true,
+		"library_ids": []int64{f.libraryID("Movies"), f.libraryID("TV"), m.library, b.library}})
 	// A local trailer beside the film: extras are files too.
 	trailer := filepath.Join(f.root, "Film 2001 1080p", "Trailers", "Teaser.mkv")
 	if err := os.MkdirAll(filepath.Dir(trailer), 0o755); err != nil {
@@ -756,9 +761,62 @@ func TestNoTokenRouteServesAWholeFile(t *testing.T) {
 	if r := f.do("GET", fmt.Sprintf("/api/v1/extras/%d/file", extraID), f.friendTok, nil); r.code != 200 || !bytes.Equal(r.body, content(4000)) {
 		t.Fatalf("a friend's account, whole trailer: %d", r.code)
 	}
+	// Control: the household's own account gets a track and a book's file
+	// whole, so the walk would see them too.
+	grantAll(t, f)
+	for _, u := range []string{fmt.Sprintf("/api/v1/music/tracks/%d/file", m.flac), fmt.Sprintf("/api/v1/audiobooks/files/%d/file", b.m4bFile)} {
+		if r := f.do("GET", u, f.friendTok, nil); r.code != 200 || len(r.body) == 0 {
+			t.Fatalf("a friend's account, whole %s: %d", u, r.code)
+		}
+	}
+	// And the device sees both libraries, so a refusal below is the stream
+	// only rule, not a missing grant.
+	if r := f.do("GET", fmt.Sprintf("/api/v1/audiobooks/books/%d", b.m4b), d.token, nil); r.code != 200 {
+		t.Fatalf("the device's audiobook grant: %d %s", r.code, r.body)
+	}
+	if r := f.do("GET", fmt.Sprintf("/api/v1/music/albums/%d", m.album), d.token, nil); r.code != 200 {
+		t.Fatalf("the device's music grant: %d %s", r.code, r.body)
+	}
 	if got := wholeFileRoutes(t, f, f.srv.Routes(), d.token); len(got) > 0 {
 		t.Fatalf("routes serving an invited device a whole file: %v", got)
 	}
+	// Inside its own listen, the device streams a track and a book's file,
+	// direct or converted; another file's listen does not count.
+	listen := func(path string) string {
+		t.Helper()
+		r := f.do("POST", path, d.token, map[string]any{"capabilities": musicBrowserCaps()})
+		var l struct {
+			SessionID string `json:"session_id"`
+		}
+		r.json(t, &l)
+		if r.code != 201 || l.SessionID == "" {
+			t.Fatalf("listen %s: %d %s", path, r.code, r.body)
+		}
+		return l.SessionID
+	}
+	track := listen(fmt.Sprintf("/api/v1/music/tracks/%d/sessions", m.flac))
+	bookFile := listen(fmt.Sprintf("/api/v1/audiobooks/files/%d/sessions", b.m4bFile))
+	for _, c := range []struct {
+		name, url string
+		want      int
+	}{
+		{"a track in its listen", fmt.Sprintf("/api/v1/music/tracks/%d/file?session=%s", m.flac, track), 206},
+		{"a track converted in its listen", fmt.Sprintf("/api/v1/music/tracks/%d/stream?session=%s", m.flac, track), 200},
+		{"a book's file in its listen", fmt.Sprintf("/api/v1/audiobooks/files/%d/file?session=%s", b.m4bFile, bookFile), 206},
+		{"a book's file converted in its listen", fmt.Sprintf("/api/v1/audiobooks/files/%d/stream?session=%s", b.m4bFile, bookFile), 200},
+		{"another track in a track's listen", fmt.Sprintf("/api/v1/music/tracks/%d/file?session=%s", m.alac, track), 403},
+		{"a track in a book's listen", fmt.Sprintf("/api/v1/music/tracks/%d/file?session=%s", m.flac, bookFile), 403},
+		{"a book's file in a track's listen", fmt.Sprintf("/api/v1/audiobooks/files/%d/file?session=%s", b.m4bFile, track), 403},
+		{"a converted track with no listen", fmt.Sprintf("/api/v1/music/tracks/%d/stream", m.flac), 403},
+	} {
+		if r := f.do("GET", c.url, d.token, nil, "Range", "bytes=0-99"); r.code != c.want {
+			t.Errorf("%s: %d, want %d: %s", c.name, r.code, c.want, r.body)
+		}
+	}
+	if r := f.do("POST", "/api/v1/playback/sessions/"+track+"/events", d.token, map[string]any{"type": "stop", "position_ms": 0}); r.code >= 300 {
+		t.Fatalf("stop the listen: %d %s", r.code, r.body)
+	}
+	wantError(t, "a track in an ended listen", f.do("GET", fmt.Sprintf("/api/v1/music/tracks/%d/file?session=%s", m.flac, track), d.token, nil), 403, "stream_only")
 	// Control: a download route added to the table is caught by name.
 	dl := route{"GET", "/api/v1/versions/{version_id}/download", signedIn, func(w http.ResponseWriter, r *http.Request) {
 		var p string
@@ -827,14 +885,18 @@ func wholeFileRoutes(t *testing.T, f *fixture, routes []route, tok string) []str
 		SessionID string `json:"session_id"`
 	}
 	r.json(t, &s)
-	var extra int64
+	var extra, track, bookFile int64
 	_ = f.db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM item_extras`).Scan(&extra)
+	_ = f.db.QueryRow(`SELECT COALESCE(MIN(id), 0) FROM music_tracks`).Scan(&track)
+	_ = f.db.QueryRow(`SELECT COALESCE(MIN(id), 0) FROM audiobook_files`).Scan(&bookFile)
 	fill := map[string]string{"version_id": fmt.Sprint(f.v1080), "item_id": fmt.Sprint(f.movieID), "kind": "poster",
 		"stream_id": fmt.Sprint(sub), "session_id": s.SessionID, "library_id": "1", "run": "1", "segment": "seg-00001.m4s",
-		"extra_id": fmt.Sprint(extra)}
-	// Every media file the library holds, versions and extras alike.
+		"extra_id": fmt.Sprint(extra), "track_id": fmt.Sprint(track), "file_id": fmt.Sprint(bookFile)}
+	// Every media file the library holds: versions, extras, music tracks and
+	// audiobook files.
 	var wholes [][]byte
-	queryRows(t, f, `SELECT path FROM media_versions UNION ALL SELECT path FROM item_extras`, func(vals []any) {
+	queryRows(t, f, `SELECT path FROM media_versions UNION ALL SELECT path FROM item_extras
+		UNION ALL SELECT path FROM music_tracks UNION ALL SELECT path FROM audiobook_files`, func(vals []any) {
 		if b, err := os.ReadFile(fmt.Sprint(vals[0])); err == nil {
 			wholes = append(wholes, b)
 		}

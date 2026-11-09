@@ -78,13 +78,18 @@ class AudiobookPlayer private constructor(private val context: Context, private 
     // offset, which currentPosition does not include.
     private var convertedOffsetMs = 0L
     private var listenSession: String? = null
+    private var listenFile: Long? = null
     private var listenJob: Job? = null
+    private val listens = ListenSessions(Regex("/api/v1/audiobooks/files/(\\d+)/")) { id ->
+        graph.api.audiobookListen(id, capabilities()).let { OpenListen(it.sessionId, it.heartbeatIntervalMs) }
+    }
     private var ticker: Job? = null
     private var lastSave = 0L
 
     /** Plays a book from where the listener left off, from [atS] when given, or from the start. */
     suspend fun play(bookId: Long, atS: Double? = null, fromStart: Boolean = false) {
         MusicPlayer.stopIfRunning()
+        listens.enabled = streamOnly(graph)
         val q = graph.api.audiobookQueue(bookId, capabilities())
         val playable = q.files.filter { it.stream != null }
         if (playable.size != q.files.size || playable.isEmpty()) {
@@ -92,6 +97,8 @@ class AudiobookPlayer private constructor(private val context: Context, private 
             return
         }
         saveNow()
+        endListen()
+        closeUnplayed(listens) { id -> graph.playbackEvents.send(id, PlaybackEvent(type = "stop", positionMs = 0)) }
         book = q
         files = q.files
         var pos = atS ?: if (fromStart || q.progress.finished) 0.0 else q.progress.positionS
@@ -108,7 +115,7 @@ class AudiobookPlayer private constructor(private val context: Context, private 
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
         ExoPlayer.Builder(context, renderers)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http), DefaultExtractorsFactory()))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(listens.dataSource(DefaultDataSource.Factory(context, http)), DefaultExtractorsFactory()))
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), true)
             .setHandleAudioBecomingNoisy(true)
             .build()
@@ -207,6 +214,7 @@ class AudiobookPlayer private constructor(private val context: Context, private 
     fun stop() {
         saveNow()
         endListen()
+        closeUnplayed(listens) { id -> graph.playbackEvents.send(id, PlaybackEvent(type = "stop", positionMs = 0)) }
         ticker?.cancel()
         player?.run {
             removeListener(listener)
@@ -271,14 +279,19 @@ class AudiobookPlayer private constructor(private val context: Context, private 
         val file = currentFile() ?: return
         listenJob = scope.launch {
             val session = try {
-                graph.api.audiobookListen(file.id, capabilities())
+                if (listens.enabled) {
+                    listens.get(file.id)
+                } else {
+                    graph.api.audiobookListen(file.id, capabilities()).let { OpenListen(it.sessionId, it.heartbeatIntervalMs) }
+                }
             } catch (e: ApiException) {
                 publish(message = e.message)
                 return@launch
             }
             listenSession = session.sessionId
+            listenFile = file.id
             report("start")
-            val beat = session.heartbeatIntervalMs.coerceAtLeast(5_000)
+            val beat = session.heartbeatMs.coerceAtLeast(5_000)
             while (isActive) {
                 delay(beat)
                 if (player?.isPlaying == true) report("progress")
@@ -289,6 +302,8 @@ class AudiobookPlayer private constructor(private val context: Context, private 
     private fun endListen() {
         listenJob?.cancel()
         listenJob = null
+        listenFile?.let { listens.forget(it) }
+        listenFile = null
         val id = listenSession ?: return
         listenSession = null
         graph.playbackEvents.send(id, PlaybackEvent(type = "stop", positionMs = fileMs(), durationMs = fileDuration()))
