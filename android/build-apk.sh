@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Builds the VCRX phone and tablet APKs with Docker and writes them to
+# android/build/out/.
+#
+# Works against any Docker host with buildx, including a remote one:
+#   DOCKER_HOST=ssh://nix1 ./android/build-apk.sh
+# Google's aapt2 is x86_64 only, so the image is always linux/amd64; an arm64
+# host (an Apple silicon Mac) runs it under emulation.
+#
+# The first run creates the signing key at android/signing/vcrx-mobile.jks with a
+# random password in android/signing/vcrx-mobile.pass. Both are gitignored, and
+# the key is not the TV's. Back them up: Android refuses to upgrade an installed
+# app with an APK signed by a different key.
+set -euo pipefail
+
+app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+out_dir="$app_dir/build/out"
+signing_dir="$app_dir/signing"
+keystore="$signing_dir/vcrx-mobile.jks"
+pass_file="$signing_dir/vcrx-mobile.pass"
+
+die() {
+  echo "build-apk: $*" >&2
+  exit 1
+}
+
+sha256() {
+  if command -v sha256sum > /dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+command -v docker > /dev/null 2>&1 || die "docker is not on PATH"
+docker buildx version > /dev/null 2>&1 || die "docker buildx is required (BuildKit secrets and local output)"
+
+# Android refuses downgrades, so the version code grows with the commit count.
+# A shallow clone, or no git, would count from 1 and build an APK the phone will
+# not install over the one it has: stop before building anything.
+[ "$(git -C "$app_dir" rev-parse --is-shallow-repository 2> /dev/null)" = false ] ||
+  die "cannot count commits for the version code (a shallow clone, or not a git checkout); run git fetch --unshallow"
+version_code="$(git -C "$app_dir" rev-list --count HEAD)"
+
+make_keystore() {
+  echo "build-apk: creating signing key $keystore"
+  mkdir -p "$signing_dir"
+  chmod 700 "$signing_dir"
+  umask 077
+  head -c 48 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-48 > "$pass_file"
+  local dname="CN=VCRX for Android, O=VCRX Media Server"
+  # Run keytool rather than look for it: macOS ships a /usr/bin/keytool stub that
+  # only says "Unable to locate a Java Runtime" when there is no JDK.
+  if keytool -help > /dev/null 2>&1; then
+    keytool -genkeypair -keystore "$keystore" -storetype PKCS12 -alias vcrx-mobile \
+      -keyalg RSA -keysize 4096 -validity 36500 -dname "$dname" \
+      -storepass:file "$pass_file" -keypass:file "$pass_file" > /dev/null
+  else
+    # No local JDK: run keytool in a throwaway container with no network. The password
+    # goes in on stdin and the keystore comes back on stdout, so nothing is left on
+    # the Docker host and neither appears in a process list or image layer.
+    local jdk_image
+    jdk_image="$(sed -n 's/^ARG JDK_IMAGE=//p' "$app_dir/Dockerfile")"
+    [ -n "$jdk_image" ] || die "cannot read JDK_IMAGE from the Dockerfile"
+    docker run --rm -i --network none --entrypoint sh "$jdk_image" -c '
+      read -r P; export P
+      keytool -genkeypair -keystore /tmp/k.p12 -storetype PKCS12 -alias vcrx-mobile \
+        -keyalg RSA -keysize 4096 -validity 36500 -dname "'"$dname"'" \
+        -storepass:env P -keypass:env P > /dev/null 2>&1 && base64 /tmp/k.p12' \
+      < "$pass_file" | base64 --decode > "$keystore"
+  fi
+  [ -s "$keystore" ] || { rm -f "$keystore" "$pass_file"; die "keystore creation failed"; }
+  echo "build-apk: back up $signing_dir somewhere safe; losing it means uninstalling to upgrade"
+}
+
+if [ ! -f "$keystore" ] || [ ! -f "$pass_file" ]; then
+  [ -f "$keystore" ] && die "$keystore exists without $pass_file; restore the password file from your backup"
+  make_keystore
+fi
+
+mkdir -p "$out_dir"
+docker buildx build \
+  --progress=plain \
+  --platform linux/amd64 \
+  --target apk \
+  --build-context openapi="$app_dir/../server/api" \
+  --secret id=release_keystore,src="$keystore" \
+  --secret id=release_keystore_pass,src="$pass_file" \
+  --build-arg VERSION_CODE="$version_code" \
+  --build-arg KEYSTORE_ID="$(sha256 "$keystore" | cut -c1-16)" \
+  --output type=local,dest="$out_dir" \
+  "$app_dir"
+
+echo
+ls -la "$out_dir"

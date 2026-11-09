@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Black is the ground everywhere, including the window behind the splash. -->
+    <style name="Theme.App" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/brand_black</item>
+        <item name="android:colorBackground">@color/brand_black</item>
+        <item name="android:colorAccent">@color/brand_accent</item>
+        <item name="android:colorControlActivated">@color/brand_accent</item>
+    </style>
+
+    <style name="Theme.App.Player">
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>

@@ -1,0 +1,54 @@
+# Android phone and tablet client: Gradle lint, unit tests and a debug build.
+# Everything runs in the check stage of android/Dockerfile, so CI uses the same
+# pinned JDK and SDK as android/build-apk.sh. The SDK and the Gradle dependencies
+# are Docker layers kept in the Actions cache; a warm run only redoes the Gradle
+# tasks.
+name: android
+
+on:
+  push:
+    paths:
+      - "android/**"
+      - "server/api/openapi.yaml"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - "server/api/openapi.yaml"
+      - ".github/workflows/android.yml"
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: lint, unit tests, assembleDebug
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: build-apk.sh numbers the release by commit count, and refuses a shallow clone
+        run: android/build-apk_test.sh
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Lint, unit tests and debug APK (android/Dockerfile, target check)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: android
+          # The API contract, which the unit tests check every request body against.
+          build-contexts: openapi=server/api
+          target: check
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=vcrx-android
+          cache-to: type=gha,scope=vcrx-android,mode=max
