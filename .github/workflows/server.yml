@@ -74,6 +74,12 @@ jobs:
           docker compose -f deploy/compose.yaml config --format json |
             jq -e '.services.vcrx | (.mem_limit | tonumber) >= 1073741824 and .pids_limit > 0' > /dev/null
           VCRX_CPUS=1.5 docker compose -f deploy/compose.yaml config --format json | jq -e '.services.vcrx.cpus == 1.5' > /dev/null
+          # deploy.sh's migration dry run works in the image, offline, on a tmpfs copy.
+          mkdir -p "$RUNNER_TEMP/live" && chmod 777 "$RUNNER_TEMP/live"
+          docker run --rm -v "$RUNNER_TEMP/live:/config" vcrx-media-server:ci migrate
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+            --tmpfs /tmp:size=64m --tmpfs /work:size=64m,mode=1777 -v "$RUNNER_TEMP/live:/live" \
+            --entrypoint vcrx vcrx-media-server:ci migrate-check -from /live/vcrx.db -db /work/vcrx.db
         env:
           VCRX_MOVIES_DIR: /tmp
           VCRX_TV_DIR: /tmp

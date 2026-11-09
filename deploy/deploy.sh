@@ -14,7 +14,11 @@
 #    commit). With --release vX.Y.Z, pulls ghcr.io's image for that version,
 #    built and attested in CI, and records it as VCRX_IMAGE in .env so a
 #    restart keeps it; rolling back is --release with the previous version.
-# 4. Restarts, waits for /healthz, checks the server reports the version just
+# 4. Dry-runs the new image's migrations on a copy of the live database, in a
+#    throwaway container with no network, before the live container is
+#    touched. A migration that fails on real data stops the deploy there and
+#    the old server keeps running. --force does not skip this.
+# 5. Restarts, waits for /healthz, checks the server reports the version just
 #    deployed, and runs scripts/smoke-api.sh.
 set -euo pipefail
 
@@ -78,17 +82,62 @@ set_image() {
   [ -z "$1" ] || echo "VCRX_IMAGE=$1" >> .env.tmp
   cat .env.tmp > .env && rm -f .env.tmp
 }
+# dry_run IMAGE: the new image migrates a copy of the live database and
+# checks it, before anything live changes. The copy is taken by that image
+# with SQLite's VACUUM INTO, the database opened read-only, so it is
+# consistent while the old server keeps writing; it lives on a tmpfs inside
+# the container, so it uses memory rather than disk and is gone when the
+# container exits, whatever happened. The config folder is mounted
+# read-write only because SQLite readers share the -shm file with the server.
+dry_run() {
+  command -v jq > /dev/null || die "jq is not installed; the migration dry run needs it"
+  local cfg config user db bytes out
+  cfg=$(docker compose config --format json) || die "could not read the compose config for the migration dry run"
+  config=$(jq -r '.services.vcrx.volumes[] | select(.target == "/config") | .source' <<< "$cfg")
+  user=$(jq -r '.services.vcrx.user // empty' <<< "$cfg")
+  [ -n "$config" ] || die "the compose config mounts nothing at /config, so the migration dry run has no database"
+  db="$config/vcrx.db"
+  if [ ! -f "$db" ]; then
+    echo "deploy: no database at $db yet, so there are no migrations to dry-run"
+    return 0
+  fi
+  # A release from before the dry run existed (a rollback) cannot run it.
+  local help
+  help=$(docker run --rm --network none --entrypoint vcrx "$1" help 2>&1) || true
+  case "$help" in
+    *migrate-check*) ;;
+    *)
+      echo "deploy: WARNING: $1 has no migrate-check, so its migrations were not dry-run"
+      return 0
+      ;;
+  esac
+  # Room for the copy and what the migrations add: three times its size.
+  bytes=$(wc -c < "$db")
+  [ ! -f "$db-wal" ] || bytes=$((bytes + $(wc -c < "$db-wal")))
+  local run=(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true
+    --tmpfs /tmp:size=64m --tmpfs "/work:size=$((bytes * 3 / 1048576 + 64))m,mode=1777" -v "$config:/live")
+  [ -z "$user" ] || run+=(--user "$user")
+  out="${TMPDIR:-/tmp}/vcrx-dry-run.log"
+  echo "deploy: dry-running the migrations of $1 on a copy of $db"
+  if ! "${run[@]}" --entrypoint vcrx "$1" migrate-check -from /live/vcrx.db -db /work/vcrx.db > "$out" 2>&1; then
+    tail -30 "$out"
+    die "the migration dry run failed on a copy of the live database; the running server was not touched"
+  fi
+  cat "$out"
+}
 if [ -n "$release" ]; then
   version="$release"
   image="$registry:${release#v}"
   VCRX_IMAGE="$image" docker compose pull vcrx > "${TMPDIR:-/tmp}/vcrx-build.log" 2>&1 ||
     { tail -30 "${TMPDIR:-/tmp}/vcrx-build.log"; die "could not pull $image"; }
+  dry_run "$image"
   set_image "$image"
   VCRX_IMAGE="$image" docker compose up -d --no-build
 else
   version="$(git describe --always --dirty)"
   VCRX_IMAGE=vcrx-media-server:local VCRX_VERSION="$version" docker compose build > "${TMPDIR:-/tmp}/vcrx-build.log" 2>&1 ||
     { tail -30 "${TMPDIR:-/tmp}/vcrx-build.log"; die "build failed"; }
+  dry_run vcrx-media-server:local
   set_image ""
   VCRX_IMAGE=vcrx-media-server:local docker compose up -d
 fi
