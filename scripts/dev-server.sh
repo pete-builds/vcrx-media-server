@@ -164,6 +164,38 @@ if [ ! -d "$music" ]; then
   done
 fi
 
+# Audiobooks: invented books of tones. One M4B with three chapters from an
+# ffmetadata file and a cover.jpg beside it (Author/Book), and a book of two
+# MP3 files, one chapter each, in a series folder with an Audiobookshelf
+# metadata.json (Author/Series/NN - Book).
+books="$media/Audiobooks"
+if [ ! -d "$books" ]; then
+  echo "dev-server: building sample audiobooks in $books"
+  sample="$books/A. Author/The Sample Book"
+  mkdir -p "$sample"
+  printf ';FFMETADATA1\ntitle=The Sample Book\nalbum=The Sample Book\nartist=A. Author\ncomposer=N. Narrator\ngenre=Fiction\ndate=2001\n' > "$dir/book.meta"
+  printf 'description=An invented book of three short tones, for trying the player.\n' >> "$dir/book.meta"
+  n=0
+  for c in "Opening:0:8" "The Middle:8:16" "Ending:16:24"; do
+    n=$((n + 1))
+    rest="${c#*:}"
+    printf '[CHAPTER]\nTIMEBASE=1/1000\nSTART=%d\nEND=%d\ntitle=%s\n' "$((${rest%%:*} * 1000))" "$((${rest##*:} * 1000))" "${c%%:*}" >> "$dir/book.meta"
+  done
+  ffmpeg -loglevel error -y -f lavfi -i "aevalsrc=0.3*sin(2*PI*(220+110*floor(t/8))*t):s=44100:d=24" -i "$dir/book.meta" \
+    -map 0:a -map_metadata 1 -map_chapters 1 -c:a aac -b:a 64k -f mp4 "$sample/The Sample Book.m4b"
+  rm -f "$dir/book.meta"
+  ffmpeg -loglevel error -y -f lavfi -i "color=c=0x3a2a14:s=600x600" -frames:v 1 "$sample/cover.jpg"
+  steps="$books/B. Writer/Sample Series/01 - First Steps"
+  mkdir -p "$steps"
+  n=0
+  for t in "Arrival:330" "Departure:440"; do
+    n=$((n + 1))
+    song "$steps/0$n ${t%%:*}.mp3" 12 "sine=frequency=${t##*:}" libmp3lame -metadata title="${t%%:*}" -metadata album="First Steps" \
+      -metadata artist="B. Writer" -metadata track="$n"
+  done
+  printf '{"title":"First Steps","authors":["B. Writer"],"narrators":["R. Reader"],"series":["Sample Series #1"],"publishedYear":"2020","description":"An invented book in two parts."}\n' > "$steps/metadata.json"
+fi
+
 # A season with a shared theme and shared end credits, for Skip Intro and
 # Skip Credits: a cold open of a different length in each episode, then the
 # theme (20 s), the episode (noise unique to it), and the credits (15 s). The
@@ -284,6 +316,10 @@ libraries:
     kind: music
     path: $media/Music
     scan_interval_minutes: 60
+  - name: Audiobooks
+    kind: audiobook
+    path: $media/Audiobooks
+    scan_interval_minutes: 60
 YAML
 
 export VCRX_CONFIG_DIR="$dir/config" VCRX_CACHE_DIR="$dir/cache" VCRX_MEDIA_ROOTS="$media"
@@ -315,7 +351,7 @@ done
 # CI starts the smoke test once every scan line is printed, so hold them
 # until the play history is seeded too.
 scanned=""
-for lib in Movies TV Music; do scanned+="$("$dir/vcrx" library scan -name "$lib" || true)"$'\n'; done
+for lib in Movies TV Music Audiobooks; do scanned+="$("$dir/vcrx" library scan -name "$lib" || true)"$'\n'; done
 "$dir/vcrx" dev-seed || echo "dev-server: dev-seed failed; Home has fewer rows" >&2
 printf '%s' "$scanned"
 wait "$server"

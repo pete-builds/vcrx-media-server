@@ -94,8 +94,8 @@ func (in *LibraryInput) normalize() error {
 	if in.Name == "" || len(in.Name) > 100 {
 		return errors.New("library name must be 1 to 100 characters")
 	}
-	if in.Kind != "movie" && in.Kind != "show" && in.Kind != "music" {
-		return errors.New("kind must be movie, show or music")
+	if in.Kind != "movie" && in.Kind != "show" && in.Kind != "music" && in.Kind != "audiobook" {
+		return errors.New("kind must be movie, show, music or audiobook")
 	}
 	if in.Grouping == "" {
 		in.Grouping = "folder"

@@ -10,8 +10,15 @@ import (
 )
 
 type ffOutput struct {
-	Streams []ffStream `json:"streams"`
-	Format  ffFormat   `json:"format"`
+	Streams  []ffStream  `json:"streams"`
+	Format   ffFormat    `json:"format"`
+	Chapters []ffChapter `json:"chapters"`
+}
+
+type ffChapter struct {
+	StartTime string            `json:"start_time"`
+	EndTime   string            `json:"end_time"`
+	Tags      map[string]string `json:"tags"`
 }
 
 type ffFormat struct {

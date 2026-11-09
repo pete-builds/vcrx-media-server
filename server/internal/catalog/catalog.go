@@ -77,9 +77,13 @@ func (c *Catalog) Libraries(ctx context.Context, pol policy.Policy) ([]Library, 
 	cond, args := pol.ItemCond("i")
 	for idx := range libs {
 		q, qargs := `SELECT COUNT(*) FROM items i WHERE i.library_id = ? AND i.parent_id IS NULL AND `+cond, args
-		if libs[idx].Kind == "music" {
+		switch libs[idx].Kind {
+		case "music":
 			// A music library's access is the library grant checked above.
 			q, qargs = `SELECT COUNT(*) FROM music_albums a WHERE a.library_id = ? AND a.missing_since IS NULL`, nil
+		case "audiobook":
+			// So is an audiobook library's.
+			q, qargs = `SELECT COUNT(*) FROM audiobook_books b WHERE b.library_id = ? AND b.missing_since IS NULL`, nil
 		}
 		if err := c.DB.QueryRowContext(ctx, q, append([]any{libs[idx].ID}, qargs...)...).Scan(&libs[idx].ItemCount); err != nil {
 			return nil, err

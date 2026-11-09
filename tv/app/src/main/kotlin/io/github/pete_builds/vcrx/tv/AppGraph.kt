@@ -8,6 +8,7 @@ import io.github.pete_builds.vcrx.tv.data.PreferencesStore
 import io.github.pete_builds.vcrx.tv.data.ProfilePrefs
 import io.github.pete_builds.vcrx.tv.data.SettingsStore
 import io.github.pete_builds.vcrx.tv.data.TokenStore
+import io.github.pete_builds.vcrx.tv.music.AudiobookPlayer
 import io.github.pete_builds.vcrx.tv.music.MusicPlayer
 import io.github.pete_builds.vcrx.tv.net.AuthInterceptor
 import io.github.pete_builds.vcrx.tv.net.ServerApi
@@ -38,7 +39,12 @@ class AppGraph(context: Context) {
     val settings = SettingsStore(context)
     // Music outlives screens, not sessions: a sign-out, a 401, or a switch of
     // profile stops whatever the previous session was playing.
-    val tokens = TokenStore(context).apply { onSessionChange = { MusicPlayer.stopIfRunning() } }
+    val tokens = TokenStore(context).apply {
+        onSessionChange = {
+            MusicPlayer.stopIfRunning()
+            AudiobookPlayer.stopIfRunning()
+        }
+    }
     val profilePrefs = ProfilePrefs(context)
 
     /** Settings and remembered subtitle choices, kept per server and user. */

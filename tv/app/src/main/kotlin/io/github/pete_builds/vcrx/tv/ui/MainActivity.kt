@@ -17,12 +17,16 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.pete_builds.vcrx.tv.graph
+import io.github.pete_builds.vcrx.tv.music.AudiobookPlayer
 import io.github.pete_builds.vcrx.tv.music.MusicPlayer
 import io.github.pete_builds.vcrx.tv.ui.browse.BrowseScreen
 import io.github.pete_builds.vcrx.tv.ui.connect.ConnectScreen
 import io.github.pete_builds.vcrx.tv.ui.connect.LoginScreen
 import io.github.pete_builds.vcrx.tv.ui.collection.CollectionScreen
 import io.github.pete_builds.vcrx.tv.ui.details.DetailsScreen
+import io.github.pete_builds.vcrx.tv.ui.audiobooks.AudiobookNav
+import io.github.pete_builds.vcrx.tv.ui.audiobooks.LocalAudiobookNav
+import io.github.pete_builds.vcrx.tv.ui.audiobooks.audiobookScreens
 import io.github.pete_builds.vcrx.tv.ui.music.LocalMusicNav
 import io.github.pete_builds.vcrx.tv.ui.music.MusicNav
 import io.github.pete_builds.vcrx.tv.ui.music.musicScreens
@@ -59,7 +63,8 @@ class MainActivity : ComponentActivity() {
                 // A lent tape that came back: "Be kind, rewind." rather than Login.
                 LaunchedEffect(nav) { graph.rewind.filterNotNull().collect { actions.toRewind() } }
                 val musicNav = remember(nav) { MusicNav(nav) }
-                CompositionLocalProvider(LocalAppActions provides actions, LocalMusicNav provides musicNav) {
+                val bookNav = remember(nav) { AudiobookNav(nav) }
+                CompositionLocalProvider(LocalAppActions provides actions, LocalMusicNav provides musicNav, LocalAudiobookNav provides bookNav) {
                     NavHost(navController = nav, startDestination = start) {
                         composable<ConnectRoute> { ConnectScreen() }
                         composable<LoginRoute> { LoginScreen() }
@@ -78,6 +83,7 @@ class MainActivity : ComponentActivity() {
                             RewindScreen(rewound)
                         }
                         musicScreens()
+                        audiobookScreens()
                     }
                 }
             }
@@ -88,7 +94,10 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         // Home, another app, or a video taking the screen: the music stops with
         // its listen rather than playing on with nothing on screen to stop it.
-        if (!isChangingConfigurations) MusicPlayer.stopIfRunning()
+        if (!isChangingConfigurations) {
+            MusicPlayer.stopIfRunning()
+            AudiobookPlayer.stopIfRunning()
+        }
     }
 }
 
@@ -103,9 +112,13 @@ private fun KeepScreenOnWhileMusicPlays() {
     val playing by remember {
         MusicPlayer.get(context.graph, context).state.map { it.playing }.distinctUntilChanged()
     }.collectAsState(initial = false)
+    // A book too: a chapter can run longer than the screensaver waits.
+    val reading by remember {
+        AudiobookPlayer.get(context.graph, context).state.map { it.playing }.distinctUntilChanged()
+    }.collectAsState(initial = false)
     val view = LocalView.current
-    DisposableEffect(view, playing) {
-        view.keepScreenOn = playing
+    DisposableEffect(view, playing, reading) {
+        view.keepScreenOn = playing || reading
         onDispose { view.keepScreenOn = false }
     }
 }

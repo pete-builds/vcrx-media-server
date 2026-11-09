@@ -284,3 +284,31 @@ func check[T comparable](t *testing.T, what string, got, want T) {
 		t.Errorf("%s = %v, want %v", what, got, want)
 	}
 }
+
+// An M4B's chapter marks come through in order, in milliseconds, and an empty
+// or backwards mark is dropped.
+func TestParseAudioChapters(t *testing.T) {
+	t.Parallel()
+	data := []byte(`{"streams":[{"index":0,"codec_name":"aac","codec_type":"audio","sample_rate":"44100","channels":2}],
+		"format":{"format_name":"mov,mp4,m4a,3gp,3g2,mj2","duration":"3.000000"},
+		"chapters":[{"start_time":"0.000000","end_time":"1.000000","tags":{"title":"Opening"}},
+			{"start_time":"1.000000","end_time":"2.500000","tags":{"TITLE":"Middle"}},
+			{"start_time":"2.500000","end_time":"2.500000","tags":{"title":"Empty"}},
+			{"start_time":"2.500000","end_time":"3.000000"}]}`)
+	r, err := ParseAudio(data, "/books/x.m4b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Chapter{{"Opening", 0, 1000}, {"Middle", 1000, 2500}, {"", 2500, 3000}}
+	if len(r.Chapters) != len(want) {
+		t.Fatalf("chapters: %+v", r.Chapters)
+	}
+	for i, c := range want {
+		if r.Chapters[i] != c {
+			t.Errorf("chapter %d: %+v, want %+v", i, r.Chapters[i], c)
+		}
+	}
+	if r.Container != "m4a" {
+		t.Errorf("container %q", r.Container)
+	}
+}

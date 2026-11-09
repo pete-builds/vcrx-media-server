@@ -27,6 +27,12 @@ var steps = map[string]func(ctx context.Context, tx *sql.Tx) error{
 			return replaceOnce(ddl, "CHECK (kind IN ('movie', 'show'))", "CHECK (kind IN ('movie', 'show', 'music'))")
 		})
 	},
+	// And audiobooks.
+	"audiobook_library_kind": func(ctx context.Context, tx *sql.Tx) error {
+		return rebuildTable(ctx, tx, "libraries", func(ddl string) (string, error) {
+			return replaceOnce(ddl, "CHECK (kind IN ('movie', 'show', 'music'))", "CHECK (kind IN ('movie', 'show', 'music', 'audiobook'))")
+		})
+	},
 }
 
 func (m migration) step() (func(context.Context, *sql.Tx) error, error) {
@@ -68,7 +74,12 @@ func rebuildTable(ctx context.Context, tx *sql.Tx, table string, edit func(ddl s
 	if err != nil {
 		return err
 	}
+	// A table an earlier step rebuilt is stored with its name quoted, which
+	// is what ALTER TABLE ... RENAME writes.
 	head := "CREATE TABLE " + table + " "
+	if quoted := "CREATE TABLE \"" + table + "\" "; strings.HasPrefix(ddl, quoted) {
+		head = quoted
+	}
 	if !strings.HasPrefix(ddl, head) {
 		return fmt.Errorf("rebuild %s: unexpected definition %.60q", table, ddl)
 	}

@@ -82,6 +82,9 @@ type Server struct {
 	// Music serves music libraries (music.go).
 	Music *Music
 
+	// Audiobooks serves audiobook libraries (audiobooks.go).
+	Audiobooks *Audiobooks
+
 	// Live is IPTV's channels (live.go).
 	Live *Live
 
@@ -316,7 +319,7 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/admin/newsletter/preview", adminOnly, s.newsletterPreview},
 		{"GET", "/api/v1/admin/items/{item_id}/subtitles", adminOnly, s.adminItemSubtitles},
 		{"DELETE", "/api/v1/admin/subtitles/{stream_id}", adminOnly, s.adminDeleteSubtitle},
-	}, append(s.musicRoutes(), s.liveRoutes()...)...)
+	}, append(append(s.musicRoutes(), s.audiobookRoutes()...), s.liveRoutes()...)...)
 }
 
 // Handler builds the mux with middleware applied.

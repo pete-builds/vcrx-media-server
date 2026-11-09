@@ -15,6 +15,12 @@
 // into Web Audio buffers, which costs hundreds of megabytes for a long jam.
 // FLAC, which tapers use, has no encoder padding, so this is enough there;
 // an MP3 may still carry its encoder's few milliseconds of silence.
+//
+// Audiobooks play through the same queue: a book's files are its tracks, and
+// state.book turns the bar into a book player (skip back 15 s and forward
+// 30 s, chapters, speed, a sleep timer). A position in a book is seconds from
+// its start across every file; the server keeps it, saved every SAVE_MS
+// while playing and on every pause.
 
 import { api, ApiError } from "../api.js";
 import { h, clock, toast } from "../dom.js";
@@ -22,6 +28,10 @@ import { micon as icon } from "./icons.js";
 import { audioCapabilities } from "../caps.js";
 
 const PRELOAD_S = 20;
+const SAVE_MS = 15000;
+export const SPEEDS = [0.8, 1, 1.2, 1.5, 1.75, 2, 2.5];
+// Sleep timer choices: minutes, or "chapter" for the end of this chapter.
+export const SLEEPS = [15, 30, 45, 60, "chapter"];
 
 const state = {
   // Tracks as the server sent them (each with stream or refusal).
@@ -34,6 +44,13 @@ const state = {
   repeat: "off",
   // Where the queue came from, for ReplayGain: an album in order uses album gain.
   source: "",
+  // The book playing, or null for music: {id, title, author, has_cover,
+  // duration_s, chapters}. Its files are the tracks, each with start_s.
+  book: null,
+  // Playback speed for books; music always plays at 1.
+  rate: 1,
+  // The sleep timer: null, {at: ms clock time} or {chapterEnd: seconds}.
+  sleep: null,
 };
 
 // Two elements take turns; cur plays, the other preloads the next track.
@@ -44,8 +61,9 @@ for (const el of els) {
   el.dataset.offset = "0";
 }
 
-// Debug facts the browser test reads: how each track change happened.
-export const debug = { transitions: [] };
+// Debug facts the browser test reads: how each track change happened, and
+// each book position saved to the server.
+export const debug = { transitions: [], saves: [] };
 
 const listeners = new Set();
 // onChange calls fn after every change of track or play state. It returns
@@ -103,12 +121,18 @@ export async function playTracks(ids, startIndex = 0) {
   start(tracks, Math.min(startIndex, tracks.length - 1), { source: "tracks" });
 }
 
-function start(tracks, index, { shuffle = false, source = "" } = {}) {
+function start(tracks, index, { shuffle = false, source = "", book = null, atMs = 0 } = {}) {
   if (!tracks.length) {
     toast("Nothing here can be played.");
     return;
   }
   endListen();
+  if (state.book) saveProgress();
+  state.book = book;
+  state.repeat = book ? "off" : state.repeat;
+  state.sleep = null;
+  clearTimeout(sleepTimer);
+  setRate(book ? state.rate : 1);
   state.tracks = tracks;
   state.source = source;
   state.order = tracks.map((_, i) => i);
@@ -117,8 +141,145 @@ function start(tracks, index, { shuffle = false, source = "" } = {}) {
   if (shuffle) setShuffle(true);
   clearIdle();
   show(true);
-  loadCurrent(0, true);
+  loadCurrent(atMs, true);
 }
+
+// ---- Audiobooks ---------------------------------------------------------
+
+// locate finds the file a book position falls in and the offset into it.
+export function locate(files, posS) {
+  let i = 0;
+  for (let j = files.length - 1; j >= 0; j--) {
+    if (posS >= files[j].start_s) { i = j; break; }
+  }
+  const f = files[i];
+  return { index: i, offsetS: Math.max(0, Math.min(posS - f.start_s, f.duration_s)) };
+}
+
+// playBook plays a book from where the caller left off, from atS seconds
+// when given, or from the beginning with fromStart.
+export async function playBook(bookId, { atS = null, fromStart = false } = {}) {
+  const q = await api(`/audiobooks/books/${bookId}/queue`, { method: "POST", body: { capabilities: audioCapabilities() } });
+  if (!q.files.length) {
+    toast("Nothing in this book can be played.");
+    return;
+  }
+  const p = q.progress || {};
+  let pos = atS != null ? atS : fromStart || p.finished ? 0 : p.position_s || 0;
+  if (pos >= q.duration_s - 1) pos = 0;
+  const tracks = q.files.map((f) => ({ ...f, duration_ms: Math.round(f.duration_s * 1000), book_id: q.book_id }));
+  const at = locate(tracks, pos);
+  start(tracks, at.index, { source: "book", book: { id: q.book_id, title: q.title, author: q.author, has_cover: q.has_cover,
+    duration_s: q.duration_s, chapters: q.chapters }, atMs: Math.round(at.offsetS * 1000) });
+}
+
+export const currentBook = () => state.book;
+
+// bookPos is where the book is, in seconds from its start.
+export function bookPos() {
+  const t = current();
+  return state.book && t ? t.start_s + posMs() / 1000 : 0;
+}
+
+export function chapterAt(posS) {
+  const chs = state.book ? state.book.chapters : [];
+  let i = -1;
+  for (let j = 0; j < chs.length; j++) if (posS >= chs[j].start_s - 0.05) i = j;
+  return i;
+}
+
+// seekBook moves to a position in the book, changing files when it has to.
+export function seekBook(posS) {
+  if (!state.book) return;
+  posS = Math.max(0, Math.min(posS, state.book.duration_s - 0.5));
+  const at = locate(state.tracks, posS);
+  if (at.index === state.order[state.pos]) {
+    seek(at.offsetS * 1000);
+  } else {
+    const playing = !el().paused;
+    state.pos = state.order.indexOf(at.index);
+    loadCurrent(Math.round(at.offsetS * 1000), playing);
+  }
+  saveProgress();
+}
+
+export const skip = (deltaS) => seekBook(bookPos() + deltaS);
+
+// chapter moves to the next chapter (1) or back (-1): back restarts the
+// chapter when it has played a few seconds, as Previous does for a track.
+export function chapter(dir) {
+  if (!state.book) return;
+  const chs = state.book.chapters;
+  const pos = bookPos();
+  const i = chapterAt(pos);
+  if (dir > 0) {
+    if (i + 1 < chs.length) seekBook(chs[i + 1].start_s);
+    return;
+  }
+  if (i >= 0 && pos - chs[i].start_s > 3) seekBook(chs[i].start_s);
+  else if (i > 0) seekBook(chs[i - 1].start_s);
+  else seekBook(0);
+}
+
+function setRate(r) {
+  for (const e of els) {
+    e.defaultPlaybackRate = r;
+    e.playbackRate = r;
+  }
+}
+
+// setSpeed sets a book's playback speed, kept for the next book too.
+export function setSpeed(r) {
+  state.rate = SPEEDS.includes(r) ? r : 1;
+  if (state.book) setRate(state.rate);
+  try { localStorage.setItem("vcrx.bookSpeed", String(state.rate)); } catch { /* private mode */ }
+  changed();
+}
+try {
+  const saved = Number(localStorage.getItem("vcrx.bookSpeed"));
+  if (SPEEDS.includes(saved)) state.rate = saved;
+} catch { /* private mode */ }
+
+let sleepTimer = null;
+// setSleep pauses after some minutes, or at the end of this chapter; null
+// turns it off.
+export function setSleep(choice) {
+  clearTimeout(sleepTimer);
+  state.sleep = null;
+  if (choice === "chapter") {
+    const chs = state.book ? state.book.chapters : [];
+    const i = chapterAt(bookPos());
+    if (i >= 0) state.sleep = { chapterEnd: chs[i].end_s };
+  } else if (choice) {
+    state.sleep = { at: Date.now() + choice * 60000 };
+    sleepTimer = setTimeout(() => { el().pause(); state.sleep = null; toast("Sleep timer: paused."); changed(); }, choice * 60000);
+  }
+  changed();
+}
+
+function checkSleep() {
+  if (state.sleep && state.sleep.chapterEnd != null && bookPos() >= state.sleep.chapterEnd - 0.25) {
+    state.sleep = null;
+    el().pause();
+    toast("Sleep timer: paused at the end of the chapter.");
+    changed();
+  }
+}
+
+let lastSave = 0;
+// saveProgress sends the book position to the server.
+function saveProgress(keepalive = false, finished) {
+  const b = state.book;
+  if (!b || !current()) return;
+  const pos = finished ? b.duration_s : bookPos();
+  lastSave = Date.now();
+  const body = { position_s: Math.round(pos * 1000) / 1000 };
+  if (finished) body.finished = true;
+  api(`/audiobooks/books/${b.id}/progress`, { method: "PUT", keepalive, body })
+    .then((p) => { debug.saves.push({ book: b.id, position_s: p.position_s, finished: p.finished }); })
+    .catch(() => {});
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveProgress(true); });
 
 // setShuffle reorders what is left after the current track, or puts the queue
 // back in order, keeping the current track playing either way.
@@ -185,6 +346,11 @@ export function toggle() {
 
 export function clear() {
   endListen();
+  if (state.book) saveProgress(true);
+  state.book = null;
+  state.sleep = null;
+  clearTimeout(sleepTimer);
+  setRate(1);
   for (const e of els) {
     e.pause();
     e.removeAttribute("src");
@@ -205,6 +371,7 @@ function srcWithStart(stream, ms) {
 }
 
 function gainFor(t) {
+  if (!t.replaygain) return 1;
   const g = state.source === "album" && !state.shuffle ? (t.replaygain.album_gain ?? t.replaygain.track_gain) : t.replaygain.track_gain;
   // An element's volume only turns down, so a positive gain plays at full.
   return g == null ? 1 : Math.min(1, Math.pow(10, g / 20));
@@ -247,7 +414,8 @@ function loadCurrent(atMs, autoplay) {
     old.load();
     delete old.dataset.trackId;
   }
-  el().volume = gainFor(t);
+  el().volume = state.book ? 1 : gainFor(t);
+  el().playbackRate = state.book ? state.rate : 1;
   if (autoplay) el().play().catch((e) => { if (e.name !== "AbortError") toast("Press play to start the music."); });
   beginListen(t, preloaded);
   changed();
@@ -274,7 +442,11 @@ function wire(e) {
   e.addEventListener("timeupdate", () => {
     if (e !== el()) return;
     const left = durMs() / 1000 - (Number(e.dataset.offset) + e.currentTime);
-    if (left > 0 && left < PRELOAD_S) preloadNext();
+    if (left > 0 && left < PRELOAD_S * (state.book ? state.rate : 1)) preloadNext();
+    if (state.book) {
+      checkSleep();
+      if (!e.paused && Date.now() - lastSave >= SAVE_MS) saveProgress();
+    }
     drawTime();
     positionState();
   });
@@ -289,6 +461,7 @@ function wire(e) {
     }
     const p = nextPos();
     if (p < 0) {
+      if (state.book) saveProgress(false, true);
       endListen();
       changed();
       return;
@@ -314,6 +487,7 @@ function wire(e) {
   e.addEventListener("pause", () => {
     if (e !== el() || e.ended) return;
     report("pause");
+    saveProgress();
     changed();
   });
   e.addEventListener("error", () => {
@@ -354,7 +528,8 @@ function beginListen(t, preloaded) {
   if (!t) return;
   const me = { trackId: t.id, id: null, started: false, preloaded };
   listen = me;
-  api(`/music/tracks/${t.id}/sessions`, { method: "POST", body: { capabilities: audioCapabilities() } })
+  const path = state.book ? `/audiobooks/files/${t.id}/sessions` : `/music/tracks/${t.id}/sessions`;
+  api(path, { method: "POST", body: { capabilities: audioCapabilities() } })
     .then((s) => {
       if (listen !== me) {
         // The track changed before the server answered: close this one.
@@ -394,7 +569,10 @@ function endListen(keepalive = false) {
   listen = null;
 }
 
-window.addEventListener("pagehide", () => endListen(true));
+window.addEventListener("pagehide", () => {
+  saveProgress(true);
+  endListen(true);
+});
 
 // ---- The bar ------------------------------------------------------------
 
@@ -411,20 +589,34 @@ function build() {
   ui.repeat = btn("repeat", "Repeat", cycleRepeat, "mb-toggle");
   ui.queueBtn = btn("queue", "Queue", () => { ui.queue.hidden = !ui.queue.hidden; drawQueue(); }, "mb-toggle");
   ui.close = btn("close", "Stop and clear the queue", clear);
+  // A book's controls, shown instead of shuffle, repeat and the queue.
+  ui.back15 = btn("back15", "Back 15 seconds", () => skip(-15), "mb-book");
+  ui.fwd30 = btn("fwd30", "Forward 30 seconds", () => skip(30), "mb-book");
+  ui.chPrev = btn("prevtrack", "Previous chapter", () => chapter(-1), "mb-book");
+  ui.chNext = btn("nexttrack", "Next chapter", () => chapter(1), "mb-book");
+  ui.speed = h("select", { class: "mb-select mb-book", "aria-label": "Playback speed", title: "Playback speed",
+    onchange: (e) => setSpeed(Number(e.target.value)) }, SPEEDS.map((r) => h("option", { value: String(r) }, `${r}×`)));
+  ui.sleepSel = h("select", { class: "mb-select mb-book", "aria-label": "Sleep timer", title: "Sleep timer",
+    onchange: (e) => setSleep(e.target.value === "" ? null : e.target.value === "chapter" ? "chapter" : Number(e.target.value)) },
+  h("option", { value: "" }, "Sleep off"), SLEEPS.map((m) => h("option", { value: String(m) }, m === "chapter" ? "End of chapter" : `${m} min`)));
   ui.time = h("span", { class: "mb-time" }, "0:00");
   ui.dur = h("span", { class: "mb-time" }, "0:00");
   ui.bar = h("input", { class: "mb-seek", type: "range", min: "0", max: "1", step: "1", value: "0", "aria-label": "Position" });
   ui.bar.addEventListener("input", () => { ui.dragging = true; ui.time.textContent = clock(Number(ui.bar.value)); });
-  ui.bar.addEventListener("change", () => { ui.dragging = false; seek(Number(ui.bar.value)); });
+  ui.bar.addEventListener("change", () => {
+    ui.dragging = false;
+    if (state.book) seekBook(Number(ui.bar.value) / 1000);
+    else seek(Number(ui.bar.value));
+  });
   ui.queue = h("div", { class: "mb-queue", hidden: true, role: "region", "aria-label": "Queue" });
   ui.root = h("div", { class: "music-bar", id: "music-bar", hidden: true, role: "region", "aria-label": "Music player" },
     ui.queue,
     h("div", { class: "mb-row" },
       h("div", { class: "mb-now" }, ui.cover, h("div", { class: "mb-meta" }, ui.title, ui.artist)),
       h("div", { class: "mb-main" },
-        h("div", { class: "mb-buttons" }, ui.shuffle, ui.prev, ui.play, ui.next, ui.repeat),
+        h("div", { class: "mb-buttons" }, ui.shuffle, ui.back15, ui.chPrev, ui.prev, ui.play, ui.next, ui.chNext, ui.fwd30, ui.repeat),
         h("div", { class: "mb-progress" }, ui.time, ui.bar, ui.dur)),
-      h("div", { class: "mb-side" }, ui.queueBtn, ui.close)));
+      h("div", { class: "mb-side" }, ui.speed, ui.sleepSel, ui.queueBtn, ui.close)));
   document.body.append(ui.root, ...els.map((e) => { e.className = "mb-audio"; return e; }));
 }
 
@@ -443,15 +635,34 @@ function draw() {
     show(false);
     return;
   }
-  const art = t.has_cover ? `/api/v1/music/albums/${t.album_id}/cover?width=160` : null;
-  if (ui.cover.dataset.album !== String(t.album_id)) {
-    ui.cover.dataset.album = String(t.album_id);
-    ui.cover.replaceChildren(art ? h("img", { src: art, alt: "" }) : icon("disc"));
+  const b = state.book;
+  const coverKey = b ? `book:${b.id}` : String(t.album_id);
+  const art = b ? (b.has_cover ? `/api/v1/audiobooks/books/${b.id}/cover?width=160` : null)
+    : t.has_cover ? `/api/v1/music/albums/${t.album_id}/cover?width=160` : null;
+  if (ui.cover.dataset.album !== coverKey) {
+    ui.cover.dataset.album = coverKey;
+    ui.cover.replaceChildren(art ? h("img", { src: art, alt: "" }) : icon(b ? "book" : "disc"));
   }
-  ui.title.textContent = t.title || "";
-  ui.title.href = `#/music/album/${t.album_id}`;
-  ui.artist.textContent = t.artist_name || "";
-  ui.artist.href = `#/music/artist/${t.artist_id}`;
+  ui.root.classList.toggle("is-book", !!b);
+  for (const n of [ui.back15, ui.fwd30, ui.chPrev, ui.chNext, ui.speed, ui.sleepSel]) n.hidden = !b;
+  for (const n of [ui.shuffle, ui.repeat, ui.queueBtn, ui.prev, ui.next]) n.hidden = !!b;
+  if (b) {
+    const i = chapterAt(bookPos());
+    ui.title.textContent = i >= 0 ? b.chapters[i].title : t.title || "";
+    ui.title.href = `#/audiobooks/book/${b.id}`;
+    ui.artist.textContent = [b.title, b.author].filter(Boolean).join(" · ");
+    ui.artist.href = `#/audiobooks/book/${b.id}`;
+    ui.chNext.disabled = i + 1 >= b.chapters.length;
+    ui.speed.value = String(state.rate);
+    ui.sleepSel.value = !state.sleep ? "" : state.sleep.chapterEnd != null ? "chapter" : ui.sleepSel.value;
+    ui.root.dataset.book = String(b.id);
+  } else {
+    ui.title.textContent = t.title || "";
+    ui.title.href = `#/music/album/${t.album_id}`;
+    ui.artist.textContent = t.artist_name || "";
+    ui.artist.href = `#/music/artist/${t.artist_id}`;
+    delete ui.root.dataset.book;
+  }
   const playing = !el().paused;
   ui.play.replaceChildren(icon(playing ? "pause" : "play"));
   ui.play.setAttribute("aria-label", playing ? "Pause" : "Play");
@@ -470,13 +681,22 @@ function draw() {
   mediaSession(t);
 }
 
+// barPosMs and barDurMs are what the seek bar shows: the track, or for a
+// book the whole book.
+const barPosMs = () => (state.book ? Math.round(bookPos() * 1000) : posMs());
+const barDurMs = () => (state.book ? Math.round(state.book.duration_s * 1000) : durMs());
+
 function drawTime() {
   if (!ui.root || ui.dragging) return;
-  const d = durMs();
+  const d = barDurMs();
   ui.bar.max = String(Math.max(1, d));
-  ui.bar.value = String(Math.min(posMs(), d));
-  ui.time.textContent = clock(posMs());
+  ui.bar.value = String(Math.min(barPosMs(), d));
+  ui.time.textContent = clock(barPosMs());
   ui.dur.textContent = clock(d);
+  if (state.book && ui.root.dataset.chapter !== String(chapterAt(bookPos()))) {
+    ui.root.dataset.chapter = String(chapterAt(bookPos()));
+    changed();
+  }
 }
 
 function drawQueue() {
@@ -497,12 +717,19 @@ let sessionTrack = null;
 function mediaSession(t) {
   if (!("mediaSession" in navigator)) return;
   navigator.mediaSession.playbackState = el().paused ? "paused" : "playing";
-  if (sessionTrack === t.id) return;
-  sessionTrack = t.id;
-  const artwork = t.has_cover ? [96, 240, 480].map((w) => ({ src: new URL(`/api/v1/music/albums/${t.album_id}/cover?width=${w}`, location.href).href,
+  const b = state.book;
+  // A book's lock screen shows the chapter, so it changes with the chapter.
+  const key = b ? `book:${b.id}:${chapterAt(bookPos())}` : t.id;
+  if (sessionTrack === key) return;
+  sessionTrack = key;
+  const coverAt = (w) => (b ? `/api/v1/audiobooks/books/${b.id}/cover?width=${w}` : `/api/v1/music/albums/${t.album_id}/cover?width=${w}`);
+  const artwork = (b ? b.has_cover : t.has_cover) ? [96, 240, 480].map((w) => ({ src: new URL(coverAt(w), location.href).href,
     sizes: `${w}x${w}`, type: "image/jpeg" })) : [];
+  const i = b ? chapterAt(bookPos()) : -1;
+  const meta = b ? { title: i >= 0 ? b.chapters[i].title : b.title, artist: b.author, album: b.title, artwork }
+    : { title: t.title || "", artist: t.artist_name || "", album: t.album_title || "", artwork };
   try {
-    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title || "", artist: t.artist_name || "", album: t.album_title || "", artwork });
+    navigator.mediaSession.metadata = new MediaMetadata(meta);
   } catch (e) {
     console.warn("media session", e);
   }
@@ -511,10 +738,10 @@ function mediaSession(t) {
 
 function positionState() {
   if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState) return;
-  const d = durMs() / 1000;
+  const d = barDurMs() / 1000;
   if (!(d > 0)) return;
   try {
-    navigator.mediaSession.setPositionState({ duration: d, position: Math.min(d, posMs() / 1000), playbackRate: 1 });
+    navigator.mediaSession.setPositionState({ duration: d, position: Math.min(d, barPosMs() / 1000), playbackRate: state.book ? state.rate : 1 });
   } catch {
     // A position past the end while a track changes; the next update fixes it.
   }
@@ -539,11 +766,12 @@ function installMediaSession() {
   };
   set("play", () => el().play().catch(() => {}));
   set("pause", () => el().pause());
-  set("previoustrack", previous);
-  set("nexttrack", next);
-  set("seekto", (d) => seek(d.seekTime * 1000));
-  set("seekbackward", (d) => seek(posMs() - (d.seekOffset || 10) * 1000));
-  set("seekforward", (d) => seek(posMs() + (d.seekOffset || 10) * 1000));
+  // A book's previous and next are chapters, and its skips 15 and 30 s.
+  set("previoustrack", () => (state.book ? chapter(-1) : previous()));
+  set("nexttrack", () => (state.book ? chapter(1) : next()));
+  set("seekto", (d) => (state.book ? seekBook(d.seekTime) : seek(d.seekTime * 1000)));
+  set("seekbackward", (d) => (state.book ? skip(-(d.seekOffset || 15)) : seek(posMs() - (d.seekOffset || 10) * 1000)));
+  set("seekforward", (d) => (state.book ? skip(d.seekOffset || 30) : seek(posMs() + (d.seekOffset || 10) * 1000)));
 }
 
 // ---- Keys and pages ------------------------------------------------------

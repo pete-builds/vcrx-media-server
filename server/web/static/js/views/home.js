@@ -2,6 +2,7 @@ import { api, artUrl } from "../api.js";
 import { h, card, icon, toast, fadeImg, runtime, episodeCode } from "../dom.js";
 import { go } from "../app.js";
 import { sourceBadge } from "./peer.js";
+import { bookCard, listeningRow } from "./audiobooks.js";
 
 // Home shows a featured title, then the server's rows in the order the user
 // chose (Customize Home): Continue Watching, recently added, seasonal picks,
@@ -29,7 +30,22 @@ export async function homeView() {
     return section;
   })), customize);
   friendsRow(el.querySelector(".rows"));
+  continueListening(el.querySelector(".rows"));
   return { el, title: "Home", hero: !!featured };
+}
+
+// continueListening adds the books the caller is partway through, after
+// Continue Watching. It loads after the local rows and is left out when there
+// are none, or when the server has no audiobooks.
+async function continueListening(rowsEl) {
+  const books = await listeningRow();
+  if (!books || !rowsEl.isConnected) return;
+  const title = "Continue listening";
+  const section = h("section", { class: "row listening-row", "data-row": "continue_listening", "aria-label": title },
+    h("div", { class: "row-head" }, h("h2", {}, title)));
+  section.append(scroller(h("div", { class: "strip books-strip" }, books.map(bookCard)), title));
+  const cw = rowsEl.querySelector('[data-row="continue_watching"]');
+  rowsEl.insertBefore(section, cw ? cw.nextSibling : rowsEl.firstChild);
 }
 
 const PEER_STATES = { offline: "offline", checking: "not answering yet", bad_answer: "answering badly", unlinked: "ended the link",

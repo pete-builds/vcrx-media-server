@@ -124,3 +124,10 @@ libraries:
   #  kind: music
   #  path: /media/Music
   #  scan_interval_minutes: 60
+  # Audiobooks: set VCRX_AUDIOBOOKS_DIR in .env first. A book is one file with
+  # its own chapters (an M4B) or a folder of files, under Author/Book or
+  # Author/Series/Book; loose files at the top work too.
+  #- name: Audiobooks
+  #  kind: audiobook
+  #  path: /media/Audiobooks
+  #  scan_interval_minutes: 60

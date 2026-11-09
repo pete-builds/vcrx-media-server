@@ -2558,6 +2558,230 @@ paths:
       responses:
         "200": { description: Headers only }
 
+  # Audiobook libraries (kind audiobook): books, their files and chapters, and
+  # each listener's place in each book. Every route goes through the caller's
+  # library grants, like music; a library that is not granted, or not an
+  # audiobook library, answers 404. Times are seconds from the start of the
+  # whole book, across its files.
+  /api/v1/audiobooks/libraries/{library_id}/books:
+    get:
+      operationId: audiobookList
+      summary: >-
+        An audiobook library's books, with the library's authors and series for filtering. sort is title, author
+        (by surname, then series order), series, added (newest first) or recent (most recently listened first);
+        state keeps only books in progress, finished or not started.
+      parameters:
+        - { name: library_id, in: path, required: true, schema: { type: integer } }
+        - { name: sort, in: query, schema: { type: string, enum: [title, author, series, added, recent], default: title } }
+        - { name: author, in: query, schema: { type: string } }
+        - { name: series, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string, enum: [in_progress, finished, unplayed] } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: A page of books.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [books, total, authors, series]
+                properties:
+                  books: { type: array, items: { $ref: "#/components/schemas/AudiobookBook" } }
+                  total: { type: integer }
+                  authors: { type: array, items: { $ref: "#/components/schemas/AudiobookFacet" } }
+                  series: { type: array, items: { $ref: "#/components/schemas/AudiobookFacet" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/audiobooks/continue:
+    get:
+      operationId: audiobookContinue
+      summary: >-
+        Continue listening: the books the caller has started and not finished, most recently listened first, from every
+        audiobook library they may see. Empty when there are none or the server has no audiobooks.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        "200":
+          description: Books in progress.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [books]
+                properties:
+                  books: { type: array, items: { $ref: "#/components/schemas/AudiobookBook" } }
+  /api/v1/audiobooks/books/{book_id}:
+    get:
+      operationId: audiobookBook
+      summary: A book's page. What it says about itself, its files in play order and its chapters, and the caller's progress.
+      parameters:
+        - { name: book_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The book.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AudiobookDetail" } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/audiobooks/books/{book_id}/cover:
+    get:
+      operationId: audiobookCover
+      summary: The book's cover (cover.jpg or the like in its folder, else a picture embedded in a file), as JPEG.
+      parameters:
+        - { name: book_id, in: path, required: true, schema: { type: integer } }
+        - { name: width, in: query, schema: { type: integer }, description: "Snapped up to 96, 160, 240, 320, 480, 640 or 1000; never larger than the source." }
+      responses:
+        "200": { description: JPEG image, content: { image/jpeg: {} } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/audiobooks/books/{book_id}/progress:
+    get:
+      operationId: audiobookProgress
+      summary: The caller's place in the book. Zero and not finished when they have not started it.
+      parameters:
+        - { name: book_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The progress.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AudiobookProgress" } } }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: audiobookSetProgress
+      summary: >-
+        Save the caller's place in the book, as a player does every few seconds and on pause. position_s is clamped to
+        the book; reaching its last second marks it finished unless finished says otherwise.
+      parameters:
+        - { name: book_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [position_s]
+              properties:
+                position_s: { type: number }
+                finished: { type: boolean }
+      responses:
+        "200":
+          description: The progress as saved.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AudiobookProgress" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/audiobooks/books/{book_id}/finished:
+    post:
+      operationId: audiobookMarkFinished
+      summary: Mark the book finished. The next listen starts from the beginning, and it leaves Continue listening.
+      parameters:
+        - { name: book_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The progress as saved.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AudiobookProgress" } } }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: audiobookMarkUnfinished
+      summary: Mark the book not finished, back at its beginning.
+      parameters:
+        - { name: book_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The progress as saved.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AudiobookProgress" } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/audiobooks/books/{book_id}/queue:
+    post:
+      operationId: audiobookQueue
+      summary: >-
+        Everything a player needs to play the book on this client: its files in order, each with how this client plays
+        it (stream) or why it cannot (refusal), decided from the capabilities as for music; its chapters; and where the
+        caller left off. To resume, find the file whose start_s is the last one at or before progress.position_s.
+      parameters:
+        - { name: book_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [capabilities]
+              properties:
+                capabilities: { $ref: "#/components/schemas/Capabilities" }
+      responses:
+        "200":
+          description: The queue.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AudiobookQueue" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/audiobooks/files/{file_id}/sessions:
+    post:
+      operationId: audiobookListen
+      summary: >-
+        Record a listen as one of a book's files starts: a playback session in Activity with item_kind audiobook. The
+        client then sends start, progress, pause and stop to /api/v1/playback/sessions/{session_id}/events as for music,
+        and saves its place in the book with PUT /api/v1/audiobooks/books/{book_id}/progress. 403 when the file needs
+        converting and the account may not; 422 when the device decodes nothing the server can convert to.
+      parameters:
+        - { name: file_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [capabilities]
+              properties:
+                capabilities: { $ref: "#/components/schemas/Capabilities" }
+      responses:
+        "201":
+          description: The listen.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AudiobookSession" } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v1/audiobooks/files/{file_id}/file:
+    get:
+      operationId: audiobookFile
+      summary: The book's file, for direct play. Supports Range, If-Range and HEAD; access is checked on every request.
+      parameters:
+        - { name: file_id, in: path, required: true, schema: { type: integer } }
+        - { name: session, in: query, schema: { type: string }, description: The listen's session id, so stopping it from Activity cuts the stream. }
+      responses:
+        "200": { description: Whole file }
+        "206": { description: Partial content }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "416": { description: Range not satisfiable }
+    head:
+      operationId: headAudiobookFile
+      parameters:
+        - { name: file_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: Headers only }
+  /api/v1/audiobooks/files/{file_id}/stream:
+    get:
+      operationId: audiobookStream
+      summary: >-
+        The file converted as ffmpeg reads it, for a client that cannot decode it: AAC in ADTS or Opus in Ogg. To seek,
+        request it again with start_ms (milliseconds into this file). 403 for an account without allow_transcode; 503
+        busy when the server is converting as many streams as it allows.
+      parameters:
+        - { name: file_id, in: path, required: true, schema: { type: integer } }
+        - { name: codec, in: query, schema: { type: string, enum: [aac, opus], default: aac } }
+        - { name: start_ms, in: query, schema: { type: integer, default: 0 } }
+        - { name: session, in: query, schema: { type: string } }
+      responses:
+        "200": { description: The converted stream, content: { audio/aac: {}, audio/ogg: {} } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    head:
+      operationId: headAudiobookStream
+      parameters:
+        - { name: file_id, in: path, required: true, schema: { type: integer } }
+        - { name: codec, in: query, schema: { type: string, enum: [aac, opus], default: aac } }
+      responses:
+        "200": { description: Headers only }
   /api/v1/live/channels:
     get:
       operationId: liveChannels
@@ -3018,8 +3242,8 @@ components:
       properties:
         id: { type: integer }
         name: { type: string }
-        kind: { type: string, enum: [movie, show, music] }
-        item_count: { type: integer, description: Top-level titles, or a music library's albums. }
+        kind: { type: string, enum: [movie, show, music, audiobook] }
+        item_count: { type: integer, description: "Top-level titles, a music library's albums, or an audiobook library's books." }
     WatchState:
       type: object
       required: [position_ms, played, play_count]
@@ -3418,7 +3642,7 @@ components:
       required: [name, kind, root_path]
       properties:
         name: { type: string }
-        kind: { type: string, enum: [movie, show, music] }
+        kind: { type: string, enum: [movie, show, music, audiobook] }
         root_path: { type: string, description: Absolute path inside the container, under a configured media root. }
         grouping: { type: string, enum: [folder, title_year], default: folder }
         scan_interval_minutes: { type: integer, default: 60 }
@@ -3822,6 +4046,108 @@ components:
                     code: { type: string }
                     message: { type: string }
                 - { type: "null" }
+    AudiobookProgress:
+      type: object
+      required: [position_s, finished, updated_at]
+      properties:
+        position_s: { type: number, description: Seconds from the start of the whole book. }
+        finished: { type: boolean }
+        updated_at: { type: integer, description: Unix milliseconds; 0 when never saved. }
+    AudiobookBook:
+      type: object
+      required: [id, library_id, title, author, duration_s, file_count, chapter_count, has_cover, added_at, progress]
+      properties:
+        id: { type: integer }
+        library_id: { type: integer }
+        title: { type: string }
+        subtitle: { type: [string, "null"] }
+        author: { type: string }
+        narrator: { type: [string, "null"] }
+        series: { type: [string, "null"] }
+        series_index: { type: [number, "null"] }
+        year: { type: [integer, "null"] }
+        genre: { type: [string, "null"] }
+        duration_s: { type: number }
+        file_count: { type: integer }
+        chapter_count: { type: integer }
+        has_cover: { type: boolean }
+        added_at: { type: integer }
+        progress: { oneOf: [{ $ref: "#/components/schemas/AudiobookProgress" }, { type: "null" }], description: Null until the caller starts the book. }
+    AudiobookFile:
+      type: object
+      required: [id, index, title, start_s, duration_s]
+      properties:
+        id: { type: integer }
+        index: { type: integer }
+        title: { type: string }
+        start_s: { type: number, description: Where this file begins in the whole book. }
+        duration_s: { type: number }
+        container: { type: [string, "null"] }
+        codec: { type: [string, "null"] }
+        bitrate: { type: [integer, "null"] }
+    AudiobookChapter:
+      type: object
+      required: [index, title, start_s, end_s, file_id]
+      properties:
+        index: { type: integer }
+        title: { type: string }
+        start_s: { type: number }
+        end_s: { type: number }
+        file_id: { type: integer, description: The file the chapter starts in. }
+    AudiobookFacet:
+      type: object
+      required: [name, count]
+      properties:
+        name: { type: string }
+        count: { type: integer }
+    AudiobookDetail:
+      allOf:
+        - $ref: "#/components/schemas/AudiobookBook"
+        - type: object
+          required: [files, chapters]
+          properties:
+            date: { type: [string, "null"] }
+            publisher: { type: [string, "null"] }
+            description: { type: [string, "null"] }
+            files: { type: array, items: { $ref: "#/components/schemas/AudiobookFile" } }
+            chapters: { type: array, items: { $ref: "#/components/schemas/AudiobookChapter" } }
+    AudiobookQueueFile:
+      allOf:
+        - $ref: "#/components/schemas/AudiobookFile"
+        - type: object
+          properties:
+            stream: { oneOf: [{ $ref: "#/components/schemas/MusicStream" }, { type: "null" }] }
+            refusal:
+              oneOf:
+                - type: object
+                  required: [code, message]
+                  properties:
+                    code: { type: string }
+                    message: { type: string }
+                - { type: "null" }
+    AudiobookQueue:
+      type: object
+      required: [book_id, title, author, has_cover, duration_s, files, chapters, progress]
+      properties:
+        book_id: { type: integer }
+        title: { type: string }
+        author: { type: string }
+        has_cover: { type: boolean }
+        duration_s: { type: number }
+        files: { type: array, items: { $ref: "#/components/schemas/AudiobookQueueFile" } }
+        chapters: { type: array, items: { $ref: "#/components/schemas/AudiobookChapter" } }
+        progress: { $ref: "#/components/schemas/AudiobookProgress" }
+    AudiobookSession:
+      type: object
+      required: [session_id, file_id, book_id, decision, reason, stream, heartbeat_interval_ms]
+      properties:
+        session_id: { type: string }
+        file_id: { type: integer }
+        book_id: { type: integer }
+        decision: { type: string, enum: [direct_play, audio_transcode] }
+        reason: { type: string }
+        stream: { $ref: "#/components/schemas/MusicStream" }
+        heartbeat_interval_ms: { type: integer }
     MusicSession:
       type: object
       required: [session_id, track_id, decision, reason, stream, heartbeat_interval_ms]
