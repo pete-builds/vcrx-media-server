@@ -71,27 +71,53 @@ fun HomeScreen(onItem: (Long) -> Unit) {
     }
 }
 
-/** Every library this session may see; music opens the music pages. */
+/**
+ * Every library this session may see: music opens the music pages, an
+ * audiobook library the Audiobooks page; Podcasts, which are not a library,
+ * are listed last when the server has them for this session.
+ */
 @Composable
-fun LibrariesScreen(onLibrary: (Long, String) -> Unit, onMusic: () -> Unit, onOther: (String) -> Unit) {
+fun LibrariesScreen(
+    onLibrary: (Long, String) -> Unit,
+    onMusic: () -> Unit,
+    onAudiobooks: () -> Unit,
+    onPodcasts: (() -> Unit)?,
+    onOther: (String) -> Unit,
+) {
     val graph = LocalContext.current.graph
     Loadable(Unit, { graph.api.libraries() }) { libs ->
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
             items(libs, key = { it.id }) { lib ->
+                val icon = when (lib.kind) {
+                    "music" -> R.drawable.ic_music
+                    "audiobook" -> R.drawable.ic_book
+                    else -> R.drawable.ic_library
+                }
                 ListItem(
                     headlineContent = { Text(lib.name, style = MaterialTheme.typography.titleMedium) },
-                    supportingContent = { Text("${lib.itemCount} titles", color = Brand.Muted) },
-                    leadingContent = { Icon(painterResource(if (lib.kind == "music") R.drawable.ic_music else R.drawable.ic_library), null, tint = Brand.Green) },
+                    supportingContent = { Text(if (lib.kind == "audiobook") "${lib.itemCount} books" else "${lib.itemCount} titles", color = Brand.Muted) },
+                    leadingContent = { Icon(painterResource(icon), null, tint = Brand.Green) },
                     colors = ListItemDefaults.colors(containerColor = Brand.Black),
                     modifier = Modifier.clickable {
                         when (lib.kind) {
                             "music" -> onMusic()
+                            "audiobook" -> onAudiobooks()
                             "movie", "show" -> onLibrary(lib.id, lib.name)
-                            // Audiobooks and podcasts get their own pages once the server's routes are final.
                             else -> onOther(lib.name)
                         }
                     },
                 )
+            }
+            if (onPodcasts != null) {
+                item {
+                    ListItem(
+                        headlineContent = { Text("Podcasts", style = MaterialTheme.typography.titleMedium) },
+                        supportingContent = { Text("Your subscriptions", color = Brand.Muted) },
+                        leadingContent = { Icon(painterResource(R.drawable.ic_podcast), null, tint = Brand.Green) },
+                        colors = ListItemDefaults.colors(containerColor = Brand.Black),
+                        modifier = Modifier.clickable { onPodcasts() },
+                    )
+                }
             }
         }
     }

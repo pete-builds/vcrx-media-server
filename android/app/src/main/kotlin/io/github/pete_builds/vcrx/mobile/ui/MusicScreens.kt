@@ -3,6 +3,7 @@ package io.github.pete_builds.vcrx.mobile.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,8 +21,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -34,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -42,9 +48,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.pete_builds.vcrx.mobile.R
+import io.github.pete_builds.vcrx.mobile.auto.AudioKind
+import io.github.pete_builds.vcrx.mobile.auto.PlaybackService
 import io.github.pete_builds.vcrx.mobile.graph
+import io.github.pete_builds.vcrx.mobile.music.PodcastPlayback
+import io.github.pete_builds.vcrx.mobile.music.SleepTimer
 import io.github.pete_builds.vcrx.mobile.net.MusicAlbum
 import io.github.pete_builds.vcrx.mobile.net.albumCoverUrl
 import io.github.pete_builds.vcrx.mobile.net.artistImageUrl
@@ -184,7 +196,7 @@ fun ArtistScreen(artistId: Long, remote: MusicRemote?, onAlbum: (Long) -> Unit) 
     }
 }
 
-/** The bar above the navigation while music plays. */
+/** The bar above the navigation while music, a book or an episode plays. */
 @Composable
 fun MiniPlayer(remote: MusicRemote, now: NowPlaying, onOpen: () -> Unit) {
     Row(
@@ -195,44 +207,137 @@ fun MiniPlayer(remote: MusicRemote, now: NowPlaying, onOpen: () -> Unit) {
         Art(now.artworkUri, Modifier.size(44.dp).clip(RoundedCornerShape(4.dp)))
         Column(Modifier.weight(1f)) {
             Text(now.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-            Text(now.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
+            Text(now.book?.chapterTitle ?: now.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
         }
+        if (now.kind != AudioKind.Music) SkipButton(back = true, onClick = remote::skipBack)
         IconButton(onClick = remote::toggle) { Icon(painterResource(if (now.playing) R.drawable.ic_pause else R.drawable.ic_play), if (now.playing) "Pause" else "Play") }
-        IconButton(onClick = remote::next) { Icon(painterResource(R.drawable.ic_skip_next), "Next") }
+        if (now.kind == AudioKind.Music) {
+            IconButton(onClick = remote::next) { Icon(painterResource(R.drawable.ic_skip_next), "Next") }
+        } else {
+            SkipButton(back = false, onClick = remote::skipForward)
+        }
     }
 }
 
-/** Now Playing: big art, the position, and the transport. */
+/** Back 15 seconds or forward 30, with the number on the arrow. */
+@Composable
+fun SkipButton(back: Boolean, onClick: () -> Unit, size: Dp = 24.dp) {
+    IconButton(onClick = onClick) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                painterResource(if (back) R.drawable.ic_replay else R.drawable.ic_forward),
+                if (back) "Back ${PodcastPlayback.SKIP_BACK_MS / 1000} seconds" else "Forward ${PodcastPlayback.SKIP_FORWARD_MS / 1000} seconds",
+                Modifier.size(size),
+            )
+            Text(
+                if (back) "${PodcastPlayback.SKIP_BACK_MS / 1000}" else "${PodcastPlayback.SKIP_FORWARD_MS / 1000}",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = (size.value * 0.32f).sp),
+                modifier = Modifier.padding(top = (size.value * 0.12f).dp),
+            )
+        }
+    }
+}
+
+/**
+ * Now Playing: big art, the position, and the transport. A book's position
+ * runs across the whole book, with its chapter and chapter skips; a book or an
+ * episode gets 15 and 30 second skips, its speed, and the sleep timer.
+ */
 @Composable
 fun NowPlayingScreen(remote: MusicRemote?) {
     val (now, position) = rememberNowPlaying(remote)
     if (remote == null || now == null) return Message("Nothing is playing.")
+    val book = now.book
+    val spoken = now.kind != AudioKind.Music
     Column(
-        Modifier.fillMaxSize().padding(24.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Art(now.artworkUri, Modifier.widthIn(max = 360.dp).fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(8.dp)))
-        Text(now.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2)
+        Art(now.artworkUri, Modifier.widthIn(max = 340.dp).fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(8.dp)))
+        Text(now.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(now.artist, color = Brand.Muted)
-        val duration = remote.durationMs
+        if (book?.chapterTitle != null) {
+            Text(book.chapterTitle, color = Brand.Green, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Chapter ${book.chapter + 1} of ${book.chapterCount}", color = Brand.Muted, style = MaterialTheme.typography.bodySmall)
+        }
+        // A book's slider spans the whole book; music and episodes the one item.
+        val at = if (book != null) (book.positionS * 1000).toLong() else position
+        val length = if (book != null) (book.durationS * 1000).toLong() else remote.durationMs
+        var drag by remember { mutableStateOf<Float?>(null) }
         Slider(
-            value = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f,
-            onValueChange = { remote.seekTo((it * duration).toLong()) },
+            value = drag ?: if (length > 0) (at.toFloat() / length).coerceIn(0f, 1f) else 0f,
+            onValueChange = { drag = it },
+            onValueChangeFinished = {
+                drag?.let { f -> if (book != null) remote.seekBook(f * book.durationS) else remote.seekTo((f * length).toLong()) }
+                drag = null
+            },
             colors = SliderDefaults.colors(thumbColor = Brand.Green, activeTrackColor = Brand.Green),
             modifier = Modifier.widthIn(max = 480.dp),
         )
         Row(Modifier.widthIn(max = 480.dp).fillMaxWidth()) {
-            Text(formatTime(position), color = Brand.Muted)
+            Text(formatTime(drag?.let { (it * length).toLong() } ?: at), color = Brand.Muted)
             Spacer(Modifier.weight(1f))
-            Text(formatTime(duration), color = Brand.Muted)
+            Text(if (spoken && length > 0) "-" + formatTime(length - at) else formatTime(length), color = Brand.Muted)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = remote::previous) { Icon(painterResource(R.drawable.ic_skip_previous), "Previous", Modifier.size(36.dp)) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            when {
+                book != null -> IconButton(onClick = remote::previousChapter) { Icon(painterResource(R.drawable.ic_skip_previous), "Previous chapter", Modifier.size(32.dp)) }
+                !spoken -> IconButton(onClick = remote::previous) { Icon(painterResource(R.drawable.ic_skip_previous), "Previous", Modifier.size(36.dp)) }
+            }
+            if (spoken) SkipButton(back = true, onClick = remote::skipBack, size = 36.dp)
             IconButton(onClick = remote::toggle, modifier = Modifier.size(72.dp).clip(CircleShape).background(Brand.Tint)) {
                 Icon(painterResource(if (now.playing) R.drawable.ic_pause else R.drawable.ic_play), if (now.playing) "Pause" else "Play", Modifier.size(40.dp))
             }
-            IconButton(onClick = remote::next) { Icon(painterResource(R.drawable.ic_skip_next), "Next", Modifier.size(36.dp)) }
+            if (spoken) SkipButton(back = false, onClick = remote::skipForward, size = 36.dp)
+            when {
+                book != null -> IconButton(onClick = remote::nextChapter, enabled = book.chapter + 1 < book.chapterCount) {
+                    Icon(painterResource(R.drawable.ic_skip_next), "Next chapter", Modifier.size(32.dp))
+                }
+                !spoken -> IconButton(onClick = remote::next) { Icon(painterResource(R.drawable.ic_skip_next), "Next", Modifier.size(36.dp)) }
+            }
+        }
+        if (spoken) {
+            val sleep = when {
+                now.sleepAt == PlaybackService.SLEEP_END_OF_CHAPTER -> "Sleep: end of chapter"
+                // Read on every tick of the position, so the minutes count down.
+                now.sleepAt > 0 && position >= 0 -> "Sleep: " + SleepTimer.remaining(now.sleepAt, System.currentTimeMillis())
+                else -> "Sleep timer"
+            }
+            SpokenControls(remote, now, sleep)
+        }
+    }
+}
+
+/** Speed and the sleep timer, for books and episodes. */
+@Composable
+private fun SpokenControls(remote: MusicRemote, now: NowPlaying, sleepLabel: String) {
+    var speedMenu by remember { mutableStateOf(false) }
+    var sleepMenu by remember { mutableStateOf(false) }
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box {
+            QuietButton("Speed ${PodcastPlayback.speedLabel(now.speed)}", onClick = { speedMenu = true })
+            DropdownMenu(expanded = speedMenu, onDismissRequest = { speedMenu = false }) {
+                PodcastPlayback.SPEEDS.forEach { s ->
+                    DropdownMenuItem(text = { Text(PodcastPlayback.speedLabel(s)) }, onClick = {
+                        speedMenu = false
+                        remote.setSpeed(s)
+                    })
+                }
+            }
+        }
+        Box {
+            QuietButton(sleepLabel, onClick = { sleepMenu = true })
+            DropdownMenu(expanded = sleepMenu, onDismissRequest = { sleepMenu = false }) {
+                val choices = SleepTimer.MINUTES + (if (now.book != null) listOf(SleepTimer.END_OF_CHAPTER) else emptyList()) +
+                    (if (now.sleepAt != 0L) listOf(SleepTimer.OFF) else emptyList())
+                choices.forEach { c ->
+                    DropdownMenuItem(text = { Text(SleepTimer.label(c)) }, onClick = {
+                        sleepMenu = false
+                        remote.sleep(c)
+                    })
+                }
+            }
         }
     }
 }
