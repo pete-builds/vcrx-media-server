@@ -230,22 +230,27 @@ object BrowseTree {
     }
 
     /** The Podcasts tab: New episodes, then every show. */
-    fun podcasts(shows: List<Podcast>): List<BrowseNode> = listOf(BrowseNode(NEW_EPISODES, "New episodes", browsable = true, childStyle = Style.List)) +
-        shows.map { p ->
-            BrowseNode(
-                id = BrowseId.show(p.id),
-                title = p.title,
-                subtitle = when {
-                    p.newCount > 0 -> "${p.newCount} new"
-                    p.author.isNotEmpty() -> p.author
-                    else -> null
-                },
-                browsable = true,
-                art = if (p.hasArtwork) ArtRef(ArtRef.PODCAST, p.id) else null,
-                childStyle = Style.List,
-                type = BrowseNode.TYPE_PODCAST,
-            )
-        }
+    fun podcasts(shows: List<Podcast>): List<BrowseNode> =
+        listOf(BrowseNode(NEW_EPISODES, "New episodes", browsable = true, childStyle = Style.List)) + shows.map { show(it) }
+
+    /** A show: opened, its episodes; played (by a voice request), its newest unplayed episode. */
+    fun show(p: Podcast): BrowseNode = BrowseNode(
+        id = BrowseId.show(p.id),
+        title = p.title,
+        subtitle = when {
+            p.newCount > 0 -> "${p.newCount} new"
+            p.author.isNotEmpty() -> p.author
+            else -> null
+        },
+        browsable = true,
+        art = if (p.hasArtwork) ArtRef(ArtRef.PODCAST, p.id) else null,
+        childStyle = Style.List,
+        type = BrowseNode.TYPE_PODCAST,
+    )
+
+    /** The episode a show plays when asked for by name: the newest not yet played, else the newest. */
+    fun showEpisodeToPlay(episodes: List<PodcastEpisode>): PodcastEpisode? =
+        episodes.sortedByDescending { it.publishedAt ?: 0L }.let { newest -> newest.firstOrNull { !it.played } ?: newest.firstOrNull() }
 
     fun episode(e: PodcastEpisode, withShow: Boolean = true): BrowseNode = BrowseNode(
         id = BrowseId.episode(e.id),

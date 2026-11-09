@@ -587,8 +587,9 @@ class PlaybackService : MediaLibraryService() {
 
     /**
      * The ids to play. A voice request ("play ... on VCRX") comes with no id and a
-     * search query: the best album or artist match plays, and with no query (just
-     * "play VCRX") the album played last does.
+     * search query: the best match plays ([VoiceSearch]: an album or artist, or a
+     * book, a show's newest episode or an episode when they match better), and
+     * with no query (just "play VCRX") the album played last does.
      */
     private suspend fun idsFor(items: List<MediaItem>): List<String> = items.mapNotNull { item ->
         if (item.mediaId.isNotEmpty()) return@mapNotNull item.mediaId
@@ -641,9 +642,26 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    /**
+     * Search and voice requests: music as before, plus books, shows and episodes
+     * when this session has them ([VoiceSearch]). Each part that fails (offline,
+     * an older server) is left out rather than failing the rest.
+     */
     private suspend fun search(query: String): List<BrowseNode> {
-        val lib = musicLibrary() ?: return emptyList()
-        return BrowseTree.search(query, app.api.musicAlbums(lib, "title", null, limit = 500).albums, app.api.musicArtists(lib, limit = 500).artists)
+        val f = app.features()
+        val music = musicLibrary()?.let { lib ->
+            runCatching {
+                BrowseTree.search(query, app.api.musicAlbums(lib, "title", null, limit = 500).albums, app.api.musicArtists(lib, limit = 500).artists)
+            }.getOrDefault(emptyList())
+        }.orEmpty()
+        val books = if (f.audiobooks) {
+            app.libraries.value.filter { it.kind == Features.KIND_AUDIOBOOK }.flatMap { lib -> runCatching { app.api.audiobooks(lib.id).books }.getOrDefault(emptyList()) }
+        } else {
+            emptyList()
+        }
+        val shows = if (f.podcasts) runCatching { app.api.podcasts() }.getOrDefault(emptyList()) else emptyList()
+        val episodes = if (f.podcasts) runCatching { app.api.podcastNewEpisodes(100) }.getOrDefault(emptyList()) + app.offlineAudio.recentEpisodes() else emptyList()
+        return VoiceSearch.rank(query, f, music, books, shows, episodes)
     }
 
     private fun downloadedTracks(): List<DownloadedTrack> = app.downloads.entries.value
@@ -689,6 +707,9 @@ class PlaybackService : MediaLibraryService() {
                 first is BrowseId.BookFile -> bookQueue(first.bookId, null, fromFileId = first.fileId)
                 first is BrowseId.DownloadedBook -> offlineBook(first.bookId, null) ?: Resolved(emptyList(), 0)
                 first is BrowseId.Episode -> episodeQueue(first.episodeId)
+                // A show asked for by name (a voice request) plays its newest unplayed episode.
+                first is BrowseId.Show -> BrowseTree.showEpisodeToPlay(app.api.podcastShow(first.podcastId).episodes)
+                    ?.let { episodeQueue(it.id) } ?: Resolved(emptyList(), 0)
                 first is BrowseId.DownloadedEpisode -> offlineEpisode(first.episodeId) ?: Resolved(emptyList(), 0)
                 else -> Resolved(emptyList(), 0)
             }
