@@ -98,3 +98,14 @@ data class PodcastSearchResult(
 
 @Serializable
 data class PodcastSearchResponse(val results: List<PodcastSearchResult> = emptyList())
+
+/** POST /api/v1/podcasts/opml: how many feeds were added, how many were already there, and those that failed with why. */
+@Serializable
+data class OpmlImportResult(
+    val added: Int = 0,
+    val already: Int = 0,
+    val failed: List<OpmlFailure> = emptyList(),
+)
+
+@Serializable
+data class OpmlFailure(val url: String = "", val reason: String = "")

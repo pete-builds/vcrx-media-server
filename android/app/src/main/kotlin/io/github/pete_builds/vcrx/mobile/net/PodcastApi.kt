@@ -1,5 +1,7 @@
 package io.github.pete_builds.vcrx.mobile.net
 
+import io.github.pete_builds.vcrx.mobile.music.Opml
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -44,6 +46,18 @@ suspend fun ServerApi.podcastSetProgress(episodeId: Long, request: PodcastProgre
 
 suspend fun ServerApi.podcastSetPlayed(episodeId: Long, played: Boolean): PodcastProgress =
     send(put("/api/v1/podcasts/episodes/$episodeId/played", PodcastPlayedRequest(played), PodcastPlayedRequest.serializer()), PodcastProgress.serializer())
+
+/**
+ * Subscribes to every feed in an OPML file, sent as it is ([Opml.check] first).
+ * Feeds that fail come back with their reason; the rest are subscribed.
+ */
+suspend fun ServerApi.podcastImportOpml(file: ByteArray): OpmlImportResult {
+    val body = file.toRequestBody(Opml.MEDIA_TYPE.toMediaType())
+    return send(Request.Builder().url(url("/api/v1/podcasts/opml")).post(body).build(), OpmlImportResult.serializer())
+}
+
+/** Every subscription as an OPML 2.0 file, for another podcast app. */
+suspend fun ServerApi.podcastExportOpml(): ByteArray = bytes(Request.Builder().url(url("/api/v1/podcasts/opml")).build())
 
 fun ServerApi.podcastArtworkUrl(podcastId: Long): String? = absoluteUrl("/api/v1/podcasts/shows/$podcastId/artwork")
 

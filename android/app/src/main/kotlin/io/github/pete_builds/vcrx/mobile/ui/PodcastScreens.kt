@@ -1,5 +1,7 @@
 package io.github.pete_builds.vcrx.mobile.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,12 +53,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.pete_builds.vcrx.mobile.R
 import io.github.pete_builds.vcrx.mobile.graph
+import io.github.pete_builds.vcrx.mobile.music.Opml
 import io.github.pete_builds.vcrx.mobile.music.PodcastPlayback
 import io.github.pete_builds.vcrx.mobile.net.ApiException
 import io.github.pete_builds.vcrx.mobile.net.PodcastEpisode
 import io.github.pete_builds.vcrx.mobile.net.PodcastSearchResult
 import io.github.pete_builds.vcrx.mobile.net.episodeArtworkUrl
 import io.github.pete_builds.vcrx.mobile.net.podcastArtworkUrl
+import io.github.pete_builds.vcrx.mobile.net.podcastExportOpml
+import io.github.pete_builds.vcrx.mobile.net.podcastImportOpml
 import io.github.pete_builds.vcrx.mobile.net.podcastNewEpisodes
 import io.github.pete_builds.vcrx.mobile.net.podcastRefresh
 import io.github.pete_builds.vcrx.mobile.net.podcastSearch
@@ -69,7 +74,9 @@ import io.github.pete_builds.vcrx.mobile.offline.DownloadEligibility
 import io.github.pete_builds.vcrx.mobile.offline.DownloadKeys
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** "Nov 3, 2026", in the phone's own format. */
 private fun formatDate(ms: Long?): String? = ms?.let { DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(it)) }
@@ -93,6 +100,7 @@ fun PodcastsScreen(onShow: (Long) -> Unit, onAdd: () -> Unit, remote: MusicRemot
                 }
             }
             IconButton(onClick = onAdd) { Icon(Icons.Filled.Add, "Add a podcast") }
+            OpmlMenu(onImported = { reload++ })
         }
         if (tab == 0) {
             Loadable("new$reload", { graph.api.podcastNewEpisodes() }) { episodes ->
@@ -126,6 +134,90 @@ fun PodcastsScreen(onShow: (Long) -> Unit, onAdd: () -> Unit, remote: MusicRemot
                 }
             }
         }
+    }
+}
+
+/**
+ * Import and Export OPML: move subscriptions from or to another podcast app.
+ * Import picks a file with the system picker and sends it as it is; Export
+ * saves the server's OPML where the listener chooses. Accounts only.
+ */
+@Composable
+private fun OpmlMenu(onImported: () -> Unit) {
+    val context = LocalContext.current
+    val graph = context.graph
+    val me by graph.me.collectAsState()
+    if (!Opml.allowed(me, graph.tokens.isInvitedDevice)) return
+    val scope = rememberCoroutineScope()
+    var menu by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var outcome by remember { mutableStateOf<Pair<String, List<String>>?>(null) }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        busy = true
+        scope.launch {
+            outcome = try {
+                val file = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use(Opml::read) } ?: ByteArray(0)
+                val problem = Opml.check(file)
+                if (problem != null) {
+                    problem to emptyList()
+                } else {
+                    val r = graph.api.podcastImportOpml(file)
+                    onImported()
+                    Opml.summary(r) to r.failed.map { "${it.url}: ${it.reason}" }
+                }
+            } catch (e: ApiException) {
+                (e.message ?: "The import failed.") to emptyList()
+            } catch (e: java.io.IOException) {
+                "Cannot read that file: ${e.message}" to emptyList()
+            } finally {
+                busy = false
+            }
+        }
+    }
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(Opml.MEDIA_TYPE)) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        busy = true
+        scope.launch {
+            outcome = try {
+                val file = graph.api.podcastExportOpml()
+                withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.use { it.write(file) } }
+                "Saved your podcasts as OPML." to emptyList()
+            } catch (e: ApiException) {
+                (e.message ?: "The export failed.") to emptyList()
+            } catch (e: java.io.IOException) {
+                "Cannot save there: ${e.message}" to emptyList()
+            } finally {
+                busy = false
+            }
+        }
+    }
+    Box {
+        IconButton(onClick = { menu = true }, enabled = !busy) { Icon(Icons.Filled.MoreVert, "Import or export podcasts") }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text("Import OPML") }, onClick = {
+                menu = false
+                pick.launch(Opml.PICKER_TYPES)
+            })
+            DropdownMenuItem(text = { Text("Export OPML") }, onClick = {
+                menu = false
+                save.launch(Opml.EXPORT_NAME)
+            })
+        }
+    }
+    outcome?.let { (summary, failed) ->
+        AlertDialog(
+            onDismissRequest = { outcome = null },
+            title = { Text("Podcasts") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(summary)
+                    failed.take(20).forEach { Text(it, color = Brand.Muted, style = MaterialTheme.typography.bodySmall) }
+                    if (failed.size > 20) Text("And ${failed.size - 20} more.", color = Brand.Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = { QuietButton("OK", onClick = { outcome = null }) },
+        )
     }
 }
 

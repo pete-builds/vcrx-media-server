@@ -78,7 +78,15 @@ class RequestContractTest {
         Answer("get", "/api/v1/podcasts/episodes/{episode_id}", "200", PodcastEpisodeResponse.serializer()),
         Answer("put", "/api/v1/podcasts/episodes/{episode_id}/progress", "200", PodcastProgress.serializer()),
         Answer("put", "/api/v1/podcasts/episodes/{episode_id}/played", "200", PodcastProgress.serializer()),
+        Answer("post", "/api/v1/podcasts/opml", "200", OpmlImportResult.serializer()),
     )
+
+    /** The OPML import goes up as the raw file; the type it is sent as must be one the route takes. */
+    @Test
+    fun opmlImportIsSentAsATypeTheRouteTakes() {
+        val content = (spec["paths"] as Map<*, *>).let { (it["/api/v1/podcasts/opml"] as Map<*, *>)["post"] as Map<*, *> }.at("requestBody", "content") as Map<*, *>
+        assertTrue("${io.github.pete_builds.vcrx.mobile.music.Opml.MEDIA_TYPE} is not in ${content.keys}", io.github.pete_builds.vcrx.mobile.music.Opml.MEDIA_TYPE in content.keys)
+    }
 
     private val spec: Map<*, *> by lazy {
         val path = System.getProperty("vcrx.openapi")

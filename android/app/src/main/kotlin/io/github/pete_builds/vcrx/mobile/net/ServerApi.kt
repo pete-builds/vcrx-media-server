@@ -272,6 +272,17 @@ class ServerApi(
     internal fun <B> put(path: String, body: B, serializer: KSerializer<B>): Request =
         Request.Builder().url(url(path)).put(json.encodeToString(serializer, body).toRequestBody(JSON)).build()
 
+    /** Runs [request] and returns the answer's raw bytes, for the routes that are not JSON (an OPML export). */
+    internal suspend fun bytes(request: Request): ByteArray {
+        val answer = exchange(request)
+        if (answer.status !in 200..299) {
+            val error = httpError(answer.status, answer.body.toString(Charsets.UTF_8), json)
+            if (error is ApiException.Unauthorized) unauthorized(error, answer.authorization)
+            throw error
+        }
+        return answer.body
+    }
+
     private class Exchange(val status: Int, val body: ByteArray, val retryAfter: Int?, val authorization: String?)
 
     /** Runs the call and returns the raw answer, for the routes that are not JSON. */
