@@ -20,6 +20,7 @@ import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
@@ -450,7 +451,7 @@ class PlaybackService : MediaLibraryService() {
                 Commands.PREVIOUS_CHAPTER -> chapter(-1)
                 Commands.SEEK_BOOK -> seekBook(args.getDouble(Commands.ARG_SECONDS))
                 Commands.SLEEP -> setSleep(args.getInt(Commands.ARG_MINUTES))
-                else -> return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
+                else -> return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
