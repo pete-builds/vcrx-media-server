@@ -21,6 +21,8 @@ For every server deploy and every TV APK. A box is ticked only when the step ran
 - [ ] The version running now is noted, so there is something to go back to.
 - [ ] A migration is coming: the pre-migration backup will be written to `data/config/backups`; there is free space
       for another copy of the database.
+- [ ] `deploy.sh` printed `migrations, integrity_check and foreign_key_check passed` before it restarted anything
+      (its migration dry run on a copy of the live database; a failure stops the deploy with the old server up).
 - [ ] Config keys added by this release go into `vcrx.yaml` only after the new binary is running (the parser
       refuses unknown keys, so the old binary would not start).
 

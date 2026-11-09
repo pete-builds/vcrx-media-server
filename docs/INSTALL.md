@@ -25,7 +25,9 @@ curl -s http://<server-ip>:3750/readyz     # {"status":"ok", "checks": {...}}
 docker compose exec vcrx vcrx library list # item counts and the last scan
 ```
 
-Update later with `deploy/deploy.sh`, run on the server from this clone. It refuses a checkout with local changes or commits origin does not have, refuses while someone is watching (checked as an admin whose password you keep in `deploy/.flexbot-password`; `--force` overrides), fast-forwards to `origin/main`, builds with the commit as the version, waits for the server and runs `scripts/smoke-api.sh`.
+Update later with `deploy/deploy.sh`, run on the server from this clone. It refuses a checkout with local changes or commits origin does not have, refuses while someone is watching (checked as an admin whose password you keep in `deploy/.flexbot-password`; `--force` overrides), fast-forwards to `origin/main`, builds with the commit as the version, dry-runs the new image's migrations (below), waits for the server and runs `scripts/smoke-api.sh`.
+
+**The migration dry run.** Before the running container is replaced, `deploy.sh` starts the new image once more in a throwaway container (`vcrx migrate-check`) with no network, as the server's own user. It copies the live database with SQLite's `VACUUM INTO`, opening it read-only, so the copy is consistent while the old server keeps serving; it then applies the new migrations to the copy and runs `PRAGMA integrity_check` and `PRAGMA foreign_key_check` on the result. The copy lives on a tmpfs inside that container, so it takes memory about the size of the database and no disk, and it is gone when the container exits, pass or fail. For a database of a few tens of megabytes the whole step takes a second or two. If it fails, the deploy stops with the error (for example the row a migration refused), the old server keeps running untouched, and nothing in `.env` changes; fix the data and deploy again. `--force` does not skip it. It also refuses a database newer than the image, which is what running an older release against it without restoring a backup would hit. An image built before `migrate-check` existed cannot run it, so a rollback to one deploys with a warning instead. The config folder is mounted read-write into the dry run only because SQLite readers share the `-shm` file with the server; the database file itself is opened read-only.
 
 ## More users
 
@@ -48,6 +50,8 @@ Inside the container (`docker compose exec vcrx vcrx ...`):
 
 ```
 vcrx migrate                  back up the database, apply migrations, exit
+vcrx migrate-check -db PATH [-from LIVE]
+                              copy LIVE to PATH, migrate PATH and check it (deploy.sh's dry run)
 vcrx user add|grant|passwd|list
 vcrx library add|list|scan
 vcrx metadata refresh [-all]  fetch posters and plots from TMDb now

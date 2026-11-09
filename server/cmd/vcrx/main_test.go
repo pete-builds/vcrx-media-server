@@ -195,3 +195,32 @@ func TestShutdownStopsStreamsAndLeavesTheScansTime(t *testing.T) {
 		t.Error("the scans were handed an expired context")
 	}
 }
+
+// migrate-check, as deploy.sh runs it: copy the live database, migrate the
+// copy, pass; and fail, leaving the live file alone, when the copy cannot be
+// migrated (here a database newer than this binary, as a rollback would meet).
+func TestMigrateCheckCommand(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "live.db")
+	conn, err := db.Open(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := db.Migrate(context.Background(), conn, "", slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateCheck([]string{"-from", live, "-db", filepath.Join(dir, "a.db")}); err != nil {
+		t.Fatalf("a current database failed the dry run: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO schema_migrations (version, name, applied_at) VALUES (9999, 'future.sql', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	err = migrateCheck([]string{"-from", live, "-db", filepath.Join(dir, "b.db")})
+	if err == nil || !strings.Contains(err.Error(), "dry run failed") {
+		t.Fatalf("err = %v, want the dry run to fail", err)
+	}
+	if err := migrateCheck(nil); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("no -db: err = %v", err)
+	}
+}

@@ -75,6 +75,10 @@ const usage = `vcrx: VCRX Media Server
 Usage:
   vcrx [serve]                         run the server
   vcrx migrate                         back up the database, apply migrations, exit
+  vcrx migrate-check -db PATH [-from LIVE]
+                                       deploy.sh's dry run: copy LIVE to PATH
+                                       (read-only, safe while it serves), migrate
+                                       PATH, check it, exit non-zero on failure
   vcrx version                         print the version
   vcrx healthcheck                     exit 0 if the local server answers /healthz
   vcrx user add -username NAME [-admin] [-display-name NAME]
@@ -114,6 +118,8 @@ func main() {
 		err = serve()
 	case "migrate":
 		err = migrateOnly()
+	case "migrate-check":
+		err = migrateCheck(args)
 	case "version", "-version", "--version":
 		fmt.Println(version)
 	case "healthcheck":
@@ -209,6 +215,38 @@ func migrateOnly() error {
 		return err
 	}
 	fmt.Printf("schema version %d -> %d (%d applied)\n", before, before+n, n)
+	return nil
+}
+
+// migrateCheck is the dry run deploy.sh runs in the new image before it
+// replaces the live container: the new binary's migrations on a copy of the
+// live database, so one that fails on real data stops the deploy while the
+// old server keeps running. It needs no config, only the two paths.
+func migrateCheck(args []string) error {
+	flags := flag.NewFlagSet("migrate-check", flag.ContinueOnError)
+	path := flags.String("db", "", "the database to migrate: a throwaway copy, changed in place")
+	from := flags.String("from", "", "first copy this database to -db (read-only, safe while its server runs)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *path == "" || flags.NArg() > 0 {
+		return errors.New("usage: vcrx migrate-check -db PATH [-from LIVE]")
+	}
+	ctx := context.Background()
+	if *from != "" {
+		start := time.Now()
+		if err := db.Snapshot(ctx, *from, *path); err != nil {
+			return err
+		}
+		fmt.Printf("copied %s in %s\n", *from, time.Since(start).Round(time.Millisecond))
+	}
+	start := time.Now()
+	before, after, err := db.CheckMigrations(ctx, *path, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	if err != nil {
+		return fmt.Errorf("the dry run failed at schema version %d (this binary knows %d): %w", after, db.LatestVersion(), err)
+	}
+	fmt.Printf("schema version %d -> %d in %s: migrations, integrity_check and foreign_key_check passed\n",
+		before, after, time.Since(start).Round(time.Millisecond))
 	return nil
 }
 
