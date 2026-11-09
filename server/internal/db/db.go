@@ -217,6 +217,12 @@ func apply(ctx context.Context, conn *sql.DB, m migration) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if step != nil {
+		// A reference left dangling by a delete made with foreign keys off
+		// would fail the check below though this migration did not cause it.
+		// Clear the ones the schema says to clear (ON DELETE SET NULL) first.
+		if _, err := clearDanglingSetNull(ctx, tx); err != nil {
+			return fmt.Errorf("migration %s: %w", m.name, err)
+		}
 		if err := step(ctx, tx); err != nil {
 			return fmt.Errorf("migration %s: %w", m.name, err)
 		}
