@@ -119,6 +119,26 @@ Extras laid out the way Plex reads them work with no internet: `<name>-trailer.m
 
 **Before a movie (optional, per profile):** each profile can choose up to three local trailers for other movies it may see and has not watched, and a pre-roll clip, to play before a movie. Pre-rolls come from `preroll_dir`, a folder of short clips mounted read-only (`VCRX_PREROLL_DIR` in `.env`). Off by default. Trailers come only from local trailer files, never YouTube, and follow the profile's access rules, so a kids' profile never sees a trailer for a title it cannot see. Nothing that plays first counts as watched.
 
+## Podcasts (optional)
+
+Off by default. Turn them on in `vcrx.yaml` (or `VCRX_PODCASTS=true`):
+
+```yaml
+podcasts:
+  enabled: true
+  refresh_hours: 4      # how often subscribed feeds are read again (1 to 168)
+  max_episodes: 500     # newest episodes kept per feed (up to 5000)
+  search: false         # true: search Apple's podcast directory by name
+```
+
+Accounts and household profiles subscribe to shows by their RSS feed URL, or import an OPML file from another podcast app (and export one back). A feed is fetched once per server however many people subscribe, read again every `refresh_hours` with a conditional request (ETag and Last-Modified), and dropped with its episodes and artwork when its last subscriber leaves. RSS 2.0 with the iTunes and Podcasting 2.0 tags is read: title, author, description, artwork, and per episode its guid, date, length, enclosure, artwork, season and episode number, type and chapters URL. Feeds are capped at 10 MB, artwork at 5 MB.
+
+Subscriptions, the place reached in each episode, played and "new" (out in the last 30 days, not started) are each person's own. Artwork is downloaded by the server and served from it; episode audio is never stored but played through the server (`GET /api/v1/podcasts/episodes/{id}/stream`), which passes byte ranges on to the podcast's host, so players seek and a phone can download an episode for offline listening through the same route. A profile with a content rating ceiling below R (a kids' profile) never sees a show or episode marked explicit. Invited devices and linked friends' servers get no podcasts at all.
+
+The web app has a Podcasts page (add by URL, search when `search` is on, new episodes, your shows with unplayed counts, OPML), a page per show, and a podcast mode for the player bar: skip back 15 and forward 30 seconds, speed from 0.8 to 2.5, a sleep timer, the place saved every 15 seconds and on pause, and lock screen controls. The TV app lists your shows in a Podcasts row and plays them with the same controls; subscribing is done on the web or phone.
+
+Because a user types the feed URL, every podcast fetch (feed, artwork, redirects, episode audio) goes through a guard that refuses anything but public internet addresses, checked on the address each connection actually dials. See [SECURITY-AND-PRIVACY.md](SECURITY-AND-PRIVACY.md). `podcasts.allow_hosts` lets named hosts through that guard; it exists only so `scripts/dev-server.sh` can serve a sample feed on loopback, and a real server leaves it empty.
+
 ## IPTV (in progress, optional)
 
 Channels from M3U playlists you list under `live_tv` in `vcrx.yaml`, read at startup and every 12 hours. VCRX ships no playlist and suggests none; play what you have the right to watch. A playlist URL with an account's password goes in a file named by `m3u_url_file`, and neither it nor any stream URL ever reaches a client. Viewers need the IPTV grant in Settings > Users; admins always have it. Each playlist can name an XMLTV guide (`xmltv`, a URL or file, gzipped or not), read every 6 hours and matched to channels by tvg-id or name: channels list what is on now and next (`GET /api/v1/live/channels`) and `GET /api/v1/live/guide` gives the grid. To watch, `POST /api/v1/live/channels/{id}/watch` returns VCRX's own live HLS playlist: one pull per channel, shared by everyone watching it, video copied and audio converted to AAC, at most `max_streams` (4) channels at once. The web app has an IPTV page with the guide's now and next and a player with channel up and down, and the TV app has the same in an IPTV row (`docs/plans/2026-10-31-live-tv.md`).

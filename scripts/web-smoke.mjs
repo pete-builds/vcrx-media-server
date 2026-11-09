@@ -124,6 +124,7 @@ async function main() {
     const libs = (await j("/libraries")).libraries;
     const out = { libs: libs.filter((l) => l.kind !== "music" && l.kind !== "audiobook").map((l) => l.id), movie: null, show: null, direct: null,
       converted: null, transcoded: null, music: null, liveAlbum: null, alacAlbum: null, artist: null, books: null, m4b: null, mp3Book: null };
+    out.podcasts = !!(await j("/me")).podcasts;
     for (const l of libs) {
       if (l.kind === "audiobook") {
         out.books = l.id;
@@ -246,6 +247,8 @@ async function main() {
       [`/audiobooks/book/${ids.m4b}`, ".chapters .track .track-btn"],
       [`/audiobooks/book/${ids.mp3Book}`, ".music-facts dd a"],
     ] : []),
+    // Podcasts: the page with its add form (the show itself comes below).
+    ...(ids.podcasts ? [["/podcasts", ".podcast-add input"]] : []),
     ["/settings/devices", ".scope-form"],
     ["/settings/friends", ".link-form"],
     ["/settings/markers", "table.list"],
@@ -682,6 +685,7 @@ async function main() {
 
   await music(s, evaluate, press, ids, { reset: () => { exceptions = []; }, first: () => exceptions[0] });
   await audiobooks(s, evaluate, ids, { reset: () => { exceptions = []; }, first: () => exceptions[0] });
+  await podcasts(s, evaluate, ids, { reset: () => { exceptions = []; }, first: () => exceptions[0] });
   // Extras: Harbor Lights has a -trailer file and two extras folders, and Quiet
   // Street a theme.mp3 (scripts/dev-server.sh). None may become a title of its
   // own. The film's page shows an Extras row and a Trailer button; the trailer,
@@ -1291,6 +1295,119 @@ async function audiobooks(s, evaluate, ids, ex) {
     await new Promise((r) => setTimeout(r, 800));
     ${reset}`);
   if (ex.first()) fail("audiobooks", `threw: ${ex.first()}`);
+}
+
+// Podcasts: subscribing to the dev server's sample feed by typing its URL
+// into the Podcasts page opens the show with its two episodes; Play with a
+// real mouse click starts the newest through VCRX's stream route in the
+// player bar, now a podcast player (skips and speed, no chapters); speed
+// reaches the audio; pausing saves the place to the server; and the
+// Podcasts page then lists the show.
+async function podcasts(s, evaluate, ids, ex) {
+  if (!ids.podcasts) {
+    fail("podcasts", "podcasts are off for this user (run against scripts/dev-server.sh)");
+    return;
+  }
+  const feed = process.env.VCRX_SMOKE_FEED || `http://127.0.0.1:${Number(new URL(base).port) + 1000}/feed.xml`;
+  const wait = (cond, n = 60) => `for (let i = 0; i < ${n} && !(${cond}); i++) await new Promise((r) => setTimeout(r, 150));`;
+  console.log(`podcasts: subscribe to ${feed}`);
+  ex.reset();
+  await s("Page.navigate", { url: `${base}/#/podcasts` });
+  const shown = await evaluate(`${wait(`document.querySelector(".podcast-add input")`)}
+    const input = document.querySelector(".podcast-add input");
+    if (!input) return null;
+    input.value = ${JSON.stringify(feed)};
+    document.querySelector(".podcast-add button[type=submit]").click();
+    ${wait(`location.hash.startsWith("#/podcasts/show/") && document.querySelector(".episodes .episode .episode-play")`, 120)}
+    return { hash: location.hash, title: document.querySelector(".podcast-page h1")?.textContent || "",
+      episodes: [...document.querySelectorAll(".episodes .episode .episode-title")].map((e) => e.textContent),
+      art: !!document.querySelector(".podcast-page .music-head img") };`);
+  if (!shown) {
+    fail("podcasts", "the Podcasts page has no feed URL box");
+    return;
+  }
+  if (shown.title !== "Harbor Radio Hour") fail("podcasts", `subscribing opened ${shown.hash} titled "${shown.title}"`);
+  if (shown.episodes.length !== 2 || shown.episodes[0] !== "Episode Two: Fog Signals") fail("podcasts", `the show lists ${JSON.stringify(shown.episodes)}`);
+  if (!shown.art) fail("podcasts", "the show has no artwork from VCRX");
+  const showId = Number(shown.hash.split("/").pop());
+  // A run before this one may have played it; start from its beginning.
+  await evaluate(`const { api } = await import("/js/api.js");
+    for (const e of (await api("/podcasts/shows/${showId}")).episodes) await api("/podcasts/episodes/" + e.id + "/played", { method: "PUT", body: { played: false } });`);
+  await s("Page.reload");
+  const btn = await evaluate(`${wait(`document.querySelector(".episodes .episode .episode-play")`)}
+    const b = document.querySelector(".episodes .episode .episode-play");
+    if (!b) return null;
+    b.scrollIntoView({ block: "center" });
+    const r = b.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    return { x, y, id: b.closest("li").dataset.episode, hit: document.elementFromPoint(x, y)?.closest("button") === b };`);
+  if (!btn) {
+    fail("podcasts", "the episode has no Play button");
+    return;
+  }
+  if (!btn.hit) fail("podcasts", "the episode's Play button is covered by something else");
+  await s("Input.dispatchMouseEvent", { type: "mouseMoved", x: btn.x, y: btn.y });
+  await s("Input.dispatchMouseEvent", { type: "mousePressed", x: btn.x, y: btn.y, button: "left", clickCount: 1 });
+  await s("Input.dispatchMouseEvent", { type: "mouseReleased", x: btn.x, y: btn.y, button: "left", clickCount: 1 });
+  const audio = `[...document.querySelectorAll("audio.mb-audio")].find((e) => e.getAttribute("src") && !e.paused)`;
+  const started = await evaluate(`${wait(`(${audio})?.currentTime > 0.5`)}
+    const a = ${audio};
+    const bar = document.getElementById("music-bar");
+    const visible = (sel) => { const e = bar && bar.querySelector(sel); return !!e && !e.hidden; };
+    return { t: a ? a.currentTime : -1, src: a ? a.getAttribute("src") : "", episode: bar ? bar.dataset.episode : null,
+      title: bar ? bar.querySelector(".mb-title").textContent : "", show: bar ? bar.querySelector(".mb-artist").textContent : "",
+      skip: visible("[aria-label='Back 15 seconds']") && visible("[aria-label='Forward 30 seconds']"),
+      chapters: visible("[aria-label='Next chapter']"), shuffle: visible("[aria-label='Shuffle']"),
+      lit: !!document.querySelector(".episodes li.episode.is-current[data-episode='" + ${JSON.stringify(btn.id)} + "']"),
+      session: navigator.mediaSession && navigator.mediaSession.metadata ? navigator.mediaSession.metadata.title : "" };`);
+  if (!(started.t > 0.5)) fail("podcasts", `the episode did not start playing (t=${started.t})`);
+  if (started.src !== `/api/v1/podcasts/episodes/${btn.id}/stream`) fail("podcasts", `the audio comes from ${started.src}, not VCRX's stream route`);
+  if (started.episode !== btn.id) fail("podcasts", `the bar is not playing the episode (episode=${started.episode})`);
+  if (started.title !== "Episode Two: Fog Signals" || started.show !== "Harbor Radio Hour") fail("podcasts", `the bar shows "${started.title}" by "${started.show}"`);
+  if (!started.skip || started.chapters || started.shuffle) fail("podcasts", "the bar does not show the podcast controls (skips, no chapters, no shuffle)");
+  if (!started.lit) fail("podcasts", "the playing episode is not lit on the show page");
+  if (started.session !== "Episode Two: Fog Signals") fail("podcasts", `the lock screen shows "${started.session}"`);
+
+  // Speed, then Back 15 seconds near the start (it stops at 0), then pausing
+  // saves the place.
+  const saved = await evaluate(`
+    const p = await import("/js/music/player.js");
+    const sel = document.querySelector("#music-bar select[aria-label='Playback speed']");
+    sel.value = "1.5";
+    sel.dispatchEvent(new Event("change"));
+    const rate = ${audio}.playbackRate;
+    document.querySelector("#music-bar [aria-label='Back 15 seconds']").click();
+    await new Promise((r) => setTimeout(r, 1500));
+    const n = p.debug.saves.length;
+    document.querySelector("#music-bar .mb-play").click();
+    ${wait(`p.debug.saves.length > n`)}
+    const want = p.bookPos();
+    let got = null;
+    for (let i = 0; i < 20; i++) {
+      got = await fetch("/api/v1/podcasts/episodes/${btn.id}/progress").then((r) => r.json());
+      if (Math.abs(got.position_seconds - want) < 0.5) break;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return { rate, want, got, saves: p.debug.saves.slice(n) };`);
+  if (saved.rate !== 1.5) fail("podcasts", `speed 1.5 did not reach the audio (${saved.rate})`);
+  if (!(saved.got.position_seconds > 0.5) || Math.abs(saved.got.position_seconds - saved.want) > 0.5 || saved.got.played) {
+    fail("podcasts", `pausing at ${saved.want} s saved ${JSON.stringify(saved.got)}`);
+  }
+  console.log(`  paused at ${saved.want.toFixed(1)} s, server has ${saved.got.position_seconds} s`);
+
+  // The Podcasts page lists the show, with its unplayed count.
+  await s("Page.navigate", { url: `${base}/#/podcasts` });
+  const page = await evaluate(`${wait(`document.querySelector(".podcast-grid .podcast-card")`)}
+    const c = document.querySelector('.podcast-grid .podcast-card[data-podcast="${showId}"]');
+    return { card: !!c, badge: c && c.querySelector(".podcast-unplayed") ? c.querySelector(".podcast-unplayed").textContent : "",
+      nav: [...document.querySelectorAll("#nav a")].some((a) => a.getAttribute("href") === "#/podcasts") };`);
+  if (!page.card) fail("podcasts", "the Podcasts page does not list the show");
+  if (page.badge !== "2") fail("podcasts", `the show's unplayed badge says "${page.badge}"`);
+  if (!page.nav) fail("podcasts", "the top bar has no Podcasts link");
+
+  await evaluate(`const b = document.querySelector("#music-bar .mb-btn[aria-label^='Stop']"); if (b) b.click();
+    await new Promise((r) => setTimeout(r, 500));`);
+  if (ex.first()) fail("podcasts", `threw: ${ex.first()}`);
 }
 
 const safariUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
@@ -1982,5 +2099,6 @@ if (failures.length) {
 }
 console.log("\nweb-smoke: every page, every playback path (HLS included), Continue Watching removal, search as you type, the shortcuts list, " +
   "the Home feature and rows, Customize Home, season tabs, the manifest and icons, the phone tab bar and Back, the History section, the trailer, extras and theme music, " +
-  "Skip Intro and Next Episode, the invite and pairing loop, lending a tape, music (playing across pages, gapless hand-over, Space), audiobooks (chapters, speed, saved place, Continue listening)" +
+  "Skip Intro and Next Episode, the invite and pairing loop, lending a tape, music (playing across pages, gapless hand-over, Space), audiobooks (chapters, speed, saved place, Continue listening), " +
+  "podcasts (subscribe by URL, play through VCRX, speed, saved place)" +
   (peer ? ", and linking, badging, playing and unlinking a friend's server" : "") + " passed");

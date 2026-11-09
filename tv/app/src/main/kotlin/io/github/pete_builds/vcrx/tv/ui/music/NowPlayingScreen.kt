@@ -41,6 +41,7 @@ import io.github.pete_builds.vcrx.tv.ui.components.BrandButton
 import io.github.pete_builds.vcrx.tv.ui.components.BrandRow
 import io.github.pete_builds.vcrx.tv.ui.components.EmptyView
 import io.github.pete_builds.vcrx.tv.ui.components.Label
+import io.github.pete_builds.vcrx.tv.ui.podcasts.PodcastNowPlaying
 import io.github.pete_builds.vcrx.tv.ui.theme.Graphite
 import io.github.pete_builds.vcrx.tv.ui.theme.Gray
 import io.github.pete_builds.vcrx.tv.ui.theme.Accent
@@ -61,6 +62,10 @@ fun NowPlayingScreen() {
 
     if (track == null) {
         EmptyView(s.message ?: "Nothing is playing", "Choose an album or an artist to play.")
+        return
+    }
+    if (s.episode != null) {
+        PodcastNowPlaying(s, player)
         return
     }
     Row(Modifier.fillMaxSize().padding(start = 48.dp, top = 40.dp, end = 32.dp, bottom = 32.dp), horizontalArrangement = Arrangement.spacedBy(40.dp)) {

@@ -196,6 +196,9 @@ type walkFixture struct {
 	music musicIDs
 	// And an audiobook library.
 	books bookIDs
+	// And podcasts: the friend subscribes to a show marked explicit, which a
+	// content rating ceiling under R hides.
+	pods *podcastHost
 	// listens are the friend's own listens to the tracks and the book's file
 	// the walk plays, keyed "track:<id>" and "file:<id>": an invited device
 	// reaches an audio file only inside its own listen to it.
@@ -213,6 +216,7 @@ func newWalkFixture(t *testing.T) *walkFixture {
 	withHLS(t, f, remux.New("ffmpeg", "ffprobe", 2, nil))
 	w.music = withMusic(t, f)
 	w.books = withAudiobooks(t, f)
+	w.pods = withPodcasts(t, f)
 	w.channel = withLive(t, f)
 	withLiveStream(t, f, w.channel)
 	now := time.Now().UnixMilli()
@@ -552,7 +556,52 @@ func (w *walkFixture) startExtraSession(tok string, extra int64) string {
 // friend's at all.
 func (w *walkFixture) probes(sessions []string, adminSession, listen, bookListen string) []probe {
 	ps := append(append(w.musicProbes(listen), w.bookProbes(bookListen)...), w.liveProbes()...)
+	if !w.isToken() {
+		ps = append(ps, w.podcastProbes()...)
+	}
 	return append(ps, w.videoProbes(sessions, adminSession)...)
+}
+
+// subscribePodcasts subscribes the friend, while their policy is open, to a
+// show marked explicit. The admin subscribes too, so the friend's own
+// unsubscribe probe leaves the show on the server for the friend to come back.
+func (w *walkFixture) subscribePodcasts() {
+	w.t.Helper()
+	w.pods.subscribe(w.t, w.fixture, w.adminTok, w.pods.explicitURL)
+	w.pods.podcast, w.pods.episode = w.pods.subscribe(w.t, w.fixture, w.friendTok, w.pods.explicitURL)
+}
+
+// podcastProbes cover podcasts, for accounts and profiles (invited devices and
+// linked servers are refused every podcast route, checked in the walk). The
+// restricted friend's ceiling is under R, which hides a show marked explicit:
+// its lists, search and export stop naming it, every route on it or its
+// episode is a 404, an import counts it as refused, and subscribing to it
+// again is refused as explicit.
+func (w *walkFixture) podcastProbes() []probe {
+	h := w.pods
+	opml := fmt.Sprintf(`<opml version="2.0"><body><outline type="rss" text="x" xmlUrl="%s"/></body></opml>`, h.explicitURL)
+	return []probe{
+		at("GET /api/v1/podcasts").hides(h.explicitTitle),
+		at("GET /api/v1/podcasts/new").hides(h.epTitle),
+		at("GET /api/v1/podcasts/search").query("q=walk").hides(h.explicitTitle),
+		at("GET /api/v1/podcasts/opml").hides(h.explicitTitle),
+		at("POST /api/v1/podcasts/opml").with(rawBody(opml)).hides(`"already":1`),
+		at("GET /api/v1/podcasts/shows/{podcast_id}", h.podcast),
+		at("POST /api/v1/podcasts/shows/{podcast_id}/refresh", h.podcast),
+		at("GET /api/v1/podcasts/shows/{podcast_id}/artwork", h.podcast),
+		at("GET /api/v1/podcasts/episodes/{episode_id}", h.episode),
+		at("GET /api/v1/podcasts/episodes/{episode_id}/progress", h.episode),
+		at("PUT /api/v1/podcasts/episodes/{episode_id}/progress", h.episode).with(map[string]any{"position_seconds": 5}),
+		// After the place above, so the episode is new again for the list probe.
+		at("PUT /api/v1/podcasts/episodes/{episode_id}/played", h.episode).with(map[string]any{"played": false}),
+		at("GET /api/v1/podcasts/episodes/{episode_id}/artwork", h.episode),
+		at("GET /api/v1/podcasts/episodes/{episode_id}/stream", h.episode),
+		at("HEAD /api/v1/podcasts/episodes/{episode_id}/stream", h.episode),
+		// Last two: the open friend unsubscribes, then subscribes again, so the
+		// restricted friend is still subscribed and only the policy refuses.
+		at("DELETE /api/v1/podcasts/shows/{podcast_id}", h.podcast),
+		at("POST /api/v1/podcasts").with(map[string]any{"url": h.explicitURL}).refused(http.StatusForbidden, "explicit"),
+	}
 }
 
 // bookProbes cover the audiobook routes: every one names the library, a book
@@ -803,6 +852,10 @@ func checkCoverage(t *testing.T, routes []route, ps []probe, kind string) {
 				t.Errorf("%s says it is probed in the walk as the peer, but no probe calls it", key)
 			}
 			continue
+		case accounts:
+			if kind == "token" || kind == "peer" {
+				continue // refused outright; checked in the walk
+			}
 		case friendsServers:
 			if friendsServerRoutes[key] == "" {
 				t.Errorf("%s shows friends' servers to the household: add it to friendsServerRoutes, and a probe to TestPeerTitlesFollowTheCallersPolicy that a restricted profile is refused through it", key)
@@ -887,6 +940,9 @@ func accessWalk(t *testing.T, kind string) {
 	w := newWalkFixture(t)
 	w.become(kind)
 	w.open()
+	if !w.isToken() {
+		w.subscribePodcasts()
+	}
 	// The friend's own sessions on everything about to be hidden, opened while
 	// allowed: a policy tightened mid-play must cut them off.
 	var sessions []string
@@ -1026,6 +1082,19 @@ func accessWalk(t *testing.T, kind string) {
 		case rt.access == friendsServers && rt.Path == "/api/v1/peers/home":
 			if r.code != 200 {
 				t.Errorf("%s %s: the household profile got %d %.120s", rt.Method, rt.Path, r.code, r.body)
+			}
+		}
+	}
+	// Podcasts are a person's own: an invited device and a linked server are
+	// refused every podcast route, whatever their scope.
+	if w.isToken() {
+		for _, rt := range w.srv.Routes() {
+			if rt.access != accounts {
+				continue
+			}
+			path := routeParam.ReplaceAllString(rt.Path, "1")
+			if r := w.do(rt.Method, path, w.friendTok, nil); r.code != http.StatusForbidden || (rt.Method != "HEAD" && !strings.Contains(string(r.body), "accounts_only")) {
+				t.Errorf("%s %s: the %s got %d %.120s, want 403 accounts_only", rt.Method, rt.Path, kind, r.code, r.body)
 			}
 		}
 	}

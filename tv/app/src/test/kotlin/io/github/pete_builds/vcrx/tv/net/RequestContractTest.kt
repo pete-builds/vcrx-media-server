@@ -43,6 +43,8 @@ class RequestContractTest {
         Body("post", "/api/v1/playback/sessions/{session_id}/events", PlaybackEvent.serializer()),
         Body("post", "/api/v1/music/queue", MusicQueueRequest.serializer()),
         Body("post", "/api/v1/music/tracks/{track_id}/sessions", MusicListenRequest.serializer()),
+        Body("put", "/api/v1/podcasts/episodes/{episode_id}/progress", PodcastProgressRequest.serializer()),
+        Body("put", "/api/v1/podcasts/episodes/{episode_id}/played", PodcastPlayedRequest.serializer()),
         Body("post", "/api/v1/audiobooks/books/{book_id}/queue", AudiobookQueueRequest.serializer()),
         Body("post", "/api/v1/audiobooks/files/{file_id}/sessions", AudiobookListenRequest.serializer()),
         Body("put", "/api/v1/audiobooks/books/{book_id}/progress", AudiobookProgressRequest.serializer()),
@@ -81,10 +83,10 @@ class RequestContractTest {
      */
     @Test
     fun everyEncodedBodyIsListed() {
-        val sources = listOf("ServerApi.kt", "MusicApi.kt", "AudiobookApi.kt").map { File("src/main/kotlin/io/github/pete_builds/vcrx/tv/net/$it").readText() }
+        val sources = listOf("ServerApi.kt", "MusicApi.kt", "AudiobookApi.kt", "PodcastApi.kt").map { File("src/main/kotlin/io/github/pete_builds/vcrx/tv/net/$it").readText() }
         val sent = sources.flatMap { source ->
-            // ServerApi.post(path, body, serializer): the path is a literal, unlike OkHttp's post(EMPTY_BODY).
-            Regex("""post\("[^"\n]*",[^\n]*?,\s*(\w+)\.serializer\(\)\)""").findAll(source).map { it.groupValues[1] } +
+            // ServerApi.post or put(path, body, serializer): the path is a literal, unlike OkHttp's post(EMPTY_BODY).
+            Regex("""(?:post|put)\("[^"\n]*",[^\n]*?,\s*(\w+)\.serializer\(\)\)""").findAll(source).map { it.groupValues[1] } +
                 Regex("""encodeToString\((\w+)\.serializer\(\)""").findAll(source).map { it.groupValues[1] }
         }.toSet()
         assertTrue("found no request bodies in the sources; the patterns are stale", sent.size >= 10)

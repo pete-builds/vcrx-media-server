@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"time"
@@ -37,8 +39,15 @@ func devHomeDate(log *slog.Logger) func() time.Time {
 
 // devCommand runs "vcrx dev-seed": a play history for the sample library, so
 // Home's Trending, Most Watched and Because You Watched rows have something
-// to show. It writes once; a second run changes nothing.
-func devCommand(name string, _ []string) (bool, error) {
+// to show. It writes once; a second run changes nothing. And "vcrx dev-feeds
+// DIR ADDR", the sample podcast host (see devFeeds).
+func devCommand(name string, args []string) (bool, error) {
+	if name == "dev-feeds" {
+		if len(args) != 2 {
+			return true, errors.New("usage: vcrx dev-feeds DIR 127.0.0.1:PORT")
+		}
+		return true, devFeeds(args[0], args[1])
+	}
 	if name != "dev-seed" {
 		return false, nil
 	}
@@ -122,4 +131,21 @@ func devSeed(ctx context.Context, conn *sql.DB, now time.Time) error {
 	}
 	fmt.Printf("dev-seed: %d plays\n", n)
 	return nil
+}
+
+// devFeeds serves dir on addr, a loopback address: the sample podcast feed
+// scripts/dev-server.sh writes, its artwork and its episodes, so the web
+// smoke test can subscribe without the internet. http.FileServer answers
+// Range requests, as a real podcast host does. The dev server reaches it only
+// because vcrx.yaml lists it in podcasts.allow_hosts.
+func devFeeds(dir, addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("dev-feeds listens on loopback only, not %q", addr)
+	}
+	srv := &http.Server{Addr: addr, Handler: http.FileServer(http.Dir(dir)), ReadHeaderTimeout: 10 * time.Second}
+	return srv.ListenAndServe()
 }

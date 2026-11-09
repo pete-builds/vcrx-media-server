@@ -22,12 +22,17 @@ import io.github.pete_builds.vcrx.tv.caps.CapabilityProbe
 import io.github.pete_builds.vcrx.tv.net.ApiException
 import io.github.pete_builds.vcrx.tv.net.Capabilities
 import io.github.pete_builds.vcrx.tv.net.MusicQueueRequest
+import io.github.pete_builds.vcrx.tv.net.MusicStream
 import io.github.pete_builds.vcrx.tv.net.MusicTrack
 import io.github.pete_builds.vcrx.tv.net.PlaybackEvent
+import io.github.pete_builds.vcrx.tv.net.PodcastEpisode
+import io.github.pete_builds.vcrx.tv.net.PodcastProgressRequest
 import io.github.pete_builds.vcrx.tv.net.albumCoverUrl
+import io.github.pete_builds.vcrx.tv.net.episodeArtworkUrl
 import io.github.pete_builds.vcrx.tv.net.musicCapabilities
 import io.github.pete_builds.vcrx.tv.net.musicListen
 import io.github.pete_builds.vcrx.tv.net.musicQueue
+import io.github.pete_builds.vcrx.tv.net.podcastSetProgress
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -51,6 +56,10 @@ data class MusicState(
     val repeat: Repeat = Repeat.Off,
     /** A problem to show once, such as tracks this device cannot play. */
     val message: String? = null,
+    /** Set while a podcast episode plays instead of music: its one track is [current]. */
+    val episode: PodcastEpisode? = null,
+    /** The playback speed; podcasts only, music always plays at 1. */
+    val speed: Float = 1f,
 ) {
     val current: MusicTrack? get() = queue.getOrNull(position)
 }
@@ -85,6 +94,11 @@ class MusicPlayer private constructor(private val context: Context, private val 
     }
     private var ticker: Job? = null
 
+    /** The podcast episode playing, if it is one; its place is saved with [ProgressClock]. */
+    private var episode: PodcastEpisode? = null
+    private val progressClock = ProgressClock()
+    private var speed = 1f
+
     suspend fun playAlbum(albumId: Long, startTrackId: Long? = null, shuffle: Boolean = false) {
         listens.enabled = streamOnly(graph)
         val tracks = fetch(MusicQueueRequest(albumId = albumId, capabilities = capabilities()))
@@ -101,9 +115,70 @@ class MusicPlayer private constructor(private val context: Context, private val 
 
     private suspend fun fetch(request: MusicQueueRequest): List<MusicTrack> = graph.api.musicQueue(request)
 
+    /**
+     * Plays a podcast episode on the same player as music, from its saved
+     * place, at the speed last chosen for podcasts. Its audio comes through
+     * VCRX's stream route, which passes byte ranges on, so it seeks in place.
+     * There is no listen in Activity; the place is saved on the server instead.
+     */
+    fun playEpisode(e: PodcastEpisode) {
+        if (e.streamUrl.isEmpty()) {
+            publish(message = "This episode has no audio to play.")
+            return
+        }
+        AudiobookPlayer.stopIfRunning()
+        endListen()
+        finishEpisode()
+        episode = e
+        progressClock.reset()
+        val track = MusicTrack(
+            id = -e.id,
+            title = e.title,
+            artistName = e.podcastTitle,
+            albumTitle = e.podcastTitle,
+            durationMs = e.durationSeconds?.times(1000),
+            stream = MusicStream(url = e.streamUrl, mimeType = e.mimeType),
+        )
+        queue = MusicQueue(listOf(track), 0, false)
+        load(PodcastPlayback.startPositionMs(e))
+        publish(message = null)
+    }
+
+    /** Sets the podcast speed, within 0.8 to 2.5. */
+    fun setSpeed(value: Float) {
+        speed = PodcastPlayback.clampSpeed(value)
+        if (episode != null) player?.setPlaybackSpeed(speed)
+        publish()
+    }
+
+    fun cycleSpeed() = setSpeed(PodcastPlayback.nextSpeed(speed))
+
+    /** Saves the episode's place now, if one is playing, and leaves podcast mode. */
+    private fun finishEpisode() {
+        if (episode == null) return
+        saveEpisodeProgress(force = true)
+        episode = null
+    }
+
+    private fun saveEpisodeProgress(force: Boolean) {
+        val e = episode ?: return
+        val p = player ?: return
+        val positionMs = p.currentPosition
+        if (!progressClock.shouldSend(System.currentTimeMillis(), positionMs, p.isPlaying, force)) return
+        val measured = p.duration.takeIf { it > 0 }?.let { it / 1000.0 }
+        scope.launch {
+            try {
+                graph.api.podcastSetProgress(e.id, PodcastProgressRequest(positionMs / 1000.0, measured))
+            } catch (_: ApiException) {
+                // The next save carries the place; nothing to show for one that missed.
+            }
+        }
+    }
+
     private fun start(all: List<MusicTrack>, startIndex: Int, shuffle: Boolean) {
         // One thing plays at a time: music stops a book, as a book stops music.
         AudiobookPlayer.stopIfRunning()
+        finishEpisode()
         // Tracks this device cannot play, and the server will not convert for
         // this account, stay out of the queue; the screen says how many.
         val playable = all.filter { it.stream != null }
@@ -151,13 +226,18 @@ class MusicPlayer private constructor(private val context: Context, private val 
                         .setTitle(t.title)
                         .setArtist(t.artistName)
                         .setAlbumTitle(t.albumTitle)
-                        .apply { if (t.hasCover) graph.api.albumCoverUrl(t.albumId, 480)?.let { setArtworkUri(Uri.parse(it)) } }
+                        .apply {
+                            val art = episode?.let { graph.api.episodeArtworkUrl(it.id) }
+                                ?: if (t.hasCover) graph.api.albumCoverUrl(t.albumId, 480) else null
+                            art?.let { setArtworkUri(Uri.parse(it)) }
+                        }
                         .build(),
                 )
                 .build()
         }
         p.setMediaItems(items, q.position, positionMs)
         p.repeatMode = repeatMode(q.repeat)
+        p.setPlaybackSpeed(if (episode != null) speed else 1f)
         p.prepare()
         p.play()
         // The listen opens in onMediaItemTransition, which this playlist change fires.
@@ -198,8 +278,7 @@ class MusicPlayer private constructor(private val context: Context, private val 
     fun seekBy(deltaMs: Long) {
         val p = player ?: return
         if (_state.value.current?.stream?.seekable != true) return
-        val end = p.duration.takeIf { it > 0 }?.let { (it - 500).coerceAtLeast(0L) } ?: Long.MAX_VALUE
-        p.seekTo((p.currentPosition + deltaMs).coerceIn(0L, end))
+        p.seekTo(PodcastPlayback.skipTarget(p.currentPosition, deltaMs, p.duration.coerceAtLeast(0L)))
         report("seek")
     }
 
@@ -220,6 +299,7 @@ class MusicPlayer private constructor(private val context: Context, private val 
     /** Stops the music and empties the queue. */
     fun stop() {
         endListen()
+        finishEpisode()
         closeUnplayed(listens) { id -> graph.playbackEvents.send(id, PlaybackEvent(type = "stop", positionMs = 0)) }
         ticker?.cancel()
         player?.run {
@@ -242,17 +322,22 @@ class MusicPlayer private constructor(private val context: Context, private val 
             // Media3 moved on by itself (the end of a track, or repeat): the
             // queue follows its index, and the next track is a new listen.
             if (p.currentMediaItemIndex != q.position) q.jumpTo(p.currentMediaItemIndex)
-            beginListen()
+            if (episode == null) beginListen()
             publish()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             report(if (isPlaying) "resume" else "pause")
+            if (!isPlaying) saveEpisodeProgress(force = true)
             publish()
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED) endListen()
+            if (playbackState == Player.STATE_ENDED) {
+                endListen()
+                // At the end: the server marks the episode played.
+                saveEpisodeProgress(force = true)
+            }
             publish()
         }
 
@@ -325,6 +410,7 @@ class MusicPlayer private constructor(private val context: Context, private val 
         ticker = scope.launch {
             while (isActive) {
                 publish()
+                saveEpisodeProgress(force = false)
                 delay(500)
             }
         }
@@ -342,6 +428,8 @@ class MusicPlayer private constructor(private val context: Context, private val 
             shuffle = q?.shuffle == true,
             repeat = q?.repeat ?: Repeat.Off,
             message = message,
+            episode = episode,
+            speed = if (episode != null) speed else 1f,
         )
     }
 

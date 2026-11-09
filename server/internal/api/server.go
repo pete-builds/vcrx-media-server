@@ -88,6 +88,9 @@ type Server struct {
 	// Live is IPTV's channels (live.go).
 	Live *Live
 
+	// Podcasts are RSS subscriptions (podcasts.go); nil is off.
+	Podcasts *Podcasts
+
 	AdminAllowRemote bool
 	TrustedProxies   []netip.Prefix
 	// AutoSignInUser, when set, is signed in without a password for clients on
@@ -170,6 +173,10 @@ const (
 	// friends' servers share: never to an invited device, a linked server or
 	// an account outside the household, so a link is never passed on.
 	friendsServers
+	// accounts routes answer accounts and household profiles, never an
+	// invited device or a linked server: podcasts, which are a person's own
+	// subscriptions and make the server fetch what they type.
+	accounts
 )
 
 type route struct {
@@ -319,7 +326,7 @@ func (s *Server) Routes() []route {
 		{"POST", "/api/v1/admin/newsletter/preview", adminOnly, s.newsletterPreview},
 		{"GET", "/api/v1/admin/items/{item_id}/subtitles", adminOnly, s.adminItemSubtitles},
 		{"DELETE", "/api/v1/admin/subtitles/{stream_id}", adminOnly, s.adminDeleteSubtitle},
-	}, append(append(s.musicRoutes(), s.audiobookRoutes()...), s.liveRoutes()...)...)
+	}, append(append(append(s.musicRoutes(), s.audiobookRoutes()...), s.liveRoutes()...), s.podcastRoutes()...)...)
 }
 
 // Handler builds the mux with middleware applied.

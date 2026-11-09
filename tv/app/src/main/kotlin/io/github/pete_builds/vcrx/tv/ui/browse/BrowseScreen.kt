@@ -72,6 +72,7 @@ import io.github.pete_builds.vcrx.tv.ui.theme.Surfaces
 import io.github.pete_builds.vcrx.tv.ui.theme.White
 import io.github.pete_builds.vcrx.tv.ui.audiobooks.AudiobookSection
 import io.github.pete_builds.vcrx.tv.ui.music.MusicSection
+import io.github.pete_builds.vcrx.tv.ui.podcasts.PodcastsSection
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -80,6 +81,7 @@ const val SEARCH = "search"
 const val SETTINGS = "settings"
 const val ACTIVITY = "activity"
 const val LIVE = "live"
+const val PODCASTS = "podcasts"
 fun librarySection(id: Long) = "library:$id"
 
 /**
@@ -111,6 +113,10 @@ class BrowseViewModel(private val graph: AppGraph) : ViewModel() {
     var liveTv by mutableStateOf(false)
         private set
 
+    /** Podcasts in the rail: on for this server and this user (never an invited device). */
+    var podcasts by mutableStateOf(false)
+        private set
+
     init {
         loadLibraries()
         viewModelScope.launch {
@@ -121,6 +127,7 @@ class BrowseViewModel(private val graph: AppGraph) : ViewModel() {
             }
             isAdmin = me?.isAdmin ?: false
             liveTv = me?.liveTv ?: false
+            podcasts = me?.podcasts ?: false
         }
     }
 
@@ -200,6 +207,7 @@ fun BrowseScreen() {
             add(RailEntry(librarySection(it.id), it.name, icon))
         }
         if (vm.liveTv) add(RailEntry(LIVE, "IPTV", AppIcons.Live))
+        if (vm.podcasts) add(RailEntry(PODCASTS, "Podcasts", AppIcons.Podcast))
         add(RailEntry(SEARCH, "Search", Icons.Filled.Search))
         if (vm.isAdmin) add(RailEntry(ACTIVITY, "Activity", Icons.Filled.PlayArrow))
         add(RailEntry(SETTINGS, "Settings", Icons.Filled.Settings))
@@ -227,6 +235,7 @@ fun BrowseScreen() {
                 section == SETTINGS -> SettingsSection(vm.focus)
                 section == ACTIVITY -> ActivitySection(vm.focus)
                 section == LIVE -> LiveSection(vm.focus)
+                section == PODCASTS -> PodcastsSection(vm.focus)
                 section.startsWith("library:") -> {
                     val library = libraries.firstOrNull { librarySection(it.id) == section }
                     when {

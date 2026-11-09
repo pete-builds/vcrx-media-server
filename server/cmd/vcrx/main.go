@@ -56,6 +56,7 @@ import (
 	"github.com/pete-builds/vcrx-media-server/server/internal/opensubtitles"
 	"github.com/pete-builds/vcrx-media-server/server/internal/overlay"
 	"github.com/pete-builds/vcrx-media-server/server/internal/playback"
+	"github.com/pete-builds/vcrx-media-server/server/internal/podcasts"
 	"github.com/pete-builds/vcrx-media-server/server/internal/preroll"
 	"github.com/pete-builds/vcrx-media-server/server/internal/probe"
 	"github.com/pete-builds/vcrx-media-server/server/internal/remux"
@@ -433,6 +434,19 @@ func serve() error {
 	}
 	go streams.Run(ctx)
 	srv.Live = &api.Live{Store: liveStore, Refresher: refresher, LogoDir: cfg.LogoCacheDir(), Streams: streams}
+	// Podcasts: off unless podcasts.enabled. Every feed, image and episode is
+	// fetched through a guard that refuses non-public addresses at dial time.
+	if cfg.Podcasts.Enabled {
+		pods := podcasts.NewService(&podcasts.Store{DB: a.db}, podcasts.Guard{AllowHosts: cfg.Podcasts.AllowHosts}, cfg.PodcastArtDir())
+		pods.Interval, pods.MaxEpisodes, pods.Search = cfg.PodcastRefreshInterval(), cfg.Podcasts.MaxEpisodes, cfg.Podcasts.Search
+		pods.UserAgent, pods.Log = "VCRX/"+version+" (podcasts)", log.With("component", "podcasts")
+		if len(cfg.Podcasts.AllowHosts) > 0 {
+			log.Warn("podcasts.allow_hosts is set: those hosts are fetched even on private addresses; for development only", "hosts", cfg.Podcasts.AllowHosts)
+		}
+		go pods.Run(ctx)
+		srv.Podcasts = &api.Podcasts{Service: pods}
+		log.Info("podcasts on", "search", cfg.Podcasts.Search)
+	}
 	srv.MarkerHours = markerHours
 	if markerJob != nil {
 		srv.Markers = markerJob
