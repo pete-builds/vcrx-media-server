@@ -61,6 +61,7 @@ fun SettingsScreen(onSwitchProfile: () -> Unit, onSignedOut: () -> Unit) {
                         graph.tokens.clear()
                         graph.forgetSession()
                         graph.prefs.clearAccountData()
+                        graph.offlineAudio.clearAccountData()
                         onSignedOut()
                     }
                 })

@@ -15,7 +15,10 @@ object ArtStore {
     const val ALBUM = "album"
     const val ARTIST = "artist"
     const val ITEM = "item"
-    private val KINDS = setOf(ALBUM, ARTIST, ITEM)
+    const val BOOK = "book"
+    const val PODCAST = "podcast"
+    const val EPISODE = "episode"
+    private val KINDS = setOf(ALBUM, ARTIST, ITEM, BOOK, PODCAST, EPISODE)
 
     fun kept(context: Context, kind: String, id: Long): File = File(File(context.filesDir, "offline-art"), "$kind-$id.jpg")
 
