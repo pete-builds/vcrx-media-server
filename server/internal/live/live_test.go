@@ -108,6 +108,55 @@ func TestSyncKeepsTheAdminsChoices(t *testing.T) {
 	}
 }
 
+// A source taken out of vcrx.yaml is never refreshed again, so its channels
+// must go with it at the next start (seen 2026-11-09: two playlists replaced
+// by two others, and the old 1,000 channels stayed listed beside the new).
+// Listing it again brings them back.
+func TestARemovedSourceTakesItsChannelsWithIt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := &Store{DB: newDB(t)}
+	specs := []SourceSpec{{Name: "Old", Location: "https://playlists.example/old.m3u"}, {Name: "New", Location: "https://playlists.example/new.m3u"}}
+	r := &Refresher{Store: s, Sources: specs, Log: quiet}
+	if err := r.Register(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sync(ctx, r.ids["Old"], []Entry{{Name: "Old News", URL: "https://s.example/old.m3u8"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sync(ctx, r.ids["New"], []Entry{{Name: "New News", URL: "https://s.example/new.m3u8"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Channels(ctx, true); names(got) != "New News,Old News" {
+		t.Fatalf("both sources listed: %q", names(got))
+	}
+
+	// The admin replaces Old in vcrx.yaml and restarts.
+	r = &Refresher{Store: s, Sources: specs[1:], Log: quiet}
+	if err := r.Register(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Channels(ctx, true); names(got) != "New News" {
+		t.Fatalf("after removing Old: %q, want only New News", names(got))
+	}
+	all, _ := s.AllChannels(ctx)
+	if len(all) != 2 {
+		t.Fatalf("the admin page lists %d channels, want 2 (gone, not deleted)", len(all))
+	}
+
+	// Listed again: its channels return with its next refresh.
+	r = &Refresher{Store: s, Sources: specs, Log: quiet}
+	if err := r.Register(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sync(ctx, r.ids["Old"], []Entry{{Name: "Old News", URL: "https://s.example/old.m3u8"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Channels(ctx, true); names(got) != "New News,Old News" {
+		t.Fatalf("Old listed again: %q", names(got))
+	}
+}
+
 func TestWithoutTheGrantNothingIsListed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
