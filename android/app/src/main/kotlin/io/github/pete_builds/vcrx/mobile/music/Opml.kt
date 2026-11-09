@@ -20,6 +20,9 @@ object Opml {
     /** The server reads at most 1 MB (and 100 feeds) from one file. */
     const val MAX_BYTES = 1024 * 1024
 
+    /** A UTF-8 file may start with this; written as its code so no editor or lint mistakes it for one. */
+    private val BYTE_ORDER_MARK = 0xFEFF.toChar()
+
     /** The export's suggested file name. */
     const val EXPORT_NAME = "vcrx-podcasts.opml"
 
@@ -45,7 +48,7 @@ object Opml {
     fun check(file: ByteArray): String? {
         if (file.isEmpty()) return "That file is empty."
         if (file.size > MAX_BYTES) return "That file is over 1 MB. An OPML file of podcasts is far smaller; check it is the right one."
-        val head = String(file, 0, minOf(file.size, 4096), Charsets.UTF_8).trimStart('﻿').lowercase()
+        val head = String(file, 0, minOf(file.size, 4096), Charsets.UTF_8).trimStart(BYTE_ORDER_MARK).lowercase()
         if ("<opml" !in head) return "That is not an OPML file. Export one from your podcast app's settings."
         return null
     }
