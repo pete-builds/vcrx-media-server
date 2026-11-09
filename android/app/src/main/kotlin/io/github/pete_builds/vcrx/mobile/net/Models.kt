@@ -56,6 +56,10 @@ data class User(
     @SerialName("live_tv") val liveTv: Boolean = false,
     /** From GET /me: "user", "profile" or "token". A token is an invited device, which streams but never downloads. */
     val kind: String = "",
+    /** From GET /me: podcasts are on and this session may use them (never an invited device). Absent (an older server): false. */
+    val podcasts: Boolean = false,
+    /** From GET /me: the server searches a podcast directory, so Add podcast offers search as well as a feed URL. */
+    @SerialName("podcast_search") val podcastSearch: Boolean = false,
 )
 
 @Serializable
