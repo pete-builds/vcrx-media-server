@@ -23,6 +23,20 @@ object DownloadEligibility {
     fun canDownload(item: Item, me: User?, invitedDevice: Boolean): Boolean =
         allowed(me, invitedDevice) && item.kind in VIDEO_KINDS && item.versions.isNotEmpty()
 
+    /**
+     * Whether a book gets a Download button: the whole-file route, which the
+     * server refuses an invited device (it plays a book only inside its own
+     * listen, streamed), and a book with files to fetch.
+     */
+    fun canDownloadBook(fileCount: Int, me: User?, invitedDevice: Boolean): Boolean = allowed(me, invitedDevice) && fileCount > 0
+
+    /**
+     * Whether an episode gets a Download button. Podcasts are accounts only, so an
+     * invited device never sees one; the episode needs a stream to fetch.
+     */
+    fun canDownloadEpisode(streamUrl: String, me: User?, invitedDevice: Boolean): Boolean =
+        allowed(me, invitedDevice) && me?.podcasts == true && streamUrl.isNotEmpty()
+
     /** The version to keep: the first the server lists, which is the one Play picks by default. */
     fun versionToKeep(item: Item): Long? = item.versions.firstOrNull()?.id
 

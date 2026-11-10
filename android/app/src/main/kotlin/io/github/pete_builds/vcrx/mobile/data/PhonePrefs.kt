@@ -16,6 +16,16 @@ class PhonePrefs(context: Context) {
         get() = prefs.getBoolean(KEY_WIFI_ONLY, true)
         set(value) = prefs.edit().putBoolean(KEY_WIFI_ONLY, value).apply()
 
+    /** The speed books play at, kept between books as the TV does. */
+    var bookSpeed: Float
+        get() = prefs.getFloat(KEY_BOOK_SPEED, 1f)
+        set(value) = prefs.edit().putFloat(KEY_BOOK_SPEED, value).apply()
+
+    /** The speed podcast episodes play at, apart from books'. Music always plays at 1. */
+    var podcastSpeed: Float
+        get() = prefs.getFloat(KEY_PODCAST_SPEED, 1f)
+        set(value) = prefs.edit().putFloat(KEY_PODCAST_SPEED, value).apply()
+
     fun cachedMe(): User? = prefs.getString(KEY_ME, null)?.let { runCatching { ApiJson.decodeFromString(User.serializer(), it) }.getOrNull() }
 
     fun saveMe(user: User?) {
@@ -49,5 +59,7 @@ class PhonePrefs(context: Context) {
         const val KEY_ME = "me"
         const val KEY_LIBRARIES = "libraries"
         const val KEY_RECENT_ALBUMS = "recent_albums"
+        const val KEY_BOOK_SPEED = "book_speed"
+        const val KEY_PODCAST_SPEED = "podcast_speed"
     }
 }

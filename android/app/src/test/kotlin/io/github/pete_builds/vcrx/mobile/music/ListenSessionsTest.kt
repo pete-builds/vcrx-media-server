@@ -95,4 +95,24 @@ class ListenSessionsTest {
         assertEquals(listOf("listen-11", "listen-12"), s.drain().sorted())
         assertEquals(emptyList<String>(), s.drain())
     }
+
+    // An invited device plays a book only inside its own listen to each file (#156).
+    @Test
+    fun bookFilesGetTheirListenToo() {
+        val opened = mutableListOf<Long>()
+        val s = ListenSessions(ListenSessions.BOOK_FILES) { id ->
+            opened += id
+            OpenListen("book-$id", 10_000)
+        }.apply { enabled = true }
+        assertEquals("$base/api/v1/audiobooks/files/5/file?session=book-5", s.resolve("$base/api/v1/audiobooks/files/5/file"))
+        assertEquals(
+            "$base/api/v1/audiobooks/files/6/stream?codec=aac&start_ms=3000&session=book-6",
+            s.resolve("$base/api/v1/audiobooks/files/6/stream?codec=aac&start_ms=3000"),
+        )
+        // Covers, the listen route itself and music tracks are not book files.
+        assertEquals("$base/api/v1/audiobooks/books/2/cover?width=480", s.resolve("$base/api/v1/audiobooks/books/2/cover?width=480"))
+        assertNull(s.fileId("$base/api/v1/audiobooks/files/5/sessions"))
+        assertEquals(queue[0], s.resolve(queue[0]))
+        assertEquals(listOf(5L, 6L), opened)
+    }
 }

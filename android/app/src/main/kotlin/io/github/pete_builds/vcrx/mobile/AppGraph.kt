@@ -19,6 +19,7 @@ import io.github.pete_builds.vcrx.mobile.net.ServerApi
 import io.github.pete_builds.vcrx.mobile.net.User
 import io.github.pete_builds.vcrx.mobile.offline.DownloadEligibility
 import io.github.pete_builds.vcrx.mobile.offline.Downloads
+import io.github.pete_builds.vcrx.mobile.offline.OfflineAudioStore
 import io.github.pete_builds.vcrx.mobile.offline.OfflineStore
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -83,6 +84,9 @@ class AppGraph(private val context: Context) {
 
     val offline = OfflineStore(context)
 
+    /** Downloaded books and episodes, and the place in each, for playing and saving with no server. */
+    val offlineAudio = OfflineAudioStore(context)
+
     val downloads: Downloads by lazy { Downloads(context, this) }
 
     /** What this phone decodes, probed once. The server picks direct play or a converted stream from it. */
@@ -90,17 +94,12 @@ class AppGraph(private val context: Context) {
 
     fun canDownload(): Boolean = DownloadEligibility.allowed(me.value, tokens.isInvitedDevice)
 
-    /** What the server offers this session, for the bottom bar and Android Auto's root. */
-    fun features(): Features = Features(
-        music = libraries.value.any { it.kind == "music" },
-        // Audiobooks and podcasts stay off until the phone has their screens and
-        // Auto nodes, which follow once those server APIs are on main: an empty tab
-        // in the car is worse than none. The browse tree already places them
-        // (BrowseTreeTest); the follow-up sets these from the library kinds.
-        audiobooks = false,
-        podcasts = false,
-        hasDownloads = true,
-    )
+    /**
+     * What the server offers this session, for the navigation and Android Auto's
+     * root: music and audiobook libraries from /libraries, podcasts from /me (never
+     * on an invited device). An older server reports neither, so both stay hidden.
+     */
+    fun features(): Features = Features.of(libraries.value, me.value, tokens.isInvitedDevice)
 
     /**
      * Asks the server who this is. Unreachable marks the app offline; any answer
@@ -118,6 +117,7 @@ class AppGraph(private val context: Context) {
                 prefs.saveLibraries(it)
             }
             offline.sync(api, capabilities)
+            offlineAudio.sync(api)
             true
         } catch (e: ApiException.Unreachable) {
             onlineState.value = false

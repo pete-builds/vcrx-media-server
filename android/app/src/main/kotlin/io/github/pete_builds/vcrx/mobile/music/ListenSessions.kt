@@ -82,6 +82,13 @@ class ListenSessions(private val pattern: Regex, private val openListen: suspend
         /** Music track files and streams: /api/v1/music/tracks/{id}/file and /stream. */
         val TRACKS = Regex("/api/v1/music/tracks/(\\d+)/(?:file|stream)")
 
+        /**
+         * Audiobook files and streams: /api/v1/audiobooks/files/{id}/file and /stream.
+         * An invited device plays a book only inside its own listen to each file,
+         * as for music (server/internal/api/invites.go, streamOnly).
+         */
+        val BOOK_FILES = Regex("/api/v1/audiobooks/files/(\\d+)/(?:file|stream)")
+
         private val SESSION = Regex("[?&]session=")
 
         fun hasSession(url: String): Boolean = SESSION.containsMatchIn(url)

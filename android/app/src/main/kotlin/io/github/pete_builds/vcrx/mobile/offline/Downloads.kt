@@ -20,8 +20,10 @@ import androidx.media3.exoplayer.offline.DownloadService
 import androidx.media3.exoplayer.scheduler.Requirements
 import io.github.pete_builds.vcrx.mobile.AppGraph
 import io.github.pete_builds.vcrx.mobile.net.ApiJson
+import io.github.pete_builds.vcrx.mobile.net.AudiobookDetail
 import io.github.pete_builds.vcrx.mobile.net.Item
 import io.github.pete_builds.vcrx.mobile.net.MusicAlbumDetail
+import io.github.pete_builds.vcrx.mobile.net.PodcastEpisode
 import java.io.File
 import java.util.concurrent.Executors
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +37,7 @@ import kotlinx.serialization.Serializable
 /** What a download is, kept in the download request's data so the Downloads screen works offline. */
 @Serializable
 data class DownloadMeta(
-    /** "video" or "track". */
+    /** "video", "track", "book_file" or "episode". */
     val kind: String,
     @SerialName("item_id") val itemId: Long = 0,
     @SerialName("version_id") val versionId: Long = 0,
@@ -45,10 +47,18 @@ data class DownloadMeta(
     val subtitle: String = "",
     @SerialName("duration_ms") val durationMs: Long? = null,
     @SerialName("resume_ms") val resumeMs: Long? = null,
+    @SerialName("book_id") val bookId: Long = 0,
+    @SerialName("file_id") val fileId: Long = 0,
+    @SerialName("episode_id") val episodeId: Long = 0,
+    @SerialName("podcast_id") val podcastId: Long = 0,
 ) {
     companion object {
         const val VIDEO = "video"
         const val TRACK = "track"
+
+        /** One file of an audiobook; the Downloads screen shows a book's files as one row. */
+        const val BOOK_FILE = "book_file"
+        const val EPISODE = "episode"
     }
 }
 
@@ -196,6 +206,52 @@ class Downloads(private val context: Context, private val graph: AppGraph) {
             add(DownloadKeys.track(t.id), DownloadKeys.trackPath(t.id), meta)
         }
         saveArt(ArtStore.ALBUM, album.id, graph.api.absoluteUrl("/api/v1/music/albums/${album.id}/cover?width=480"))
+    }
+
+    /**
+     * Keeps a whole audiobook: every file, its cover, and its files and chapters
+     * ([OfflineAudioStore]), so it plays, skips chapters and saves its place offline.
+     */
+    fun addBook(book: AudiobookDetail) {
+        graph.offlineAudio.saveBook(book)
+        book.files.forEach { f ->
+            val meta = DownloadMeta(
+                kind = DownloadMeta.BOOK_FILE,
+                bookId = book.id,
+                fileId = f.id,
+                title = book.title,
+                subtitle = book.author,
+                durationMs = (f.durationS * 1000).toLong(),
+            )
+            add(DownloadKeys.bookFile(f.id), DownloadKeys.bookFilePath(f.id), meta)
+        }
+        if (book.hasCover) saveArt(ArtStore.BOOK, book.id, graph.api.absoluteUrl("/api/v1/audiobooks/books/${book.id}/cover?width=480"))
+    }
+
+    /** Deletes every file of a book from the phone. */
+    fun removeBook(bookId: Long) {
+        entries.value.filter { it.meta.kind == DownloadMeta.BOOK_FILE && it.meta.bookId == bookId }.forEach { remove(it.id) }
+        graph.offlineAudio.forgetBook(bookId)
+    }
+
+    /** Keeps a podcast episode: the whole file through the server, and its artwork. */
+    fun addEpisode(episode: PodcastEpisode) {
+        graph.offlineAudio.saveEpisode(episode)
+        val meta = DownloadMeta(
+            kind = DownloadMeta.EPISODE,
+            episodeId = episode.id,
+            podcastId = episode.podcastId,
+            title = episode.title,
+            subtitle = episode.podcastTitle,
+            durationMs = episode.durationSeconds?.let { it * 1000 },
+        )
+        add(DownloadKeys.episode(episode.id), DownloadKeys.episodePath(episode.id), meta)
+        saveArt(ArtStore.EPISODE, episode.id, graph.api.absoluteUrl("/api/v1/podcasts/episodes/${episode.id}/artwork"))
+    }
+
+    fun removeEpisode(episodeId: Long) {
+        remove(DownloadKeys.episode(episodeId))
+        graph.offlineAudio.forgetEpisode(episodeId)
     }
 
     private fun add(key: String, path: String, meta: DownloadMeta) {

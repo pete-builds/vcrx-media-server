@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -18,8 +19,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -55,6 +59,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.github.pete_builds.vcrx.mobile.R
+import io.github.pete_builds.vcrx.mobile.auto.Features
 import io.github.pete_builds.vcrx.mobile.graph
 
 class MainActivity : ComponentActivity() {
@@ -88,6 +93,9 @@ private object Routes {
     const val LIBRARIES = "libraries"
     const val MUSIC = "music"
     const val IPTV = "iptv"
+    const val AUDIOBOOKS = "audiobooks"
+    const val PODCASTS = "podcasts"
+    const val PODCAST_ADD = "podcasts/add"
     const val DOWNLOADS = "downloads"
     const val SETTINGS = "settings"
     const val NOW_PLAYING = "now"
@@ -151,16 +159,24 @@ private fun App(openRequest: String?, consumed: () -> Unit) {
         }
     }
 
+    // Audiobooks and podcasts show only when the server reports them: an
+    // audiobook library in /libraries, podcasts in /me (never an invited device).
+    val features = Features.of(libraries, me, graph.tokens.isInvitedDevice)
     val tabs = buildList {
         add(Tab(Routes.HOME, "Home") { rememberVectorPainter(Icons.Filled.Home) })
         add(Tab(Routes.SEARCH, "Search") { rememberVectorPainter(Icons.Filled.Search) })
         add(Tab(Routes.LIBRARIES, "Library") { painterResource(R.drawable.ic_library) })
-        if (libraries.any { it.kind == "music" }) add(Tab(Routes.MUSIC, "Music") { painterResource(R.drawable.ic_music) })
+        if (features.music) add(Tab(Routes.MUSIC, "Music") { painterResource(R.drawable.ic_music) })
+        if (features.audiobooks) add(Tab(Routes.AUDIOBOOKS, "Audiobooks") { painterResource(R.drawable.ic_book) })
+        if (features.podcasts) add(Tab(Routes.PODCASTS, "Podcasts") { painterResource(R.drawable.ic_podcast) })
         if (me?.liveTv == true && online) add(Tab(Routes.IPTV, "IPTV") { painterResource(R.drawable.ic_iptv) })
         add(Tab(Routes.DOWNLOADS, "Downloads") { painterResource(R.drawable.ic_download) })
     }
     val topLevel = tabs.any { it.route == route }
     val wide = LocalConfiguration.current.screenWidthDp >= 600
+    val (barRoutes, moreRoutes) = NavTabs.split(tabs.map { it.route })
+    var moreOpen by remember { mutableStateOf(false) }
+    val openPlaying = { nav.navigate(Routes.NOW_PLAYING) }
 
     Scaffold(
         topBar = {
@@ -183,14 +199,42 @@ private fun App(openRequest: String?, consumed: () -> Unit) {
                     if (remote != null && now != null && route != Routes.NOW_PLAYING) MiniPlayer(remote, now) { nav.navigate(Routes.NOW_PLAYING) }
                     if (!wide) {
                         NavigationBar(containerColor = Brand.Black) {
-                            tabs.forEach { t ->
-                                NavigationBarItem(
-                                    selected = route == t.route,
-                                    onClick = { nav.tab(t.route) },
-                                    icon = { Icon(t.icon(), null) },
-                                    label = { Text(t.label) },
-                                    colors = NavigationBarItemDefaults.colors(indicatorColor = Brand.Tint, selectedIconColor = Brand.Green),
-                                )
+                            barRoutes.forEach { r ->
+                                val t = tabs.firstOrNull { it.route == r }
+                                if (t != null) {
+                                    NavigationBarItem(
+                                        selected = route == t.route,
+                                        onClick = { nav.tab(t.route) },
+                                        icon = { Icon(t.icon(), null) },
+                                        label = { Text(t.label) },
+                                        colors = NavigationBarItemDefaults.colors(indicatorColor = Brand.Tint, selectedIconColor = Brand.Green),
+                                    )
+                                } else {
+                                    // More: the destinations a phone's bar has no room for.
+                                    NavigationBarItem(
+                                        selected = route in moreRoutes,
+                                        onClick = { moreOpen = true },
+                                        icon = {
+                                            Box {
+                                                Icon(Icons.Filled.MoreVert, null)
+                                                DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                                                    tabs.filter { it.route in moreRoutes }.forEach { m ->
+                                                        DropdownMenuItem(
+                                                            text = { Text(m.label) },
+                                                            leadingIcon = { Icon(m.icon(), null) },
+                                                            onClick = {
+                                                                moreOpen = false
+                                                                nav.tab(m.route)
+                                                            },
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        label = { Text("More") },
+                                        colors = NavigationBarItemDefaults.colors(indicatorColor = Brand.Tint, selectedIconColor = Brand.Green),
+                                    )
+                                }
                             }
                         }
                     }
@@ -233,7 +277,13 @@ private fun App(openRequest: String?, consumed: () -> Unit) {
                 composable(Routes.SEARCH) { SearchScreen(onItem = { nav.navigate("item/$it") }) }
                 composable(Routes.LIBRARIES) {
                     var other by remember { mutableStateOf<String?>(null) }
-                    LibrariesScreen(onLibrary = { id, _ -> nav.navigate("library/$id") }, onMusic = { nav.tab(Routes.MUSIC) }, onOther = { other = it })
+                    LibrariesScreen(
+                        onLibrary = { id, _ -> nav.navigate("library/$id") },
+                        onMusic = { nav.tab(Routes.MUSIC) },
+                        onAudiobooks = { nav.tab(Routes.AUDIOBOOKS) },
+                        onPodcasts = if (features.podcasts) ({ nav.tab(Routes.PODCASTS) }) else null,
+                        onOther = { other = it },
+                    )
                     other?.let { name ->
                         androidx.compose.material3.AlertDialog(
                             onDismissRequest = { other = null },
@@ -245,6 +295,22 @@ private fun App(openRequest: String?, consumed: () -> Unit) {
                 }
                 composable(Routes.MUSIC) { MusicScreen(onAlbum = { nav.navigate("album/$it") }, onArtist = { nav.navigate("artist/$it") }) }
                 composable(Routes.IPTV) { IptvScreen() }
+                composable(Routes.AUDIOBOOKS) { AudiobooksScreen(onBook = { nav.navigate("book/$it") }) }
+                composable(Routes.PODCASTS) {
+                    PodcastsScreen(onShow = { nav.navigate("show/$it") }, onAdd = { nav.navigate(Routes.PODCAST_ADD) }, remote = remote, onPlaying = openPlaying)
+                }
+                composable(Routes.PODCAST_ADD) {
+                    AddPodcastScreen(onAdded = { id ->
+                        nav.popBackStack()
+                        nav.navigate("show/$id")
+                    })
+                }
+                composable("book/{id}", listOf(navArgument("id") { type = NavType.LongType })) {
+                    BookScreen(it.arguments?.getLong("id") ?: 0, remote, onPlaying = openPlaying)
+                }
+                composable("show/{id}", listOf(navArgument("id") { type = NavType.LongType })) {
+                    ShowScreen(it.arguments?.getLong("id") ?: 0, remote, onPlaying = openPlaying, onGone = { nav.popBackStack() })
+                }
                 composable(Routes.DOWNLOADS) { DownloadsScreen(remote) }
                 composable(Routes.SETTINGS) { SettingsScreen(onSwitchProfile = { nav.navigate(Routes.PROFILES) }, onSignedOut = { nav.reset(Routes.LOGIN) }) }
                 composable(Routes.NOW_PLAYING) { NowPlayingScreen(remote) }
@@ -268,5 +334,6 @@ private fun App(openRequest: String?, consumed: () -> Unit) {
 private fun titleFor(route: String?, tabs: List<Tab>): String = when (route) {
     Routes.SETTINGS -> "Settings"
     Routes.NOW_PLAYING -> "Now playing"
+    Routes.PODCAST_ADD -> "Add a podcast"
     else -> tabs.firstOrNull { it.route == route }?.label ?: ""
 }

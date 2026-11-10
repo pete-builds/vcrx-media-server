@@ -11,7 +11,7 @@ import io.github.pete_builds.vcrx.mobile.offline.ArtStore
 import java.io.FileNotFoundException
 
 /**
- * Serves album covers and artist pictures to Android Auto and the media
+ * Serves album covers, artist pictures, book covers and podcast artwork to Android Auto and the media
  * notification as content URIs. Auto loads artwork in its own process, where
  * the server's bearer token is not, so it cannot fetch the http URLs itself:
  * this provider fetches them with the app's client (or reads the copy kept for
@@ -34,6 +34,9 @@ class ArtworkProvider : ContentProvider() {
                 ArtStore.ALBUM -> graph.api.absoluteUrl("/api/v1/music/albums/$id/cover?width=$SIZE")
                 ArtStore.ARTIST -> graph.api.absoluteUrl("/api/v1/music/artists/$id/image?width=$SIZE")
                 ArtStore.ITEM -> graph.api.artworkUrl(id, "poster", SIZE)
+                ArtStore.BOOK -> graph.api.absoluteUrl("/api/v1/audiobooks/books/$id/cover?width=$SIZE")
+                ArtStore.PODCAST -> graph.api.absoluteUrl("/api/v1/podcasts/shows/$id/artwork")
+                ArtStore.EPISODE -> graph.api.absoluteUrl("/api/v1/podcasts/episodes/$id/artwork")
                 else -> null
             } ?: throw FileNotFoundException("no server")
             ArtStore.fetch(ctx, graph.httpClient, kind, id, url, keep = false)
