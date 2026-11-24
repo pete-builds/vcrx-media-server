@@ -1,6 +1,6 @@
 module github.com/pete-builds/vcrx-media-server/server
 
-go 1.26.10
+go 1.26.11
 
 require (
 	go.yaml.in/yaml/v3 v3.0.5

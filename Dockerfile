@@ -2,7 +2,7 @@
 #   docker build -t vcrx-media-server .
 # Runtime is Debian with vanilla FFmpeg from the Debian archive.
 
-FROM golang:1.26-trixie@sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42 AS build
+FROM golang:1.26-trixie@sha256:5b84eb2e384a72edcde80ff00651b4236c44313cee5df7246c53d0d030aa8f5e AS build
 WORKDIR /src
 COPY server/go.mod server/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
