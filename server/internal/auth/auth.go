@@ -24,6 +24,8 @@ var (
 	ErrInvalidCredentials = errors.New("invalid username or password")
 	ErrInvalidToken       = errors.New("invalid or expired token")
 	ErrUsernameTaken      = errors.New("username already exists")
+	// ErrSetupDone is CreateFirstAdmin on a server that already has an account.
+	ErrSetupDone = errors.New("this server is already set up")
 )
 
 // OWASP's argon2id baseline: 19 MiB, 2 iterations, 1 lane.
@@ -218,6 +220,40 @@ func (s *Store) SetPassword(ctx context.Context, userID int64, password string) 
 		return err
 	}
 	return tx.Commit()
+}
+
+// CreateFirstAdmin adds the server's first account, an admin, but only while
+// no account of any kind exists. The check and the insert are one statement,
+// so two setup screens racing cannot both create an admin: the loser gets
+// ErrSetupDone, as does every call once any account exists.
+func (s *Store) CreateFirstAdmin(ctx context.Context, username, password, displayName string) (User, error) {
+	if err := ValidateUsername(username); err != nil {
+		return User{}, err
+	}
+	if err := ValidatePassword(password); err != nil {
+		return User{}, err
+	}
+	hash, err := HashPassword(password)
+	if err != nil {
+		return User{}, err
+	}
+	now := db.NowMs()
+	var dn any
+	if displayName != "" {
+		dn = displayName
+	}
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO users (username, display_name, password_hash, is_admin, household, created_at, updated_at)
+		SELECT ?, ?, ?, 1, 1, ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)`, username, dn, hash, now, now)
+	if err != nil {
+		return User{}, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return User{}, err
+	} else if n == 0 {
+		return User{}, ErrSetupDone
+	}
+	id, _ := res.LastInsertId()
+	return User{ID: id, Username: username, DisplayName: displayName, IsAdmin: true, CreatedAt: now}, nil
 }
 
 func (s *Store) CountUsers(ctx context.Context) (int, error) {

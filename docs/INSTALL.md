@@ -12,9 +12,10 @@ cp .env.example .env                       # set VCRX_MOVIES_DIR and VCRX_TV_DIR
 mkdir -p data/config data/cache
 cp vcrx.example.yaml data/config/vcrx.yaml # declares the Movies and TV libraries
 docker compose up -d --build
-docker compose exec vcrx vcrx user add -username you -admin
 docker compose logs -f vcrx                # watch the first scan
 ```
+
+Then open `http://<server-ip>:3750/` from a device on the same network and create the admin account on the **Set up** screen. It appears only while the server has no account, and only to the local network (loopback, private and link-local addresses; a client behind `trusted_proxies` counts by its forwarded address), so a server reachable from the internet before setup cannot be claimed from outside. `remote_admin` does not widen it. From afar, or without a browser, use the CLI instead: `docker compose exec vcrx vcrx user add -username you -admin`.
 
 The container runs as `VCRX_UID:VCRX_GID` (1000 by default), which must be able to read the media and write `data/`. Media is mounted read-only. The server listens on port 3750 on the host's network.
 
