@@ -14,12 +14,13 @@ Each one is a sentence an owner can check by using the app. One per session, fin
 
 1. **First-run setup.** Opening a brand-new server in a browser on its own network shows Set up, which creates the admin and lands in Settings, Libraries, signed in; from the internet, or once any account exists, it never appears. *Built 2026-11-24 (`server/internal/api/setup.go`, `scripts/setup-smoke.sh`).*
 2. **Add a library in the web app.** An admin adds Movies, TV, Music or Audiobooks by choosing a folder under the mounted media, and the first scan starts; no YAML edit.
-3. **The TV and phone find the server.** On a new install the apps list VCRX servers on the home network (mDNS, `_vcrx._tcp`) and connect with one press; typing an address stays as the fallback.
-4. **Self-service account.** A signed-in person changes their own password and sees and signs out their own devices, in the web app and both apps.
-5. **Away from home, the easy way.** Settings shows whether the server is reachable over Tailscale and walks an owner through it; the store listing and README say what works where.
-6. **Store build.** CI builds signed Android App Bundles for the TV and phone apps; a privacy policy page is published; store artwork and screenshots come from the brand kit.
-7. **Reviewer demo server.** A small public server holding only public-domain films, with a demo account for Google's reviewers, kept separate from any real library.
-8. **Google Play.** Internal test, then closed test, then production, for both apps.
+3. **Add an IPTV provider in the web app.** An admin pastes a playlist (M3U) link or file path and an optional guide (XMLTV), sets the provider's connection limit, and the channels and guide load without a restart; providers can be edited and removed the same way. A link with a password in it is stored on the server and never shown back in full. Sources already in `vcrx.yaml` keep working. Added 2026-11-24.
+4. **The TV and phone find the server.** On a new install the apps list VCRX servers on the home network (mDNS, `_vcrx._tcp`) and connect with one press; typing an address stays as the fallback.
+5. **Self-service account.** A signed-in person changes their own password and sees and signs out their own devices, in the web app and both apps.
+6. **Away from home, the easy way.** Settings shows whether the server is reachable over Tailscale and walks an owner through it; the store listing and README say what works where.
+7. **Store build.** CI builds signed Android App Bundles for the TV and phone apps; a privacy policy page is published; store artwork and screenshots come from the brand kit.
+8. **Reviewer demo server.** A small public server holding only public-domain films, with a demo account for Google's reviewers, kept separate from any real library.
+9. **Google Play.** Internal test, then closed test, then production, for both apps.
 
 ## Store notes
 
