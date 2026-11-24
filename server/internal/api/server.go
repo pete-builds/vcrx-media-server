@@ -114,6 +114,7 @@ type Server struct {
 	// setupDone is set once the server is known to have an account, so the
 	// first-run checks stop asking the database. It is never cleared.
 	setupDone atomic.Bool
+	setupMu   sync.Mutex
 	// Invites are invited devices (the invite is the account); Pairings are
 	// TVs waiting for a phone to approve them. PairLimiter counts pairing
 	// starts, polls with unknown codes, and wrong codes typed by an admin.

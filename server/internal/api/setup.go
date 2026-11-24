@@ -45,9 +45,14 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if req.Cookie && r.Header.Get(csrfHeader) == "" {
-		// As for /auth/login: a cross-site post must not plant a session cookie.
-		writeError(w, http.StatusForbidden, "csrf", "Missing the "+csrfHeader+" header.")
+	// Always the client header, not only when a cookie is asked for: setup
+	// needs no credential, so a page on any site a LAN browser visits could
+	// otherwise post a CORS "simple" request here from that browser's LAN
+	// address and make an admin with a password it chose. A cross-site page
+	// cannot add a custom header without a preflight this server never
+	// grants, and browsers that send Sec-Fetch-Site are refused outright.
+	if r.Header.Get(csrfHeader) == "" || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		writeError(w, http.StatusForbidden, "csrf", "Set up from the VCRX web app.")
 		return
 	}
 	ip := info(r).IP
@@ -55,6 +60,10 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "lan_only", "Set up a new server from its local network.")
 		return
 	}
+	// One setup at a time: each hashes a password (19 MiB of argon2id) before
+	// its insert, and after the first wins the rest answer 409 from the flag.
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
 	if s.setupDone.Load() {
 		writeError(w, http.StatusConflict, "setup_done", "This server is already set up. Sign in instead.")
 		return

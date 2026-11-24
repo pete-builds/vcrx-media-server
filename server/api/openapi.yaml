@@ -89,8 +89,10 @@ paths:
       summary: >-
         First-run setup: create the server's first account, an admin, and sign this client in as it.
         Open only while the server has no account of any kind and only to a client on the local
-        network (403 lan_only otherwise; remote_admin does not widen it). Once any account exists it
-        answers 409 setup_done. GET /api/v1/server says setup_needed when this would work from here.
+        network (403 lan_only otherwise; remote_admin does not widen it). Always needs the X-VCRX-Client
+        header, and a request marked Sec-Fetch-Site cross-site is refused (403 csrf), so another site's
+        page cannot set up a server through a LAN browser. Once any account exists it answers 409
+        setup_done. GET /api/v1/server says setup_needed when this would work from here.
       security: []
       requestBody:
         required: true
@@ -3491,7 +3493,7 @@ components:
         password: { type: string, minLength: 8 }
         display_name: { type: string }
         device: { $ref: "#/components/schemas/Device" }
-        cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers. Needs the X-VCRX-Client header (403 csrf without it)." }
+        cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers." }
     LoginRequest:
       type: object
       required: [username, password, device]

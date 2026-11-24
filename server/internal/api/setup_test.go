@@ -24,6 +24,12 @@ func setupBody(user, pass string) map[string]any {
 		"device": map[string]string{"id": "web-setup", "name": "Chrome on Linux", "platform": "web", "client": "VCRX Web", "client_version": "1.0.0"}}
 }
 
+// setup posts to /api/v1/setup as the web app does, with its client header.
+func (f *fixture) setup(body any, hdr ...string) resp {
+	f.t.Helper()
+	return f.do("POST", "/api/v1/setup", "", body, append([]string{csrfHeader, "web"}, hdr...)...)
+}
+
 func (f *fixture) countUsers() int {
 	f.t.Helper()
 	var n int
@@ -40,13 +46,13 @@ func TestSetupCreatesFirstAdminOnce(t *testing.T) {
 		t.Fatalf("a new server on the LAN must offer setup: %s", r.body)
 	}
 	// Validation failures create nothing and leave setup open.
-	if r := f.do("POST", "/api/v1/setup", "", setupBody("owner", "short")); r.code != 400 {
+	if r := f.setup(setupBody("owner", "short")); r.code != 400 {
 		t.Fatalf("short password: %d %s", r.code, r.body)
 	}
 	if n := f.countUsers(); n != 0 {
 		t.Fatalf("a refused setup created %d accounts", n)
 	}
-	r := f.do("POST", "/api/v1/setup", "", setupBody("owner", "ownerpass1"))
+	r := f.setup(setupBody("owner", "ownerpass1"))
 	if r.code != 200 {
 		t.Fatalf("setup: %d %s", r.code, r.body)
 	}
@@ -70,7 +76,7 @@ func TestSetupCreatesFirstAdminOnce(t *testing.T) {
 	if r := f.do("GET", "/api/v1/server", "", nil); !strings.Contains(string(r.body), `"setup_needed":false`) {
 		t.Fatalf("setup still offered after it ran: %s", r.body)
 	}
-	if r := f.do("POST", "/api/v1/setup", "", setupBody("intruder", "intruderpass1")); r.code != 409 {
+	if r := f.setup(setupBody("intruder", "intruderpass1")); r.code != 409 {
 		t.Fatalf("second setup: %d %s", r.code, r.body)
 	}
 	if n := f.countUsers(); n != 1 {
@@ -88,7 +94,7 @@ func TestSetupClosedWhenAccountsExist(t *testing.T) {
 		t.Fatalf("setup offered on a server with accounts: %s", r.body)
 	}
 	f.srv.setupDone.Store(false) // as if freshly started
-	if r := f.do("POST", "/api/v1/setup", "", setupBody("intruder", "intruderpass1")); r.code != 409 {
+	if r := f.setup(setupBody("intruder", "intruderpass1")); r.code != 409 {
 		t.Fatalf("setup on a server with accounts: %d %s", r.code, r.body)
 	}
 	if n := f.countUsers(); n != before {
@@ -116,7 +122,7 @@ func TestSetupRefusedOffTheLAN(t *testing.T) {
 		if r := f.do("GET", "/api/v1/server", "", nil, c.hdr...); !strings.Contains(string(r.body), `"setup_needed":false`) {
 			t.Errorf("%s: setup offered: %s", c.name, r.body)
 		}
-		if r := f.do("POST", "/api/v1/setup", "", setupBody("intruder", "intruderpass1"), c.hdr...); r.code != 403 {
+		if r := f.setup(setupBody("intruder", "intruderpass1"), c.hdr...); r.code != 403 {
 			t.Errorf("%s: setup answered %d %s", c.name, r.code, r.body)
 		}
 	}
@@ -124,7 +130,7 @@ func TestSetupRefusedOffTheLAN(t *testing.T) {
 		t.Fatalf("off-LAN setup created %d accounts", n)
 	}
 	// Control: the same trusted proxy forwarding a LAN client may set up.
-	if r := f.do("POST", "/api/v1/setup", "", setupBody("owner", "ownerpass1"), "RemoteAddr", "127.0.0.2:1", "X-Forwarded-For", "192.168.1.50"); r.code != 200 {
+	if r := f.setup(setupBody("owner", "ownerpass1"), "RemoteAddr", "127.0.0.2:1", "X-Forwarded-For", "192.168.1.50"); r.code != 200 {
 		t.Fatalf("LAN client through the trusted proxy: %d %s", r.code, r.body)
 	}
 }
@@ -140,7 +146,7 @@ func TestSetupRace(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			codes[i] = f.do("POST", "/api/v1/setup", "", setupBody("owner"+string(rune('a'+i)), "ownerpass1")).code
+			codes[i] = f.setup(setupBody("owner"+string(rune('a'+i)), "ownerpass1")).code
 		}()
 	}
 	wg.Wait()
@@ -159,18 +165,34 @@ func TestSetupRace(t *testing.T) {
 	}
 }
 
-// A cookie session from setup needs the client header, as sign-in does, so a
-// cross-site form cannot plant one.
-func TestSetupCookieNeedsCSRFHeader(t *testing.T) {
+// Setup needs no credential, so it must not be reachable from another site's
+// page through a LAN browser: a CORS "simple" POST (text/plain, no custom
+// header) from that browser's LAN address is refused, cookie or not, and so
+// is anything the browser marks cross-site. The reviewer's reproduction of
+// this made an admin before the header was required on every request.
+func TestSetupRefusesCrossSite(t *testing.T) {
 	t.Parallel()
 	f := newEmptyFixture(t)
+	simple := f.do("POST", "/api/v1/setup", "", setupBody("attacker", "attackerpass1"),
+		"Content-Type", "text/plain", "Origin", "https://evil.example", "Sec-Fetch-Site", "cross-site",
+		"Host", "192.168.1.10:3750", "RemoteAddr", "192.168.1.23:5000")
+	if simple.code != 403 {
+		t.Fatalf("cross-site simple POST: %d %s", simple.code, simple.body)
+	}
+	if r := f.do("POST", "/api/v1/setup", "", setupBody("attacker", "attackerpass1")); r.code != 403 {
+		t.Fatalf("setup without the client header: %d %s", r.code, r.body)
+	}
+	if r := f.setup(setupBody("attacker", "attackerpass1"), "Sec-Fetch-Site", "cross-site"); r.code != 403 {
+		t.Fatalf("setup marked cross-site: %d %s", r.code, r.body)
+	}
+	if n := f.countUsers(); n != 0 {
+		t.Fatalf("refused setups created %d accounts", n)
+	}
+	// Control: the web app's own request, same-origin, works.
 	body := setupBody("owner", "ownerpass1")
 	body["cookie"] = true
-	if r := f.do("POST", "/api/v1/setup", "", body); r.code != 403 {
-		t.Fatalf("cookie setup without the header: %d %s", r.code, r.body)
-	}
-	r := f.do("POST", "/api/v1/setup", "", body, csrfHeader, "web")
+	r := f.setup(body, "Sec-Fetch-Site", "same-origin")
 	if r.code != 200 || !strings.Contains(r.hdr.Get("Set-Cookie"), "=") {
-		t.Fatalf("cookie setup with the header: %d %s %q", r.code, r.body, r.hdr.Get("Set-Cookie"))
+		t.Fatalf("web app setup: %d %s %q", r.code, r.body, r.hdr.Get("Set-Cookie"))
 	}
 }

@@ -9,7 +9,10 @@ dir="$(mktemp -d "${TMPDIR:-/tmp}/vcrx-setup-XXXXXX")"
 pid=""
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 cleanup() {
-  if [ -n "$pid" ]; then kill "$pid" 2> /dev/null || true; fi
+  if [ -n "$pid" ]; then
+    kill "$pid" 2> /dev/null || true
+    wait "$pid" 2> /dev/null || true
+  fi
   rm -rf "$dir"
 }
 trap cleanup EXIT
