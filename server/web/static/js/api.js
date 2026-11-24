@@ -69,6 +69,11 @@ export async function signIn(username, password) {
   return api("/auth/login", { method: "POST", body: { username, password, device: device(), cookie: true } });
 }
 
+// setUp makes a new server's first admin and signs this browser in as them.
+export async function setUp(username, password, displayName) {
+  return api("/setup", { method: "POST", body: { username, password, display_name: displayName, device: device(), cookie: true } });
+}
+
 export async function signOut() {
   await api("/auth/logout", { method: "POST" });
 }

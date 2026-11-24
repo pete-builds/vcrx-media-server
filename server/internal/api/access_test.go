@@ -56,6 +56,7 @@ var publicRoutes = map[string]string{
 	"GET /api/v1/server":       "server name and version",
 	"POST /api/v1/auth/login":  "sign-in",
 	"POST /api/v1/auth/auto":   "trusted-network sign-in",
+	"POST /api/v1/setup":       "first-run setup: makes the first admin while no account exists, LAN only; TestSetup* cover it, no titles",
 	"POST /api/v1/hooks/arr":   "Radarr and Sonarr webhooks, token-guarded, start scans and return no titles",
 	// Invited devices: TestInvite* and TestPairing* cover each.
 	"POST /api/v1/invites/redeem": "spends an invite and signs the device in; returns its scope, no titles",

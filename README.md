@@ -59,11 +59,10 @@ cp .env.example .env                       # set VCRX_MOVIES_DIR and VCRX_TV_DIR
 mkdir -p data/config data/cache
 cp vcrx.example.yaml data/config/vcrx.yaml # declares the Movies and TV libraries
 docker compose up -d --build
-docker compose exec vcrx vcrx user add -username you -admin
 docker compose logs -f vcrx                # watch the first scan
 ```
 
-Then open `http://<server-ip>:3750/` in a browser and sign in. Your media is mounted read-only, so VCRX never changes it, and any other media server on the same host keeps running untouched.
+Then open `http://<server-ip>:3750/` in a browser on the same network. A new server opens on **Set up**: choose the admin's username and password, and you land in Settings, Libraries, signed in. Setup is offered only while the server has no account and only on its local network; once it has run, everyone gets the normal sign-in. Finish it before exposing the server to the internet. (No browser handy? `docker compose exec vcrx vcrx user add -username you -admin` does the same.) Your media is mounted read-only, so VCRX never changes it, and any other media server on the same host keeps running untouched.
 
 **On the TV:** build the APK with one command and sideload it with ADB, as [tv/README.md](tv/README.md) describes, then enter `http://<server-ip>:3750` and sign in.
 

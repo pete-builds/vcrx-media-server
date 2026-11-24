@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pete-builds/vcrx-media-server/server/internal/activity"
@@ -110,6 +111,10 @@ type Server struct {
 	// proxyWarned holds peers already logged for sending proxy headers
 	// without being in TrustedProxies (netip.Addr keys).
 	proxyWarned sync.Map
+	// setupDone is set once the server is known to have an account, so the
+	// first-run checks stop asking the database. It is never cleared.
+	setupDone atomic.Bool
+	setupMu   sync.Mutex
 	// Invites are invited devices (the invite is the account); Pairings are
 	// TVs waiting for a phone to approve them. PairLimiter counts pairing
 	// starts, polls with unknown codes, and wrong codes typed by an admin.
@@ -194,6 +199,7 @@ func (s *Server) Routes() []route {
 		{"GET", "/api/v1/server", public, s.serverInfo},
 		{"POST", "/api/v1/auth/login", public, s.login},
 		{"POST", "/api/v1/auth/auto", public, s.autoLogin},
+		{"POST", "/api/v1/setup", public, s.setup},
 		{"GET", "/api/v1/profiles", householdOnly, s.profiles},
 		{"GET", "/api/v1/profiles/{user_id}/avatar", householdOnly, s.profileAvatar},
 		{"POST", "/api/v1/auth/switch", householdOnly, s.switchProfile},

@@ -147,6 +147,8 @@ jobs:
         run: node scripts/web-smoke.mjs http://127.0.0.1:3751
         env:
           VCRX_SMOKE_PEER: http://127.0.0.1:3752
+      - name: First-run setup in headless Chrome
+        run: scripts/setup-smoke.sh
       - name: Server log
         if: failure()
         # -n: GNU tail refuses the bare -100 form once it is given two files.

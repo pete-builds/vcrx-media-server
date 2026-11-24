@@ -102,6 +102,9 @@ func (s *Server) serverInfo(w http.ResponseWriter, r *http.Request) {
 		"auto_sign_in": s.autoSignIn(info(r).IP), "trailers_youtube": s.TrailersYouTube,
 		// On a trusted network, show "Who's watching?" instead of auto sign-in.
 		"profile_picker": s.pickerOpen(info(r).IP),
+		// A new server with no account yet, asked from the local network:
+		// clients show first-run setup instead of sign-in.
+		"setup_needed": s.setupNeeded(r.Context(), info(r).IP),
 	})
 }
 

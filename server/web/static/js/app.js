@@ -14,6 +14,7 @@ import { playerView } from "./views/player.js";
 import { activityView } from "./views/activity.js";
 import { settingsView } from "./views/settings.js";
 import { loginView } from "./views/login.js";
+import { setupView } from "./views/setup.js";
 import { searchSuggest } from "./suggest.js";
 import { installShortcuts } from "./shortcuts.js";
 import { musicLibraryView, musicArtistView, musicAlbumView } from "./views/music.js";
@@ -43,6 +44,7 @@ const routes = [
   [/^\/activity(?:\/(now|history|stats|users|loans))?$/, () => activityView],
   [/^\/settings(?:\/(account|home|libraries|users|devices|friends|newsletter|markers))?$/, () => settingsView],
   [/^\/login$/, () => loginView],
+  [/^\/setup$/, () => setupView],
   [/^\/music\/(\d+)$/, () => musicLibraryView],
   [/^\/music\/artist\/(\d+)$/, () => musicArtistView],
   [/^\/music\/album\/(\d+)$/, () => musicAlbumView],
@@ -88,7 +90,7 @@ async function render() {
     go("/rewind");
     return;
   }
-  if (!state.me && path !== "/login" && path !== "/profiles" && path !== "/rewind" && !isInvite(path)) {
+  if (!state.me && path !== "/login" && path !== "/setup" && path !== "/profiles" && path !== "/rewind" && !isInvite(path)) {
     go(signInPath() + "?next=" + encodeURIComponent(path));
     return;
   }
@@ -328,6 +330,7 @@ function watchLoan() {
 // signInPath is where a signed-out browser goes: the "Who's watching?" picker
 // when the server shows one on this network, else the sign-in form.
 function signInPath() {
+  if (state.server && state.server.setup_needed) return "/setup";
   return state.server && state.server.profile_picker ? "/profiles" : "/login";
 }
 

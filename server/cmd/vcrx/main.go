@@ -520,7 +520,7 @@ func serve() error {
 		}
 	}()
 	if users, err := authStore.CountUsers(ctx); err == nil && users == 0 {
-		log.Warn("no users yet: create the admin with `docker compose exec vcrx vcrx user add -username <name> -admin`")
+		log.Warn("no users yet: open the web app from this server's local network to create the admin, or run `docker compose exec vcrx vcrx user add -username <name> -admin`")
 	}
 
 	if cfg.ScanOnStartup {

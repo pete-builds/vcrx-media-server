@@ -83,6 +83,25 @@ paths:
         "200": { description: Logged in, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } } }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/v1/setup:
+    post:
+      operationId: setup
+      summary: >-
+        First-run setup: create the server's first account, an admin, and sign this client in as it.
+        Open only while the server has no account of any kind and only to a client on the local
+        network (403 lan_only otherwise; remote_admin does not widen it). Always needs the X-VCRX-Client
+        header, and a request marked Sec-Fetch-Site cross-site is refused (403 csrf), so another site's
+        page cannot set up a server through a LAN browser. Once any account exists it answers 409
+        setup_done. GET /api/v1/server says setup_needed when this would work from here.
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SetupRequest" } } }
+      responses:
+        "200": { description: Admin created and signed in, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /api/v1/profiles:
     get:
       operationId: listProfiles
@@ -3448,6 +3467,7 @@ components:
         api_version: { type: integer, const: 1 }
         auto_sign_in: { type: boolean, description: "True when this client may sign in without a password (POST /api/v1/auth/auto)." }
         profile_picker: { type: boolean, description: "True when this client should show the profile picker (GET /api/v1/profiles, POST /api/v1/auth/switch) instead of signing in automatically; POST /api/v1/auth/auto then answers 409 choose_profile." }
+        setup_needed: { type: boolean, description: "True when the server has no account yet and this client is on its local network: show first-run setup (POST /api/v1/setup) instead of sign-in." }
         trailers_youtube: { type: boolean, description: "True when the admin turned on YouTube trailers (trailers_youtube, with a TMDb key): details may carry a trailer with source youtube." }
     AutoLoginRequest:
       type: object
@@ -3465,6 +3485,15 @@ components:
         platform: { type: string, example: android_tv }
         client: { type: string, example: vcrx-tv }
         client_version: { type: string, example: 0.1.0 }
+    SetupRequest:
+      type: object
+      required: [username, password, device]
+      properties:
+        username: { type: string }
+        password: { type: string, minLength: 8 }
+        display_name: { type: string }
+        device: { $ref: "#/components/schemas/Device" }
+        cookie: { type: boolean, description: "Also set the HttpOnly vcrx_session cookie, for browsers." }
     LoginRequest:
       type: object
       required: [username, password, device]
